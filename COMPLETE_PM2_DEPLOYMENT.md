@@ -7,20 +7,31 @@ Every command is ready to copy-paste. Just follow step by step.
 ---
 
 ## TABLE OF CONTENTS
+
+### Choose ONE Deployment Method:
+
+**OPTION A: PM2 Deployment (Recommended for Beginners)**
 1. Connect to VPS
 2. Install All Software
 3. Clone Your Project  
 4. Install Dependencies
 5. Setup Database
 6. Configure PM2
-7. Start Services
+7. Start Services with PM2
 8. Setup Nginx
 9. Add SSL Certificates
 10. Verify Everything Works
-11. Daily Commands You Need
-12. How to Update Code
+11. Daily PM2 Commands
+12. How to Update Code with PM2
 13. Complete Git Commands Guide
-14. Troubleshooting
+14. PM2 Troubleshooting
+
+**OPTION B: Docker Deployment (Skip to Step 1B below)**
+- Docker Setup
+- Docker Compose Configuration
+- Services Management
+- Deployment Workflow
+- Docker Troubleshooting
 
 ---
 
@@ -1685,3 +1696,507 @@ Your app is now:
 4. Check SSL: Visit your domain, look for the green lock icon
 
 **Save this file. You'll refer to it often!**
+
+---
+
+---
+
+# 🐳 OPTION B: COMPLETE DOCKER DEPLOYMENT
+
+**If you prefer Docker instead of PM2, follow this section instead.**
+
+Docker containers run your entire app in an isolated environment.
+
+---
+
+# DOCKER STEP 1: INSTALL DOCKER
+
+### 1.1 Update System
+
+```bash
+apt update && apt upgrade -y
+```
+
+### 1.2 Install Docker
+
+```bash
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+```
+
+**Verify:**
+```bash
+docker --version
+```
+
+### 1.3 Install Docker Compose
+
+```bash
+curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+```
+
+**Verify:**
+```bash
+docker-compose --version
+```
+
+### 1.4 Start Docker Service
+
+```bash
+systemctl start docker
+systemctl enable docker
+```
+
+✅ Docker is installed!
+
+---
+
+# DOCKER STEP 2: CLONE PROJECT (Same as PM2)
+
+### 2.1 Navigate to Projects Directory
+
+```bash
+cd /home
+```
+
+### 2.2 Clone Your Repository
+
+```bash
+git clone https://github.com/YOUR-USERNAME/YOUR-REPO.git sssfurniture
+cd sssfurniture
+```
+
+✅ Project cloned!
+
+---
+
+# DOCKER STEP 3: CONFIGURE ENVIRONMENT
+
+### 3.1 Create API .env File
+
+```bash
+cd apps/api
+```
+
+```bash
+cat > .env << 'EOF'
+DATABASE_URL=mysql://root:yourSecurePassword123@db:3306/sss
+NODE_ENV=production
+PORT=4000
+JWT_ACCESS_SECRET=your-super-secret-access-key-12345
+JWT_ACCESS_EXPIRES_IN=15m
+JWT_REFRESH_SECRET=your-super-secret-refresh-key-67890
+JWT_REFRESH_EXPIRES_IN=7d
+CORS_ORIGIN=https://sssfurniture.co.in
+SUPERADMIN_NAME=Super Admin
+SUPERADMIN_EMAIL=admin@sssfurniture.co.in
+SUPERADMIN_PASSWORD=SecurePassword123!
+WHATSAPP_ENABLED=true
+WWEBJS_AUTH_PATH=.wwebjs_auth
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+PUPPETEER_SKIP_DOWNLOAD=true
+WHATSAPP_MIN_DELAY_MS=4000
+WHATSAPP_MAX_DELAY_MS=9000
+WHATSAPP_MAX_PER_RECIPIENT_PER_DAY=5
+WHATSAPP_MAX_PER_HOUR=30
+WHATSAPP_MAX_QUEUE_DEPTH=50
+WHATSAPP_SEND_TIMEOUT_MS=30000
+WHATSAPP_LID_RESOLUTION_TIMEOUT_MS=8000
+PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage
+EOF
+```
+
+### 3.2 Go Back to Root
+
+```bash
+cd ../..
+```
+
+✅ Environment configured!
+
+---
+
+# DOCKER STEP 4: SETUP DOCKER COMPOSE
+
+Your project already has `docker-compose.prod.yml`. Just verify it exists:
+
+```bash
+ls -la docker-compose.prod.yml
+```
+
+---
+
+# DOCKER STEP 5: CREATE NGINX CONFIGURATION
+
+```bash
+cat > nginx.conf << 'EOF'
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 20M;
+
+    server {
+        listen 80;
+        server_name sssfurniture.co.in api.sssfurniture.co.in admin.sssfurniture.co.in;
+        return 301 https://$server_name$request_uri;
+    }
+
+    server {
+        listen 443 ssl http2;
+        server_name sssfurniture.co.in;
+
+        ssl_certificate /etc/letsencrypt/live/sssfurniture.co.in/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/sssfurniture.co.in/privkey.pem;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+
+        location / {
+            proxy_pass http://web:3000;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+
+    server {
+        listen 443 ssl http2;
+        server_name api.sssfurniture.co.in;
+
+        ssl_certificate /etc/letsencrypt/live/sssfurniture.co.in/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/sssfurniture.co.in/privkey.pem;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+
+        location / {
+            proxy_pass http://api:4000;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+
+    server {
+        listen 443 ssl http2;
+        server_name admin.sssfurniture.co.in;
+
+        ssl_certificate /etc/letsencrypt/live/sssfurniture.co.in/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/sssfurniture.co.in/privkey.pem;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+
+        location / {
+            proxy_pass http://web:3000;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+}
+EOF
+```
+
+✅ Nginx configured!
+
+---
+
+# DOCKER STEP 6: BUILD AND START SERVICES
+
+### 6.1 Build Docker Images
+
+```bash
+docker-compose -f docker-compose.prod.yml build
+```
+
+Wait for build to complete (5-10 minutes).
+
+### 6.2 Start All Services
+
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+### 6.3 Check Status
+
+```bash
+docker-compose -f docker-compose.prod.yml ps
+```
+
+All should show `Up`.
+
+### 6.4 Create Data Directory
+
+```bash
+mkdir -p data/whatsapp-session
+chmod 777 data/whatsapp-session
+```
+
+✅ Services running!
+
+---
+
+# DOCKER STEP 7: SETUP SSL (Same as PM2)
+
+### 7.1 Install Certbot
+
+```bash
+apt install -y certbot python3-certbot-nginx
+```
+
+### 7.2 Generate SSL Certificates
+
+```bash
+certbot certonly --standalone \
+  -d sssfurniture.co.in \
+  -d api.sssfurniture.co.in \
+  -d admin.sssfurniture.co.in \
+  -n --agree-tos --email your-email@example.com
+```
+
+### 7.3 Setup Auto-Renewal
+
+```bash
+systemctl enable certbot.timer
+systemctl start certbot.timer
+```
+
+✅ SSL configured!
+
+---
+
+# DOCKER STEP 8: VERIFY EVERYTHING
+
+### 8.1 Check Containers
+
+```bash
+docker-compose -f docker-compose.prod.yml ps
+```
+
+### 8.2 View Logs
+
+```bash
+docker-compose -f docker-compose.prod.yml logs -f
+```
+
+### 8.3 Test Website
+
+Open browser and visit:
+- `https://sssfurniture.co.in`
+- `https://api.sssfurniture.co.in`
+- `https://admin.sssfurniture.co.in`
+
+✅ Everything working!
+
+---
+
+# DOCKER STEP 9: DAILY DOCKER COMMANDS
+
+### Check Status
+
+```bash
+docker-compose -f docker-compose.prod.yml ps
+```
+
+### View Logs
+
+```bash
+docker-compose -f docker-compose.prod.yml logs -f
+```
+
+### View Specific Service
+
+```bash
+docker-compose -f docker-compose.prod.yml logs -f api
+```
+
+### Restart All Services
+
+```bash
+docker-compose -f docker-compose.prod.yml restart
+```
+
+### Restart One Service
+
+```bash
+docker-compose -f docker-compose.prod.yml restart api
+```
+
+### Stop All Services
+
+```bash
+docker-compose -f docker-compose.prod.yml stop
+```
+
+### Start All Services
+
+```bash
+docker-compose -f docker-compose.prod.yml start
+```
+
+### View Resource Usage
+
+```bash
+docker stats
+```
+
+---
+
+# DOCKER STEP 10: UPDATE CODE WITH DOCKER
+
+### 10.1 Pull Latest Code
+
+```bash
+cd /home/sssfurniture
+git pull origin main
+```
+
+### 10.2 Rebuild Images
+
+```bash
+docker-compose -f docker-compose.prod.yml build --no-cache
+```
+
+### 10.3 Restart Services
+
+```bash
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+### 10.4 Verify
+
+```bash
+docker-compose -f docker-compose.prod.yml ps
+```
+
+✅ Code updated!
+
+---
+
+# DOCKER STEP 11: DOCKER COMMANDS QUICK REFERENCE
+
+```bash
+# Start
+docker-compose -f docker-compose.prod.yml up -d
+
+# Status
+docker-compose -f docker-compose.prod.yml ps
+
+# Logs
+docker-compose -f docker-compose.prod.yml logs -f
+
+# Restart
+docker-compose -f docker-compose.prod.yml restart
+
+# Stop
+docker-compose -f docker-compose.prod.yml stop
+
+# Remove
+docker-compose -f docker-compose.prod.yml down
+
+# Update and Deploy
+git pull origin main
+docker-compose -f docker-compose.prod.yml build --no-cache
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+# DOCKER STEP 12: DOCKER TROUBLESHOOTING
+
+### Containers Not Starting
+
+```bash
+docker-compose -f docker-compose.prod.yml logs
+```
+
+### Database Error
+
+```bash
+docker-compose -f docker-compose.prod.yml restart db
+```
+
+### API Crashes
+
+```bash
+docker-compose -f docker-compose.prod.yml logs api
+```
+
+### Nginx Not Working
+
+```bash
+docker-compose -f docker-compose.prod.yml restart nginx
+```
+
+### Out of Space
+
+```bash
+docker system prune -a
+docker image prune -a -f
+```
+
+### Everything Broken - Start Fresh
+
+```bash
+docker-compose -f docker-compose.prod.yml down -v
+docker-compose -f docker-compose.prod.yml build --no-cache
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+# DOCKER VS PM2 - COMPARISON
+
+| Feature | PM2 | Docker |
+|---------|-----|--------|
+| Learning Curve | Easy | Medium |
+| Isolation | No | Yes |
+| Resource Usage | Lower | Higher |
+| Deployment | Simple | Very Simple |
+| Scaling | Medium | Very Easy |
+| Production Ready | Yes | Yes |
+| Best For | Direct Node Apps | Large Apps |
+
+**Choose PM2 if:** You want simplicity and direct control
+**Choose Docker if:** You want perfect isolation and easy scaling
+
+---
+
+**Both options are production-ready. Pick whichever you prefer!**
