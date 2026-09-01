@@ -1,0 +1,108 @@
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { CarpenterService } from './carpenter.service';
+import { CreateCarpenterDto } from './dto/create-carpenter.dto';
+import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
+import { CreateWorkItemDto } from './dto/create-work-item.dto';
+import { UpdateWorkItemDto } from './dto/update-work-item.dto';
+import { UpdateWorkStatusDto } from './dto/update-work-status.dto';
+import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Role } from '../common/enums/role.enum';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller()
+export class CarpenterController {
+  constructor(private service: CarpenterService) {}
+
+  // Carpenters
+
+  @Get('carpenters')
+  findAllCarpenters(@Query('workerType') workerType?: string, @CurrentUser() user?: AuthUser) {
+    return this.service.findAllCarpenters({ workerType, viewerRole: user?.role as Role });
+  }
+
+  @Get('carpenters/:id')
+  findOneCarpenter(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.service.findOneCarpenter(id, user?.role as Role);
+  }
+
+  @Roles(Role.ADMIN)
+  @Post('carpenters')
+  createCarpenter(@Body() dto: CreateCarpenterDto) {
+    return this.service.createCarpenter(dto);
+  }
+
+  @Roles(Role.ADMIN)
+  @Patch('carpenters/:id')
+  updateCarpenter(@Param('id') id: string, @Body() dto: UpdateCarpenterDto) {
+    return this.service.updateCarpenter(id, dto);
+  }
+
+  @Roles(Role.ADMIN)
+  @Delete('carpenters/:id')
+  removeCarpenter(@Param('id') id: string) {
+    return this.service.removeCarpenter(id);
+  }
+
+  @Roles(Role.ADMIN)
+  @Post('carpenters/:id/payments')
+  addPayment(@Param('id') id: string, @Body() dto: CreateCarpenterPaymentDto, @CurrentUser() user: AuthUser) {
+    return this.service.addPayment(id, dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Delete('carpenters/:id/payments/:paymentId')
+  removePayment(@Param('id') id: string, @Param('paymentId') paymentId: string) {
+    return this.service.removePayment(id, paymentId);
+  }
+
+  // Work items (job list & assignment)
+
+  @Get('carpenter-work-items')
+  findAllWorkItems(
+    @Query('carpenterId') carpenterId?: string,
+    @Query('workerType') workerType?: string,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.service.findAllWorkItems({ carpenterId, workerType, viewerRole: user?.role as Role });
+  }
+
+  @Get('carpenter-work-items/:id')
+  findOneWorkItem(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
+    return this.service.findOneWorkItem(id, user?.role as Role);
+  }
+
+  @Patch('carpenter-work-items/:id/status')
+  updateWorkStatus(@Param('id') id: string, @Body() dto: UpdateWorkStatusDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateWorkStatus(id, dto, user.role as Role, user.userId);
+  }
+
+  // Setting a work item's price/extra/total is a wage-setting action, not
+  // "do your work" CRUD - kept Admin-only even though status updates above
+  // stay open to the assigned Carpenter/Polisher.
+  @Roles(Role.ADMIN)
+  @Post('carpenter-work-items')
+  createWorkItem(@Body() dto: CreateWorkItemDto, @CurrentUser() user: AuthUser) {
+    return this.service.createWorkItem(dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Patch('carpenter-work-items/:id')
+  updateWorkItem(@Param('id') id: string, @Body() dto: UpdateWorkItemDto) {
+    return this.service.updateWorkItem(id, dto);
+  }
+
+  @Roles(Role.ADMIN)
+  @Delete('carpenter-work-items/:id')
+  removeWorkItem(@Param('id') id: string) {
+    return this.service.removeWorkItem(id);
+  }
+
+  @Post('carpenter-work-items/:id/notify')
+  notifyWorkItem(@Param('id') id: string) {
+    return this.service.notifyWorkItem(id);
+  }
+}

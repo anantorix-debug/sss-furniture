@@ -1,0 +1,685 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth / Roles
+// ---------------------------------------------------------------------------
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  CARPENTER
+  POLISHER
+}
+
+enum DeliveryStatus {
+  PENDING
+  OUT_FOR_DELIVERY
+  DELIVERED
+  DELIVERY_FAILED
+  CANCELLED
+}
+
+enum WorkStatus {
+  ASSIGNED
+  IN_PROGRESS
+  QUALITY_CHECK
+  REWORK
+  COMPLETED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  REJECTED
+  APPROVED
+  SENT_TO_SHOP
+  RECEIVED
+  CANCELLED
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
+enum WorkerType {
+  CARPENTER
+  POLISHER
+  CARVER
+}
+
+// Lightweight customer-confirmation tracking for the catalogue-share flow.
+// Deliberately separate from DeliveryStatus (a post-production concept) -
+// this tracks the pre-production "did the customer agree to this product"
+// step.
+enum CatalogueStatus {
+  NOT_SENT
+  SENT
+  CONFIRMED
+}
+
+// Which trade a production stage belongs to - drives the Job Number's
+// Carpenter -> (optional Carving) -> Polish pipeline.
+enum ProductionStageType {
+  CARPENTER
+  CARVING
+  POLISH
+}
+
+// Which team a raw material belongs to, for visibility + who may record
+// stock-in (Carpenter team handles WOOD, Polish team handles POLISH).
+enum MaterialGroup {
+  WOOD
+  POLISH
+  OTHER
+}
+
+enum QcResult {
+  PASSED
+  FAILED
+  REWORK_REQUIRED
+}
+
+enum FinishedStockStatus {
+  AVAILABLE
+  RESERVED
+  DISPATCHED
+}
+
+enum LabourStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id               String   @id @default(cuid())
+  name             String
+  email            String   @unique
+  password         String
+  role             Role     @default(CARPENTER)
+  isActive         Boolean  @default(true)
+  refreshTokenHash String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  customerOrders        CustomerOrder[]
+  customerOrdersDelivered CustomerOrder[]      @relation("CustomerOrderDeliveredBy")
+  customerOrderPayments CustomerOrderPayment[]
+  partyOrders           PartyOrder[]
+  partyOrderPayments    PartyOrderPayment[]
+  supplierPurchases     SupplierPurchase[]
+  supplierPayments      SupplierPayment[]
+  carpenterWorkItems    CarpenterWorkItem[]
+  carpenterPayments     CarpenterPayment[]
+  stockMovements        StockMovement[]
+  purchaseOrdersCreated PurchaseOrder[]        @relation("PurchaseOrderCreatedBy")
+  purchaseOrdersApproved PurchaseOrder[]       @relation("PurchaseOrderApprovedBy")
+  auditLogs             AuditLog[]
+  qualityChecks         QualityCheck[]
+  dispatchRecords       DispatchRecord[]
+  weeklyLaboursSubmitted WeeklyLabour[]        @relation("WeeklyLabourSubmittedBy")
+  weeklyLaboursReviewed  WeeklyLabour[]        @relation("WeeklyLabourReviewedBy")
+  whatsappGroupSettingsUpdated WhatsappGroupSetting[]
+
+  customerOrdersAssigned          CustomerOrder[] @relation("CustomerOrderAssignedEmployee")
+  customerOrdersAssignedBy        CustomerOrder[] @relation("CustomerOrderAssignedBy")
+  customerOrdersModelNoUpdated    CustomerOrder[] @relation("CustomerOrderModelNoUpdatedBy")
+  partyOrdersAssigned             PartyOrder[]    @relation("PartyOrderAssignedEmployee")
+  partyOrdersAssignedBy           PartyOrder[]    @relation("PartyOrderAssignedBy")
+  partyOrdersModelNoUpdated       PartyOrder[]    @relation("PartyOrderModelNoUpdatedBy")
+
+  @@map("users")
+}
+
+// A WhatsApp group chat (id like "1203630XXXX-XXXXXXXXXX@g.us") to notify,
+// per worker type, in addition to the individual worker's own number - so
+// the whole Carpenter/Polish team sees every work assignment, not just the
+// one person it's assigned to.
+model WhatsappGroupSetting {
+  id          String     @id @default(cuid())
+  workerType  WorkerType @unique
+  groupId     String
+  groupName   String?
+  updatedById String?
+  updatedBy   User?      @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime   @default(now())
+
+  @@map("whatsapp_group_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Sheet 1: Customer Order Tracking
+// ---------------------------------------------------------------------------
+
+model CustomerOrder {
+  id                 String         @id @default(cuid())
+  orderId            String         @unique // e.g. SSS-074
+  jobNumber          String?        @unique // e.g. JOB-2026-00001 - the single ID tying order -> production -> dispatch -> delivery
+  orderDate          DateTime
+  customerName       String
+  phone              String?
+  whatsapp           String?
+  address            String?
+  deliveryLocation   String?
+  product            String
+  colour             String?
+  carvingRequired    Boolean        @default(false)
+  specialInstructions String?
+  orderValue         Decimal        @db.Decimal(12, 2)
+  cotTrack           String?
+  expectedDeliveryDate DateTime?
+  actualDeliveryDate DateTime?
+  deliveryStatus     DeliveryStatus @default(PENDING)
+  deliveredById      String?
+  deliveredBy        User?          @relation("CustomerOrderDeliveredBy", fields: [deliveredById], references: [id])
+  proofOfDeliveryUrl String?
+  deliveryRemarks    String?
+
+  // Model No workflow: Super Admin assigns a production employee, who is
+  // then solely responsible for entering cotTrack (the Model No) - Super
+  // Admin never sets cotTrack directly at creation or edit time.
+  assignedEmployeeId String?
+  assignedEmployee   User?     @relation("CustomerOrderAssignedEmployee", fields: [assignedEmployeeId], references: [id])
+  assignedAt         DateTime?
+  assignedById       String?
+  assignedBy         User?     @relation("CustomerOrderAssignedBy", fields: [assignedById], references: [id])
+  modelNoUpdatedById String?
+  modelNoUpdatedBy   User?     @relation("CustomerOrderModelNoUpdatedBy", fields: [modelNoUpdatedById], references: [id])
+  modelNoUpdatedAt   DateTime?
+
+  // Catalogue-share / customer-confirmation tracking (see CatalogueStatus).
+  catalogueStatus     CatalogueStatus @default(NOT_SENT)
+  catalogueShareToken String?         @unique
+
+  createdById String
+  createdBy   User                   @relation(fields: [createdById], references: [id])
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  payments    CustomerOrderPayment[]
+  items       CustomerOrderItem[]
+
+  @@map("customer_orders")
+}
+
+// Optional line items for an order with more than one product. When present,
+// they're the source of truth for CustomerOrder.product (a joined summary)
+// and .orderValue (their sum) - kept for backward compatibility with
+// existing single-product orders, reports, and the search/track feature.
+model CustomerOrderItem {
+  id          String        @id @default(cuid())
+  orderId     String
+  order       CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Optional link back to the catalogue product this line was created
+  // from - productName/unitPrice above are already a point-in-time
+  // snapshot (copied at creation, not live-joined), so editing the
+  // catalogue product later never changes historical order data. This FK
+  // is purely for traceability ("which catalogue product was this").
+  productId   String?
+  product     Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName String
+  quantity    Int           @default(1)
+  unitPrice   Decimal       @db.Decimal(12, 2)
+
+  @@map("customer_order_items")
+}
+
+model CustomerOrderPayment {
+  id      String        @id @default(cuid())
+  orderId String
+  order   CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date    DateTime
+  amount  Decimal       @db.Decimal(12, 2)
+  mode    String? // UPI / CASH / GPAY / ...
+  note    String?
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@map("customer_order_payments")
+}
+
+// ---------------------------------------------------------------------------
+// Sheet 5: Party Order Tracking (shop / wholesale orders)
+// ---------------------------------------------------------------------------
+
+model PartyOrder {
+  id                 String         @id @default(cuid())
+  cotNo              String?
+  jobNumber          String?        @unique // e.g. JOB-2026-00001 - shares one sequence with CustomerOrder.jobNumber
+  orderDate          DateTime
+  shopName           String
+  phone              String?
+  model              String
+  finish             String?
+  details            String?
+  qty                Int            @default(1)
+  price              Decimal        @db.Decimal(12, 2)
+  totalAmount        Decimal        @db.Decimal(12, 2)
+  cashTrack          String? // internal cash-handler note, e.g. "CASH" / "SSS"
+  courierTrack       String? // delivery agent, e.g. Sitaram / Sunil
+  actualDeliveryDate DateTime?
+  deliveryStatus     DeliveryStatus @default(PENDING)
+
+  // Optional link to the catalogue product this order's `model` field was
+  // populated from (a Party Order has no line-items table, so the
+  // reference lives directly on the order). model/price/finish above are
+  // already a snapshot copied at creation time.
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  // Same Model No workflow as CustomerOrder: Super Admin assigns a
+  // production employee, who alone enters cotNo (the Model No).
+  assignedEmployeeId String?
+  assignedEmployee   User?     @relation("PartyOrderAssignedEmployee", fields: [assignedEmployeeId], references: [id])
+  assignedAt         DateTime?
+  assignedById       String?
+  assignedBy         User?     @relation("PartyOrderAssignedBy", fields: [assignedById], references: [id])
+  modelNoUpdatedById String?
+  modelNoUpdatedBy   User?     @relation("PartyOrderModelNoUpdatedBy", fields: [modelNoUpdatedById], references: [id])
+  modelNoUpdatedAt   DateTime?
+
+  // Catalogue-share / customer-confirmation tracking (see CatalogueStatus).
+  catalogueStatus     CatalogueStatus @default(NOT_SENT)
+  catalogueShareToken String?         @unique
+
+  createdById String
+  createdBy   User                @relation(fields: [createdById], references: [id])
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  payments    PartyOrderPayment[]
+
+  @@map("party_orders")
+}
+
+model PartyOrderPayment {
+  id      String     @id @default(cuid())
+  orderId String
+  order   PartyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date    DateTime
+  amount  Decimal    @db.Decimal(12, 2)
+  mode    String?
+  note    String?
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@map("party_order_payments")
+}
+
+// ---------------------------------------------------------------------------
+// Sheets 2 & 3: Material Purchase + Payment Ledger (per supplier)
+// ---------------------------------------------------------------------------
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g. "Devi Ply Wood", "Timber Hari"
+  phone     String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  purchases      SupplierPurchase[]
+  payments       SupplierPayment[]
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+model SupplierPurchase {
+  id          String   @id @default(cuid())
+  supplierId  String
+  supplier    Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  date        DateTime
+  particulars String // e.g. "18mm 8*4 PLYWOOD"
+  qty         Decimal? @db.Decimal(12, 2)
+  price       Decimal? @db.Decimal(12, 2)
+  value       Decimal  @db.Decimal(12, 2)
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@map("supplier_purchases")
+}
+
+model SupplierPayment {
+  id           String   @id @default(cuid())
+  supplierId   String
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  date         DateTime
+  particulars  String? // e.g. "SSS"
+  voucherNo    String?
+  amount       Decimal  @db.Decimal(12, 2)
+  balanceAfter Decimal? @db.Decimal(12, 2)
+  mode         String? // CASH / GPAY / UPI
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@map("supplier_payments")
+}
+
+// ---------------------------------------------------------------------------
+// Sheet 4: Carpenter Work List & Payment
+// ---------------------------------------------------------------------------
+
+model Carpenter {
+  id         String     @id @default(cuid())
+  name       String     @unique
+  phone      String?
+  workerType WorkerType @default(CARPENTER)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  workItems     CarpenterWorkItem[]
+  payments      CarpenterPayment[]
+  weeklyLabours WeeklyLabour[]
+
+  @@map("carpenters")
+}
+
+model CarpenterWorkItem {
+  id          String    @id @default(cuid())
+  carpenterId String?
+  carpenter   Carpenter? @relation(fields: [carpenterId], references: [id], onDelete: SetNull)
+  workDate    DateTime
+  modelNo     String? // shared Job/Model Number - links Carpenter -> Carving -> Polish stages and back to CustomerOrder.jobNumber
+  stage       ProductionStageType @default(CARPENTER)
+  productName String // e.g. "HEARTEN"
+  category    String? // e.g. "BOTTOM COT", "FULL BOX"
+  size        String? // e.g. "5FT"
+  price       Decimal   @db.Decimal(12, 2)
+  extra       Decimal   @default(0) @db.Decimal(12, 2)
+  quantity    Int       @default(1)
+  total       Decimal   @db.Decimal(12, 2)
+  status      WorkStatus @default(ASSIGNED)
+  qcNote      String? // note left when moved to QUALITY_CHECK or REWORK
+  photoUrl    String? // uploaded cot / finished-work photo
+  labourClaimed Boolean @default(false) // true once included in a Weekly Labour batch, to prevent double payment
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  stockMovements StockMovement[]
+  qualityChecks  QualityCheck[]
+
+  @@map("carpenter_work_items")
+}
+
+model CarpenterPayment {
+  id          String    @id @default(cuid())
+  carpenterId String
+  carpenter   Carpenter @relation(fields: [carpenterId], references: [id], onDelete: Cascade)
+  date        DateTime
+  amount      Decimal   @db.Decimal(12, 2)
+  mode        String?
+  note        String?
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@map("carpenter_payments")
+}
+
+// ---------------------------------------------------------------------------
+// Product catalogue (optional reference list - orders keep free-text fields)
+// ---------------------------------------------------------------------------
+
+model Product {
+  id             String   @id @default(cuid())
+  sku            String?  @unique
+  modelNo        String?  @unique // shared numbering with CustomerOrder.cotTrack / PartyOrder.cotNo
+  name           String
+  category       String?
+  modelSize      String? // e.g. "6x5 ft" (size only - modelNo carries the identifier)
+  materialFinish String? // e.g. "Teak - Teak finish"
+  unit           String? // e.g. "Nos", "Set"
+  retailPrice    Decimal  @db.Decimal(12, 2)
+  wholesalePrice Decimal? @db.Decimal(12, 2)
+  costPrice      Decimal? @db.Decimal(12, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  images           ProductImage[]
+  customerOrderItems CustomerOrderItem[]
+  partyOrders        PartyOrder[]
+
+  @@map("products")
+}
+
+// Multiple images per product; the first one created (or the one flagged
+// isPrimary) is the catalogue's main image. Stored on local disk under
+// apps/api/uploads/products and served statically - the project has no
+// object storage, so this reuses the same "local uploads dir" pattern as
+// the rest of the app's file handling (PDF generation, WhatsApp media).
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  fileName  String
+  fileSize  Int
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("product_images")
+}
+
+// ---------------------------------------------------------------------------
+// Raw materials & stock (consumption tracked per carpenter work item)
+// ---------------------------------------------------------------------------
+
+model RawMaterial {
+  id            String        @id @default(cuid())
+  name          String        @unique
+  type          String? // e.g. "Plywood", "Timber", "Mica", "Hardware", "Thinner", "Sealer"
+  materialGroup MaterialGroup @default(WOOD) // WOOD -> Carpenter team; POLISH -> Polish team
+  unit          String // e.g. "sheet", "cft", "kg", "nos"
+  reorderLevel  Decimal?      @db.Decimal(12, 2)
+  photoUrl      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  stockMovements     StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+
+  @@map("raw_materials")
+}
+
+model StockMovement {
+  id            String            @id @default(cuid())
+  rawMaterialId String
+  rawMaterial   RawMaterial       @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  type          StockMovementType
+  // Signed net change: positive for IN / a positive ADJUSTMENT, negative for
+  // OUT / a negative ADJUSTMENT. Current stock = sum(quantity) per material.
+  quantity      Decimal           @db.Decimal(12, 2)
+  unitCost      Decimal?          @db.Decimal(12, 2) // purchase rate, set on IN movements - ADMIN/CO_ADMIN only in API responses
+  reason        String?
+  location      String? // stock location / bin, for physical stock-in entries
+
+  workItemId String?
+  workItem   CarpenterWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  date        DateTime
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@map("stock_movements")
+}
+
+// ---------------------------------------------------------------------------
+// Purchase orders (approval workflow) - receiving one creates stock IN
+// movements and a SupplierPurchase ledger entry for the financial side.
+// ---------------------------------------------------------------------------
+
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  poNumber     String              @unique
+  supplierId   String
+  supplier     Supplier            @relation(fields: [supplierId], references: [id])
+  status         PurchaseOrderStatus @default(DRAFT)
+  orderDate      DateTime
+  expectedDate   DateTime?
+  notes          String?
+  rejectionReason String?
+  sentToShopAt   DateTime?
+
+  createdById  String
+  createdBy    User      @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
+  approvedById String?
+  approvedBy   User?     @relation("PurchaseOrderApprovedBy", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items          PurchaseOrderItem[]
+  stockMovements StockMovement[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  rawMaterialId   String
+  rawMaterial     RawMaterial   @relation(fields: [rawMaterialId], references: [id])
+  quantity        Decimal       @db.Decimal(12, 2)
+  unitPrice       Decimal       @db.Decimal(12, 2)
+
+  @@map("purchase_order_items")
+}
+
+// ---------------------------------------------------------------------------
+// Audit log - security-sensitive events (auth, role/permission changes)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userEmail  String? // snapshot, survives user deletion
+  action     String // e.g. "LOGIN_SUCCESS", "LOGIN_FAILED", "ROLE_CHANGED", "USER_DEACTIVATED"
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Production pipeline: Quality Check -> Finished Stock -> Dispatch -> Delivery
+// All keyed off the Job/Model Number (CustomerOrder.jobNumber /
+// CarpenterWorkItem.modelNo) so any module can look a job up the same way.
+// ---------------------------------------------------------------------------
+
+model QualityCheck {
+  id           String   @id @default(cuid())
+  jobNumber    String
+  workItemId   String?
+  workItem     CarpenterWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  result       QcResult
+  checklist    Json?
+  remarks      String?
+  photoUrl     String?
+  inspectedById String
+  inspectedBy  User     @relation(fields: [inspectedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([jobNumber])
+  @@map("quality_checks")
+}
+
+model FinishedStockItem {
+  id             String              @id @default(cuid())
+  jobNumber      String              @unique
+  productName    String
+  quantity       Int                 @default(1)
+  completionDate DateTime
+  location       String?
+  status         FinishedStockStatus @default(AVAILABLE)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  dispatchRecords DispatchRecord[]
+
+  @@index([jobNumber])
+  @@map("finished_stock_items")
+}
+
+model DispatchRecord {
+  id              String             @id @default(cuid())
+  jobNumber       String
+  finishedStockId String?
+  finishedStock   FinishedStockItem? @relation(fields: [finishedStockId], references: [id], onDelete: SetNull)
+  dispatchDate    DateTime
+  vehicle         String?
+  driverName      String?
+  driverContact   String?
+  remarks         String?
+  documentUrl     String?
+
+  dispatchedById String
+  dispatchedBy   User     @relation(fields: [dispatchedById], references: [id])
+  createdAt      DateTime @default(now())
+
+  @@index([jobNumber])
+  @@map("dispatch_records")
+}
+
+// ---------------------------------------------------------------------------
+// Weekly labour: Carpenter completes jobs -> Co-Admin enters price weekly ->
+// Admin reviews/approves -> payment record.
+// ---------------------------------------------------------------------------
+
+model WeeklyLabour {
+  id                 String       @id @default(cuid())
+  carpenterId        String
+  carpenter          Carpenter    @relation(fields: [carpenterId], references: [id])
+  weekStart          DateTime
+  weekEnd            DateTime
+  totalCompletedCots Int          @default(0)
+  totalLabourAmount  Decimal      @default(0) @db.Decimal(12, 2)
+  previousDeduction  Decimal      @default(0) @db.Decimal(12, 2)
+  netPayable         Decimal      @default(0) @db.Decimal(12, 2)
+  status             LabourStatus @default(DRAFT)
+  workItemIds        Json? // snapshot of CarpenterWorkItem ids included in this batch
+
+  submittedById String?
+  submittedBy   User?    @relation("WeeklyLabourSubmittedBy", fields: [submittedById], references: [id])
+  reviewedById  String?
+  reviewedBy    User?    @relation("WeeklyLabourReviewedBy", fields: [reviewedById], references: [id])
+  reviewNote    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("weekly_labours")
+}
