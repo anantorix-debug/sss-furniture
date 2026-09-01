@@ -257,33 +257,26 @@ chmod 644 docker-compose.prod.yml
 
 ### 5.3 Setup Database with Prisma
 
-Prisma creates your database tables automatically.
+Prisma creates your database tables automatically. **Run all commands inside Docker containers**, not on VPS directly.
 
-**Install dependencies:**
-```bash
-cd apps/api
-npm install
-```
+**After you start Docker containers** (Step 7), run these commands:
 
 **Run database migrations:**
 ```bash
-npm run prisma:migrate
-```
-
-When asked for migration name, type:
-```
-sss_initial_migration
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
 ```
 
 **Generate Prisma client:**
 ```bash
-npm run prisma:generate
+docker-compose -f docker-compose.prod.yml exec api npm run prisma:generate
 ```
 
-**Go back to root:**
+**Seed initial data (if seed file exists):**
 ```bash
-cd ../..
+docker-compose -f docker-compose.prod.yml exec api npm run prisma:seed
 ```
+
+⚠️ **NOTE:** Do this AFTER starting Docker services in Step 7, not before!
 
 ✅ Docker Compose file is ready!
 
@@ -1241,14 +1234,43 @@ npm run prisma:migrate resolve --rolled-back sss_initial_migration
 
 ## DOCKER: Run Prisma in Container
 
+⚠️ **IMPORTANT: ALL Prisma commands run INSIDE Docker containers, not on VPS!**
+
 ### After Docker Services Start:
 
+**Deploy existing migrations (non-interactive):**
 ```bash
-# Run migration inside API container
-docker-compose -f docker-compose.prod.yml exec api npm run prisma:migrate
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+```
 
-# Generate client in container
+**Generate Prisma client:**
+```bash
 docker-compose -f docker-compose.prod.yml exec api npm run prisma:generate
+```
+
+**Seed initial data:**
+```bash
+docker-compose -f docker-compose.prod.yml exec api npm run prisma:seed
+```
+
+**Create new migration (interactive):**
+```bash
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate dev --name migration_name
+```
+
+**View database schema:**
+```bash
+docker-compose -f docker-compose.prod.yml exec api cat prisma/schema.prisma
+```
+
+**Reset database (deletes all data):**
+```bash
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate reset
+```
+
+**View pending migrations:**
+```bash
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate status
 ```
 
 ---
@@ -1286,21 +1308,20 @@ DATABASE_URL=mysql://root:password@db:3306/sss
 
 ### Problem: Schema Sync Issues
 
-**Reset and migrate fresh:**
+**Reset and migrate fresh (inside Docker):**
 ```bash
-cd apps/api
-npm run prisma:reset
-npm run prisma:migrate
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate reset
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
 ```
 
 ⚠️ This deletes all data!
 
 ### Problem: Tables Already Exist
 
-**Resolve the conflict:**
+**Resolve the conflict (inside Docker):**
 ```bash
-npm run prisma:migrate resolve --rolled-back <migration_name>
-npm run prisma:migrate
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate resolve --rolled-back <migration_name>
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
 ```
 
 ---
