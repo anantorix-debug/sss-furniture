@@ -20,8 +20,9 @@ Using Docker for production deployment. Every command is copy-paste ready.
 11. Daily Docker Commands
 12. How to Update Code with Docker
 13. Complete Git Commands Guide
-14. Docker Commands Reference
-15. Troubleshooting
+14. Prisma Database Commands
+15. Docker Commands Reference
+16. Troubleshooting
 
 ---
 
@@ -53,12 +54,12 @@ Your VPS IP: **185.230.63.171**
 
 ### On Windows - Open PowerShell and run:
 ```powershell
-ssh root@185.230.63.171
+ssh root@187.53.132.7
 ```
 
 ### On Mac/Linux - Open Terminal and run:
 ```bash
-ssh root@185.230.63.171
+ssh root@187.53.132.7
 ```
 
 **When it asks for password, enter your VPS password.**
@@ -252,6 +253,36 @@ It should contain configuration for:
 
 ```bash
 chmod 644 docker-compose.prod.yml
+```
+
+### 5.3 Setup Database with Prisma
+
+Prisma creates your database tables automatically.
+
+**Install dependencies:**
+```bash
+cd apps/api
+npm install
+```
+
+**Run database migrations:**
+```bash
+npm run prisma:migrate
+```
+
+When asked for migration name, type:
+```
+sss_initial_migration
+```
+
+**Generate Prisma client:**
+```bash
+npm run prisma:generate
+```
+
+**Go back to root:**
+```bash
+cd ../..
 ```
 
 ✅ Docker Compose file is ready!
@@ -1094,7 +1125,218 @@ git merge feature        # Merge branch
 
 ---
 
-# STEP 13: DOCKER COMMANDS REFERENCE
+# STEP 13: PRISMA DATABASE COMMANDS
+
+Prisma manages your database schema and migrations.
+
+## What is Prisma?
+
+**Prisma** = A tool to manage your database schema (tables, fields, relationships).
+
+---
+
+## PRISMA SETUP (First Time)
+
+### 13.1 Install Dependencies
+
+```bash
+cd /home/sssfurniture/apps/api
+npm install
+```
+
+### 13.2 Create Initial Migration
+
+```bash
+npm run prisma:migrate
+```
+
+When asked for migration name:
+```
+sss_initial_migration
+```
+
+This creates all database tables.
+
+### 13.3 Generate Prisma Client
+
+```bash
+npm run prisma:generate
+```
+
+This creates the database client for your app to use.
+
+### 13.4 View Prisma Studio (Optional)
+
+```bash
+npm run prisma:studio
+```
+
+Opens a visual database editor in browser.
+
+---
+
+## PRISMA MIGRATIONS (When Schema Changes)
+
+### After Modifying prisma/schema.prisma:
+
+```bash
+cd /home/sssfurniture/apps/api
+npm run prisma:migrate
+```
+
+Name the migration:
+```
+feature_added_new_field
+```
+
+---
+
+## COMMON PRISMA COMMANDS
+
+### View Database Schema
+
+```bash
+cat prisma/schema.prisma
+```
+
+### Generate Client (After Manual Changes)
+
+```bash
+npm run prisma:generate
+```
+
+### Create Migration Without Running
+
+```bash
+npm run prisma:migrate -- --create-only
+```
+
+### Rollback to Previous Migration
+
+```bash
+npm run prisma:migrate resolve
+```
+
+### Reset Database (Deletes All Data!)
+
+```bash
+npm run prisma:reset
+```
+
+⚠️ WARNING: This deletes everything!
+
+### View Pending Migrations
+
+```bash
+npm run prisma:migrate status
+```
+
+### Resolve Failed Migration
+
+```bash
+npm run prisma:migrate resolve --rolled-back sss_initial_migration
+```
+
+---
+
+## DOCKER: Run Prisma in Container
+
+### After Docker Services Start:
+
+```bash
+# Run migration inside API container
+docker-compose -f docker-compose.prod.yml exec api npm run prisma:migrate
+
+# Generate client in container
+docker-compose -f docker-compose.prod.yml exec api npm run prisma:generate
+```
+
+---
+
+## TROUBLESHOOTING PRISMA
+
+### Problem: Migration Fails
+
+**Check if database is running:**
+```bash
+docker-compose -f docker-compose.prod.yml ps db
+```
+
+**View database logs:**
+```bash
+docker-compose -f docker-compose.prod.yml logs db
+```
+
+**Restart database:**
+```bash
+docker-compose -f docker-compose.prod.yml restart db
+```
+
+### Problem: "Cannot find database"
+
+**Check connection string:**
+```bash
+grep DATABASE_URL apps/api/.env
+```
+
+Should be:
+```
+DATABASE_URL=mysql://root:password@db:3306/sss
+```
+
+### Problem: Schema Sync Issues
+
+**Reset and migrate fresh:**
+```bash
+cd apps/api
+npm run prisma:reset
+npm run prisma:migrate
+```
+
+⚠️ This deletes all data!
+
+### Problem: Tables Already Exist
+
+**Resolve the conflict:**
+```bash
+npm run prisma:migrate resolve --rolled-back <migration_name>
+npm run prisma:migrate
+```
+
+---
+
+## PRISMA WORKFLOW
+
+### When You Add a New Table:
+
+1. **Edit schema:**
+```bash
+nano prisma/schema.prisma
+```
+
+2. **Create migration:**
+```bash
+npm run prisma:migrate
+```
+
+3. **Name it:**
+```
+added_users_table
+```
+
+4. **Generate client:**
+```bash
+npm run prisma:generate
+```
+
+5. **Restart API:**
+```bash
+docker-compose -f docker-compose.prod.yml restart api
+```
+
+---
+
+# STEP 14: DOCKER COMMANDS REFERENCE
 
 ## Container Management
 
