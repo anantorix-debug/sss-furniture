@@ -55,7 +55,8 @@ function WhatsappSettingsContent() {
     if (!confirm('Are you sure you want to disconnect WhatsApp?')) return;
     try {
       await api.post('/whatsapp/logout');
-      mutateStatus();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await mutateStatus();
       setSelectedChat(null);
       setMessageText('');
     } catch (err) {
