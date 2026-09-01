@@ -1336,6 +1336,330 @@ docker-compose -f docker-compose.prod.yml restart api
 
 ---
 
+# STEP 13: COMMON DEPLOYMENT ISSUES & SOLUTIONS
+
+Based on real deployment experience, here are issues you might face and how to fix them.
+
+---
+
+## Issue 1: JWT Secrets Not Loaded into Docker
+
+**Error:**
+```
+JwtStrategy requires a secret or key
+```
+
+**Cause:** Environment variables from `.env` file not passed to Docker container.
+
+**Solution:** Update `docker-compose.prod.yml` to load .env file:
+
+```yaml
+api:
+  build:
+    context: ./apps/api
+  env_file:
+    - ./apps/api/.env
+```
+
+Then rebuild:
+```bash
+docker-compose -f docker-compose.prod.yml build --no-cache
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+## Issue 2: Cannot Find dist/main.js
+
+**Error:**
+```
+Error: Cannot find module '/app/dist/main.js'
+```
+
+**Cause:** NestJS builds to `/dist/src/main.js`, not `/dist/main.js`.
+
+**Solution:** Update Dockerfile CMD:
+
+```dockerfile
+# WRONG
+CMD ["node", "dist/main.js"]
+
+# CORRECT
+CMD ["node", "dist/src/main.js"]
+```
+
+Then rebuild:
+```bash
+docker-compose -f docker-compose.prod.yml build --no-cache
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+## Issue 3: Puppeteer Chrome Download Fails
+
+**Error:**
+```
+Failed to set up chrome v146.0.7680.31! Set "PUPPETEER_SKIP_DOWNLOAD"
+```
+
+**Cause:** Puppeteer tries to download Chrome in Alpine Linux, which fails.
+
+**Solution:** Set environment variable in Dockerfile:
+
+```dockerfile
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+RUN apk add --no-cache chromium
+```
+
+---
+
+## Issue 4: OpenSSL/Prisma Library Not Found
+
+**Error:**
+```
+Error loading shared library libssl.so.1.1: No such file or directory
+```
+
+**Cause:** Alpine Linux missing OpenSSL library required by Prisma.
+
+**Solution:** Install OpenSSL in Dockerfile:
+
+```dockerfile
+RUN apk add --no-cache chromium openssl
+```
+
+---
+
+## Issue 5: Database Authentication Failed
+
+**Error:**
+```
+Authentication failed against database server at `db`
+The provided database credentials for `root` are not valid
+```
+
+**Cause:** Database password in `.env` doesn't match `docker-compose.prod.yml`.
+
+**Solution:** Make passwords match:
+
+**In docker-compose.prod.yml:**
+```yaml
+db:
+  environment:
+    MYSQL_ROOT_PASSWORD: root
+```
+
+**In apps/api/.env:**
+```
+DATABASE_URL=mysql://root:root@db:3306/sss
+```
+
+Or use sed to fix:
+```bash
+sed -i 's/DATABASE_URL=mysql:\/\/root:YourSecureDBPassword123/DATABASE_URL=mysql:\/\/root:root/' apps/api/.env
+```
+
+---
+
+## Issue 6: Prisma Asks for Migration Name
+
+**When Running:**
+```bash
+npm run prisma:migrate
+```
+
+**It asks:**
+```
+Enter a name for the new migration: _
+```
+
+**Solution:** Use `migrate deploy` instead (non-interactive):
+
+```bash
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+```
+
+Or if you want to create new migration:
+```bash
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate dev --name migration_name
+```
+
+---
+
+## Issue 7: Nginx Keeps Restarting
+
+**Error:**
+```
+nginx: [emerg] open() "/etc/letsencrypt/live/sssfurniture.co.in/fullchain.pem" failed
+```
+
+**Cause:** SSL certificates don't exist yet.
+
+**Solution:** Generate SSL certificates BEFORE starting services:
+
+```bash
+certbot certonly --standalone \
+  -d sssfurniture.co.in \
+  -d api.sssfurniture.co.in \
+  -d admin.sssfurniture.co.in \
+  -n --agree-tos --email your-email@example.com
+```
+
+Then start Docker:
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+## Issue 8: Database Container Not Ready When API Starts
+
+**Error:**
+```
+Can't reach database server at `db:3306`
+```
+
+**Cause:** API starts before database finishes initializing.
+
+**Solution:** Dockerfile already has healthcheck. Just wait:
+
+```bash
+# Wait 30-60 seconds for database to start
+sleep 60
+
+# Then run migrations
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+```
+
+---
+
+## Issue 9: Port Already in Use
+
+**Error:**
+```
+Error starting userland proxy: bind: address already in use
+```
+
+**Cause:** Port 80, 443, or 3000 already in use.
+
+**Solution:** Check what's using the port:
+
+```bash
+# Check port 80
+lsof -i :80
+
+# Check port 443
+lsof -i :443
+
+# Kill process
+kill -9 <PID>
+```
+
+Or change ports in docker-compose.prod.yml:
+```yaml
+nginx:
+  ports:
+    - "8080:80"
+    - "8443:443"
+```
+
+---
+
+## Issue 10: Nginx Config Errors
+
+**Error:**
+```
+[emerg] unexpected "{"
+```
+
+**Cause:** Syntax error in nginx.conf.
+
+**Solution:** Test nginx config:
+
+```bash
+docker-compose -f docker-compose.prod.yml exec nginx nginx -t
+```
+
+Fix any errors shown, then rebuild:
+```bash
+docker-compose -f docker-compose.prod.yml restart nginx
+```
+
+---
+
+## Complete Correct Deployment Flow
+
+**Step 1: Generate SSL Certificates First**
+```bash
+certbot certonly --standalone \
+  -d sssfurniture.co.in \
+  -d api.sssfurniture.co.in \
+  -d admin.sssfurniture.co.in \
+  -n --agree-tos --email your-email@example.com
+```
+
+**Step 2: Fix .env File**
+```bash
+sed -i 's/YourSecureDBPassword123/root/' apps/api/.env
+```
+
+**Step 3: Update docker-compose.prod.yml**
+Ensure it has `env_file`:
+```yaml
+api:
+  build:
+    context: ./apps/api
+  env_file:
+    - ./apps/api/.env
+```
+
+**Step 4: Fix Dockerfile**
+Ensure it has:
+```dockerfile
+FROM node:20-alpine
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+RUN apk add --no-cache chromium openssl
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+CMD ["node", "dist/src/main.js"]
+```
+
+**Step 5: Build and Start**
+```bash
+docker-compose -f docker-compose.prod.yml build --no-cache
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+**Step 6: Wait for Database**
+```bash
+sleep 60
+```
+
+**Step 7: Run Migrations**
+```bash
+docker-compose -f docker-compose.prod.yml exec api npx prisma migrate deploy
+docker-compose -f docker-compose.prod.yml exec api npm run prisma:generate
+docker-compose -f docker-compose.prod.yml exec api npm run prisma:seed
+```
+
+**Step 8: Verify**
+```bash
+docker-compose -f docker-compose.prod.yml ps
+docker-compose -f docker-compose.prod.yml logs api | tail -10
+```
+
+Should show: `[Nest] Application successfully started on port 4000`
+
+---
+
 # STEP 14: DOCKER COMMANDS REFERENCE
 
 ## Container Management
