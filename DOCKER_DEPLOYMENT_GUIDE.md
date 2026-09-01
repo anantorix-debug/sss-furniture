@@ -290,7 +290,31 @@ Nginx acts as a reverse proxy. It:
 - Handles SSL/HTTPS
 - Balances traffic
 
+## Nginx Paths in Docker Deployment
+
+**On VPS (Host):**
+- Config file location: `/home/sssfurniture/nginx.conf`
+- SSL certificates: `/etc/letsencrypt/live/sssfurniture.co.in/`
+
+**Inside Docker Container:**
+- Config mounted at: `/etc/nginx/nginx.conf` (read-only)
+- SSL certificates: `/etc/letsencrypt/` (read-only)
+
+**In docker-compose.prod.yml:**
+```yaml
+nginx:
+  volumes:
+    - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    - /etc/letsencrypt:/etc/letsencrypt:ro
+```
+
+The `:ro` means "read-only" - container can't modify these files.
+
+---
+
 ### 6.1 Create Nginx Configuration File
+
+File will be created at: `/home/sssfurniture/nginx.conf`
 
 Copy and paste the ENTIRE block:
 
@@ -503,8 +527,65 @@ systemctl start certbot.timer
 
 ### 8.4 Restart Nginx Container
 
+**Run from:** `/home/sssfurniture`
+
 ```bash
 docker-compose -f docker-compose.prod.yml restart nginx
+```
+
+---
+
+## Nginx Management Commands
+
+### Test Nginx Configuration
+
+**Run from:** `/home/sssfurniture`
+
+```bash
+docker-compose -f docker-compose.prod.yml exec nginx nginx -t
+```
+
+Should show:
+```
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+```
+
+### View Nginx Logs
+
+**Run from:** `/home/sssfurniture`
+
+```bash
+docker-compose -f docker-compose.prod.yml logs nginx
+```
+
+### Restart Nginx After Config Changes
+
+**Run from:** `/home/sssfurniture`
+
+```bash
+docker-compose -f docker-compose.prod.yml restart nginx
+```
+
+### Reload Nginx Without Restart
+
+**Run from:** `/home/sssfurniture`
+
+```bash
+docker-compose -f docker-compose.prod.yml exec nginx nginx -s reload
+```
+
+### Check Nginx is Running
+
+**Run from:** `/home/sssfurniture`
+
+```bash
+docker-compose -f docker-compose.prod.yml ps nginx
+```
+
+Should show:
+```
+sssfurniture-nginx-1   Up
 ```
 
 ✅ SSL certificates are configured!
@@ -2081,14 +2162,46 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ---
 
-## Important Directories on VPS
+## Important Directories & Files on VPS
 
+### Project Files (Created by You)
 - **Project Root**: `/home/sssfurniture`
-- **Docker Compose File**: `/home/sssfurniture/docker-compose.prod.yml`
+- **Docker Compose**: `/home/sssfurniture/docker-compose.prod.yml`
 - **Nginx Config**: `/home/sssfurniture/nginx.conf`
-- **API Config**: `/home/sssfurniture/apps/api/.env`
-- **SSL Certs**: `/etc/letsencrypt/live/sssfurniture.co.in/`
+- **API .env File**: `/home/sssfurniture/apps/api/.env`
+- **Dockerfile (API)**: `/home/sssfurniture/apps/api/Dockerfile`
+- **Prisma Schema**: `/home/sssfurniture/apps/api/prisma/schema.prisma`
+
+### System Files (Auto-Generated)
+- **SSL Certificates**: `/etc/letsencrypt/live/sssfurniture.co.in/`
+  - Full chain: `/etc/letsencrypt/live/sssfurniture.co.in/fullchain.pem`
+  - Private key: `/etc/letsencrypt/live/sssfurniture.co.in/privkey.pem`
 - **Database Volume**: Docker managed (persistent)
+- **Docker Images**: Managed by Docker
+- **Docker Containers**: Managed by docker-compose
+
+### Inside Docker Containers
+- **Nginx config** (inside nginx): `/etc/nginx/nginx.conf`
+- **SSL certificates** (inside nginx): `/etc/letsencrypt/`
+- **API source** (inside api): `/app/`
+- **API compiled** (inside api): `/app/dist/src/`
+- **Web app** (inside web): `/app/`
+
+### Where to Run Commands
+
+**All docker-compose commands:**
+```bash
+# MUST run from project root
+cd /home/sssfurniture
+docker-compose -f docker-compose.prod.yml [command]
+```
+
+**SSH from home:**
+```bash
+ssh root@185.230.63.171
+cd /home/sssfurniture
+# Then run docker-compose commands
+```
 
 ---
 
