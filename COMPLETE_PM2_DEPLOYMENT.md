@@ -1,0 +1,1060 @@
+# COMPLETE PM2 DEPLOYMENT GUIDE - ALL STEPS IN ONE FILE
+
+**For Complete Beginners - Zero Technical Knowledge Required**
+
+Every command is ready to copy-paste. Just follow step by step.
+
+---
+
+## TABLE OF CONTENTS
+1. Connect to VPS
+2. Install All Software
+3. Clone Your Project  
+4. Install Dependencies
+5. Setup Database
+6. Configure PM2
+7. Start Services
+8. Setup Nginx
+9. Add SSL Certificates
+10. Verify Everything Works
+11. Daily Commands You Need
+12. How to Update Code
+13. Troubleshooting
+
+---
+
+# STEP 1: CONNECT TO YOUR VPS
+
+Your VPS is: **185.230.63.171**
+
+### On Windows - Open PowerShell and run:
+```powershell
+ssh root@185.230.63.171
+```
+
+### On Mac/Linux - Open Terminal and run:
+```bash
+ssh root@185.230.63.171
+```
+
+**When it asks for password, enter your VPS password.**
+
+✅ You are now on your VPS server.
+
+---
+
+# STEP 2: INSTALL ALL SOFTWARE
+
+All commands below work on any Linux server.
+
+### 2.1 Update System (REQUIRED - Do This First!)
+
+Copy and paste this entire command:
+
+```bash
+apt update && apt upgrade -y
+```
+
+Wait for it to finish (takes 1-2 minutes).
+
+### 2.2 Install Node.js (Required for your app to run)
+
+Copy and paste this:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && apt install -y nodejs
+```
+
+Wait for it to finish.
+
+**Verify Node is installed:**
+```bash
+node --version
+npm --version
+```
+
+You should see version numbers. If you see errors, re-run the command above.
+
+### 2.3 Install PM2 (The tool that keeps your apps running)
+
+Copy and paste:
+
+```bash
+npm install -g pm2
+```
+
+**Verify PM2 is installed:**
+```bash
+pm2 --version
+```
+
+### 2.4 Install Git (For version control and pulling code)
+
+Copy and paste:
+
+```bash
+apt install -y git
+```
+
+**Verify:**
+```bash
+git --version
+```
+
+### 2.5 Install MySQL (Your database)
+
+Copy and paste:
+
+```bash
+apt install -y mysql-server
+```
+
+**Start MySQL and make it run automatically:**
+```bash
+systemctl start mysql
+systemctl enable mysql
+```
+
+**Verify MySQL is running:**
+```bash
+systemctl status mysql
+```
+
+Press `q` to exit.
+
+✅ All software is installed!
+
+---
+
+# STEP 3: CLONE YOUR PROJECT FROM GITHUB
+
+### 3.1 Navigate to the Projects Directory
+
+```bash
+cd /home
+```
+
+### 3.2 Clone Your Repository
+
+**Replace these with YOUR actual GitHub username and repository name:**
+- `YOUR-USERNAME` = Your GitHub username
+- `YOUR-REPO` = Your repository name
+
+For example: `git clone https://github.com/kamalesh/portfolio.git sssfurniture`
+
+Copy and paste (with YOUR details):
+```bash
+git clone https://github.com/YOUR-USERNAME/YOUR-REPO.git sssfurniture
+```
+
+Wait for it to finish downloading.
+
+### 3.3 Go Into Your Project Folder
+
+```bash
+cd sssfurniture
+```
+
+### 3.4 Verify Files Are There
+
+```bash
+ls -la
+```
+
+You should see: `apps`, `package.json`, `.git`, etc.
+
+✅ Your project is cloned!
+
+---
+
+# STEP 4: INSTALL ALL DEPENDENCIES
+
+Your project has 3 parts: root, API, and Web. Each needs dependencies installed.
+
+### 4.1 Install Root Dependencies
+
+```bash
+npm install
+```
+
+**This will take 2-3 minutes. Wait for it to finish.**
+
+### 4.2 Install API Dependencies
+
+```bash
+cd apps/api
+npm install
+cd ../..
+```
+
+**This will take 2-3 minutes. Wait for it to finish.**
+
+### 4.3 Install Web Dependencies
+
+```bash
+cd apps/web
+npm install
+cd ../..
+```
+
+**This will take 3-5 minutes. Wait for it to finish.**
+
+✅ All dependencies installed!
+
+---
+
+# STEP 5: SETUP DATABASE
+
+Your app stores data in MySQL. We need to create the database and configure it.
+
+### 5.1 Create the Database
+
+Copy and paste:
+
+```bash
+mysql -u root -e "CREATE DATABASE sss CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+```
+
+### 5.2 Create Configuration File for API
+
+Navigate to API folder:
+```bash
+cd apps/api
+```
+
+**Create the .env configuration file:**
+
+Copy and paste the ENTIRE block below:
+
+```bash
+cat > .env << 'EOF'
+DATABASE_URL=mysql://root:@localhost:3306/sss
+NODE_ENV=production
+PORT=4000
+JWT_ACCESS_SECRET=your-super-secret-key-12345-change-this
+JWT_ACCESS_EXPIRES_IN=15m
+JWT_REFRESH_SECRET=your-super-secret-refresh-key-67890-change-this
+JWT_REFRESH_EXPIRES_IN=7d
+CORS_ORIGIN=https://sssfurniture.co.in
+SUPERADMIN_NAME=Super Admin
+SUPERADMIN_EMAIL=admin@sssfurniture.co.in
+SUPERADMIN_PASSWORD=SecurePassword123!
+WHATSAPP_ENABLED=true
+WWEBJS_AUTH_PATH=.wwebjs_auth
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+PUPPETEER_SKIP_DOWNLOAD=true
+WHATSAPP_MIN_DELAY_MS=4000
+WHATSAPP_MAX_DELAY_MS=9000
+WHATSAPP_MAX_PER_RECIPIENT_PER_DAY=5
+WHATSAPP_MAX_PER_HOUR=30
+WHATSAPP_MAX_QUEUE_DEPTH=50
+WHATSAPP_SEND_TIMEOUT_MS=30000
+WHATSAPP_LID_RESOLUTION_TIMEOUT_MS=8000
+PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage
+EOF
+```
+
+**⚠️ IMPORTANT:** Later change:
+- `JWT_ACCESS_SECRET` - Make it a long random string
+- `JWT_REFRESH_SECRET` - Make it a different long random string
+- `SUPERADMIN_PASSWORD` - Use a strong password
+
+### 5.3 Run Database Setup (Creates Tables)
+
+Still in `apps/api` folder, run:
+
+```bash
+npm run prisma:migrate
+```
+
+This will ask a question. Type and press Enter:
+```
+sss_migration
+```
+
+### 5.4 Compile API Code (TypeScript to JavaScript)
+
+Still in `apps/api` folder, run:
+
+```bash
+npm run build
+```
+
+Wait for it to finish. You should see a `dist` folder appear.
+
+### 5.5 Go Back to Project Root
+
+```bash
+cd ../..
+```
+
+✅ Database is configured!
+
+---
+
+# STEP 6: CONFIGURE PM2
+
+PM2 is the tool that keeps your apps running 24/7. We need to tell it how to run your apps.
+
+### 6.1 Create PM2 Configuration File
+
+Copy and paste the ENTIRE block below:
+
+```bash
+cat > ecosystem.config.js << 'EOF'
+module.exports = {
+  apps: [
+    {
+      name: "api",
+      script: "./dist/main.js",
+      cwd: "./apps/api",
+      instances: 2,
+      exec_mode: "cluster",
+      env: {
+        NODE_ENV: "production",
+        PORT: 4000
+      },
+      error_file: "./logs/api-error.log",
+      out_file: "./logs/api-out.log",
+      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+      merge_logs: true,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: "10s",
+      watch: false,
+      ignore_watch: ["node_modules", "dist"],
+      max_memory_restart: "500M"
+    },
+    {
+      name: "web",
+      script: "npm",
+      args: "start",
+      cwd: "./apps/web",
+      instances: 1,
+      exec_mode: "fork",
+      env: {
+        NODE_ENV: "production",
+        PORT: 3000,
+        NEXT_PUBLIC_API_URL: "https://api.sssfurniture.co.in/api"
+      },
+      error_file: "./logs/web-error.log",
+      out_file: "./logs/web-out.log",
+      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+      merge_logs: true,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: "10s",
+      watch: false,
+      ignore_watch: ["node_modules", ".next"],
+      max_memory_restart: "500M"
+    }
+  ]
+};
+EOF
+```
+
+### 6.2 Create Log Directories
+
+```bash
+mkdir -p ./apps/api/logs
+mkdir -p ./apps/web/logs
+```
+
+✅ PM2 is configured!
+
+---
+
+# STEP 7: START SERVICES WITH PM2
+
+### 7.1 Start All Services
+
+```bash
+pm2 start ecosystem.config.js
+```
+
+You should see:
+```
+┌─────────────────────────┐
+│ id │ name │ mode │ status │
+├─────────────────────────┤
+│ 0  │ api  │ cluster │ online │
+│ 1  │ web  │ fork │ online │
+└─────────────────────────┘
+```
+
+### 7.2 Check Services Are Running
+
+```bash
+pm2 status
+```
+
+Both `api` and `web` should show `online` in green.
+
+### 7.3 View Live Logs (See What's Happening)
+
+```bash
+pm2 logs
+```
+
+You'll see logs from both services. Press `CTRL + C` to exit logs.
+
+### 7.4 IMPORTANT: Save PM2 Configuration (For Auto-Start After Reboot)
+
+```bash
+pm2 save
+```
+
+This saves the current services.
+
+### 7.5 Setup Auto-Start on VPS Reboot
+
+```bash
+pm2 startup
+```
+
+This will show you a long command. **Copy and paste the suggested command exactly as shown.**
+
+After running that command, run:
+```bash
+pm2 save
+```
+
+✅ Services are running and will auto-start!
+
+---
+
+# STEP 8: SETUP NGINX
+
+Nginx acts as a reverse proxy. It receives requests from the internet and forwards them to your app.
+
+### 8.1 Install Nginx
+
+```bash
+apt install -y nginx
+```
+
+### 8.2 Create Nginx Configuration
+
+Copy and paste the ENTIRE block:
+
+```bash
+cat > /etc/nginx/sites-available/sssfurniture << 'EOF'
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name sssfurniture.co.in api.sssfurniture.co.in admin.sssfurniture.co.in;
+    return 301 https://$server_name$request_uri;
+}
+
+# Main Website (sssfurniture.co.in)
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name sssfurniture.co.in;
+
+    ssl_certificate /etc/letsencrypt/live/sssfurniture.co.in/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sssfurniture.co.in/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# API Server (api.sssfurniture.co.in)
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.sssfurniture.co.in;
+
+    ssl_certificate /etc/letsencrypt/live/sssfurniture.co.in/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sssfurniture.co.in/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    location / {
+        proxy_pass http://localhost:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# Admin Dashboard (admin.sssfurniture.co.in)
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name admin.sssfurniture.co.in;
+
+    ssl_certificate /etc/letsencrypt/live/sssfurniture.co.in/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sssfurniture.co.in/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+```
+
+### 8.3 Enable This Configuration
+
+```bash
+ln -s /etc/nginx/sites-available/sssfurniture /etc/nginx/sites-enabled/
+```
+
+### 8.4 Test Nginx Configuration (Before Starting)
+
+```bash
+nginx -t
+```
+
+You should see:
+```
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+```
+
+If you see errors, go back and check the configuration.
+
+### 8.5 Start Nginx
+
+```bash
+systemctl start nginx
+systemctl enable nginx
+```
+
+### 8.6 Verify Nginx is Running
+
+```bash
+systemctl status nginx
+```
+
+You should see `active (running)`. Press `q` to exit.
+
+✅ Nginx is running!
+
+---
+
+# STEP 9: ADD SSL CERTIFICATES (HTTPS)
+
+SSL certificates make your site secure (HTTPS instead of HTTP).
+
+### 9.1 Install Certbot (Tool for SSL certificates)
+
+```bash
+apt install -y certbot python3-certbot-nginx
+```
+
+### 9.2 Generate SSL Certificates
+
+**IMPORTANT: Replace `your-email@example.com` with your actual email address.**
+
+Copy and paste:
+
+```bash
+certbot certonly --standalone \
+  -d sssfurniture.co.in \
+  -d api.sssfurniture.co.in \
+  -d admin.sssfurniture.co.in \
+  -n --agree-tos --email your-email@example.com
+```
+
+Wait for it to finish. You should see:
+```
+Congratulations! Your certificate has been issued.
+```
+
+### 9.3 Setup Automatic Certificate Renewal (Every 90 days)
+
+```bash
+systemctl enable certbot.timer
+systemctl start certbot.timer
+```
+
+### 9.4 Reload Nginx with SSL
+
+```bash
+systemctl reload nginx
+```
+
+✅ SSL is configured!
+
+---
+
+# STEP 10: VERIFY EVERYTHING WORKS
+
+### 10.1 Check All Services Are Running
+
+```bash
+pm2 status
+```
+
+Should show:
+- `api` = online ✅
+- `web` = online ✅
+
+### 10.2 Check Nginx is Running
+
+```bash
+systemctl status nginx
+```
+
+Should show: `active (running)` ✅
+
+### 10.3 Check Database
+
+```bash
+mysql -u root -e "SELECT 1;"
+```
+
+Should show: `1` ✅
+
+### 10.4 Test Website from Another Computer
+
+Open your browser and visit:
+- `https://sssfurniture.co.in` - Should show your website
+- `https://api.sssfurniture.co.in` - Should show API info
+- `https://admin.sssfurniture.co.in` - Should show admin panel
+
+### 10.5 Check Logs for Any Errors
+
+```bash
+pm2 logs
+```
+
+Look for any red error messages. If you see errors, write them down and refer to troubleshooting section.
+
+Press `CTRL + C` to exit logs.
+
+✅ Everything is working!
+
+---
+
+# STEP 11: DAILY COMMANDS YOU NEED
+
+### Check Everything is Running
+
+```bash
+pm2 status
+```
+
+### View Live Logs (What's Happening Right Now)
+
+```bash
+pm2 logs
+```
+
+Press `CTRL + C` to exit.
+
+### View Just API Logs
+
+```bash
+pm2 logs api
+```
+
+### View Just Web Logs
+
+```bash
+pm2 logs web
+```
+
+### Restart All Services (If Something is Broken)
+
+```bash
+pm2 restart all
+```
+
+### Restart Just API
+
+```bash
+pm2 restart api
+```
+
+### Stop All Services (To Shut Down)
+
+```bash
+pm2 stop all
+```
+
+### Start All Services Again
+
+```bash
+pm2 start ecosystem.config.js
+```
+
+### Monitor Resource Usage (CPU, Memory)
+
+```bash
+pm2 monit
+```
+
+Press `CTRL + C` to exit.
+
+### See Database Status
+
+```bash
+mysql -u root -e "SELECT 1;"
+```
+
+### Restart Database
+
+```bash
+systemctl restart mysql
+```
+
+### Restart Nginx
+
+```bash
+systemctl restart nginx
+```
+
+---
+
+# STEP 12: HOW TO UPDATE YOUR CODE
+
+When you push new code to GitHub, follow these steps to deploy it:
+
+### 12.1 SSH Into Your VPS
+
+```bash
+ssh root@185.230.63.171
+```
+
+### 12.2 Go to Your Project
+
+```bash
+cd /home/sssfurniture
+```
+
+### 12.3 Pull Latest Code from GitHub
+
+```bash
+git pull origin main
+```
+
+### 12.4 Install Any New Dependencies (If package.json changed)
+
+```bash
+npm install
+cd apps/api && npm install && cd ../..
+cd apps/web && npm install && cd ../..
+```
+
+### 12.5 Rebuild API (If Backend Code Changed)
+
+```bash
+cd apps/api
+npm run build
+cd ../..
+```
+
+### 12.6 Restart Services
+
+```bash
+pm2 restart all
+```
+
+### 12.7 Verify Everything Works
+
+```bash
+pm2 status
+pm2 logs
+```
+
+### 12.8 If Something Broke, Revert
+
+If new code broke something:
+
+```bash
+git log --oneline
+git checkout <previous-commit-hash>
+npm run build
+cd ../..
+pm2 restart all
+```
+
+✅ Code updated!
+
+---
+
+# STEP 13: TROUBLESHOOTING
+
+### Problem: Services Show "Stopped"
+
+**Solution:**
+```bash
+pm2 restart all
+```
+
+### Problem: Website Not Loading
+
+**Check if Nginx is running:**
+```bash
+systemctl status nginx
+```
+
+**If not running, start it:**
+```bash
+systemctl restart nginx
+```
+
+**Check Nginx config:**
+```bash
+nginx -t
+```
+
+### Problem: "Cannot connect to database"
+
+**Check MySQL:**
+```bash
+systemctl status mysql
+```
+
+**If not running:**
+```bash
+systemctl restart mysql
+```
+
+**Test connection:**
+```bash
+mysql -u root -e "SELECT 1;"
+```
+
+### Problem: API Service Crashes
+
+**View error logs:**
+```bash
+pm2 logs api
+```
+
+Look for the red error message. Common causes:
+- Missing .env file
+- Database not running
+- Port already in use
+
+**Restart:**
+```bash
+pm2 restart api
+```
+
+### Problem: Port Already in Use
+
+**Find what's using port 4000:**
+```bash
+lsof -i :4000
+```
+
+**Kill the process:**
+```bash
+kill -9 <PID>
+```
+
+(Replace `<PID>` with the number shown)
+
+### Problem: Out of Disk Space
+
+**Check disk usage:**
+```bash
+df -h
+```
+
+**Clear old logs:**
+```bash
+pm2 flush
+```
+
+### Problem: High Memory Usage
+
+**View memory stats:**
+```bash
+pm2 monit
+```
+
+**Restart services:**
+```bash
+pm2 restart all
+```
+
+### Problem: SSL Certificate Not Working
+
+**Check certificate:**
+```bash
+certbot certificates
+```
+
+**Force renew:**
+```bash
+certbot renew --force-renewal
+```
+
+**Reload Nginx:**
+```bash
+systemctl reload nginx
+```
+
+### Problem: Can't SSH Into VPS
+
+**Check if VPS is running** (contact your hosting provider)
+
+**Try again:**
+```bash
+ssh root@185.230.63.171
+```
+
+### Problem: Can't Clone Repository
+
+**Check Git is installed:**
+```bash
+git --version
+```
+
+**Check GitHub credentials** (you may need to use a personal access token instead of password)
+
+**Try clone again:**
+```bash
+cd /home
+rm -rf sssfurniture
+git clone https://github.com/YOUR-USERNAME/YOUR-REPO.git sssfurniture
+```
+
+---
+
+# QUICK REFERENCE
+
+## Most Used Commands
+
+```bash
+# View status
+pm2 status
+
+# View logs
+pm2 logs
+
+# Restart
+pm2 restart all
+
+# Stop
+pm2 stop all
+
+# Update code
+cd /home/sssfurniture
+git pull origin main
+npm install
+cd apps/api && npm install && npm run build && cd ../..
+pm2 restart all
+
+# Check database
+mysql -u root -e "SELECT 1;"
+
+# Check Nginx
+nginx -t
+systemctl restart nginx
+```
+
+## Ports Used
+
+- **Website**: Port 3000 (via Nginx)
+- **API**: Port 4000 (via Nginx)
+- **Database**: Port 3306
+- **Nginx**: Port 80 & 443
+
+## Your Domains
+
+- `https://sssfurniture.co.in` → Website
+- `https://api.sssfurniture.co.in` → API
+- `https://admin.sssfurniture.co.in` → Admin
+
+## Important Files
+
+- PM2 Config: `/home/sssfurniture/ecosystem.config.js`
+- Nginx Config: `/etc/nginx/sites-available/sssfurniture`
+- API Config: `/home/sssfurniture/apps/api/.env`
+- API Logs: `/home/sssfurniture/apps/api/logs/api-*.log`
+- Web Logs: `/home/sssfurniture/apps/web/logs/web-*.log`
+- Nginx Logs: `/var/log/nginx/error.log` & `/var/log/nginx/access.log`
+
+---
+
+# FINAL CHECKLIST
+
+✅ Node.js installed
+✅ PM2 installed
+✅ Git installed
+✅ MySQL installed
+✅ Project cloned
+✅ Dependencies installed
+✅ Database created
+✅ .env configured
+✅ Database migrations run
+✅ API built
+✅ PM2 configured
+✅ Services started
+✅ PM2 auto-startup configured
+✅ Nginx installed
+✅ Nginx configured
+✅ SSL certificates generated
+✅ Website accessible at https://sssfurniture.co.in
+✅ API accessible at https://api.sssfurniture.co.in
+✅ All services running in `pm2 status`
+
+---
+
+# YOU'RE DONE! 🎉
+
+Your app is now:
+- ✅ Running 24/7 with PM2
+- ✅ Auto-restarting if it crashes
+- ✅ Auto-starting after VPS reboot
+- ✅ Accessible via HTTPS
+- ✅ Connected to database
+- ✅ Proxied through Nginx
+
+**Your site is live!**
+
+**Next steps:**
+1. Test your website at https://sssfurniture.co.in
+2. Monitor logs: `pm2 logs`
+3. Keep this file for reference
+4. When updating code, follow "STEP 12: HOW TO UPDATE YOUR CODE"
+
+---
+
+## Need Help?
+
+1. Check the logs: `pm2 logs`
+2. Refer to STEP 13 Troubleshooting section
+3. Check DNS is working: Verify your domains point to this VPS IP
+4. Check SSL: Visit your domain, look for the green lock icon
+
+**Save this file. You'll refer to it often!**
