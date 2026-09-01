@@ -19,7 +19,8 @@ Every command is ready to copy-paste. Just follow step by step.
 10. Verify Everything Works
 11. Daily Commands You Need
 12. How to Update Code
-13. Troubleshooting
+13. Complete Git Commands Guide
+14. Troubleshooting
 
 ---
 
@@ -808,9 +809,635 @@ pm2 restart all
 
 ---
 
-# STEP 13: TROUBLESHOOTING
+# STEP 13: COMPLETE GIT COMMANDS GUIDE
+
+Git is a version control system. It tracks changes to your code and lets you upload them to GitHub.
+
+## What is Git?
+
+**Git = A tool to track changes in your code**
+
+Think of it like a history book for your project. Every time you make changes, Git records what changed and why.
+
+---
+
+## GIT SETUP (Do Once)
+
+### 13.1 Configure Git (First Time Only)
+
+**On your LOCAL computer (not VPS), open Terminal/PowerShell:**
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "your-email@example.com"
+```
+
+### 13.2 Verify Configuration
+
+```bash
+git config --global user.name
+git config --global user.email
+```
+
+---
+
+## BASIC GIT WORKFLOW (What You Do Every Day)
+
+### Step 1: Make Changes to Code
+(Edit files in your editor)
+
+### Step 2: Check What Changed
+```bash
+git status
+```
+
+This shows all files you modified. You'll see:
+- Red files = Not staged
+- Green files = Staged
+
+### Step 3: Stage Your Changes (Tell Git What to Save)
+```bash
+git add .
+```
+
+The `.` means "add everything". You can also add specific files:
+```bash
+git add apps/api/src/app.ts
+git add apps/web/pages/index.tsx
+```
+
+### Step 4: Check Staged Changes
+```bash
+git status
+```
+
+Should show green files now.
+
+### Step 5: Commit (Save to Git History)
+```bash
+git commit -m "Description of what you changed"
+```
+
+Example:
+```bash
+git commit -m "Add email authentication feature"
+```
+
+### Step 6: Push to GitHub (Upload to Server)
+```bash
+git push origin main
+```
+
+**DONE!** Your code is now on GitHub and can be deployed.
+
+---
+
+## ESSENTIAL GIT COMMANDS
+
+### Check Current Status
+```bash
+git status
+```
+
+Shows which files changed, which are staged.
+
+### See Your Commit History
+```bash
+git log
+```
+
+Shows all commits with messages. Press `q` to exit.
+
+### See Last 5 Commits
+```bash
+git log --oneline -5
+```
+
+Much cleaner view.
+
+### See Changes in Files (Before Committing)
+```bash
+git diff
+```
+
+Shows exact lines that changed.
+
+### See Changes in Staged Files
+```bash
+git diff --staged
+```
+
+### Add All Changes
+```bash
+git add .
+```
+
+Stages all modified files.
+
+### Add Specific File
+```bash
+git add filename.js
+```
+
+Stages only that file.
+
+### Undo Changes (Before Staging)
+```bash
+git checkout filename.js
+```
+
+Reverts the file to last committed version.
+
+### Undo Staging
+```bash
+git reset filename.js
+```
+
+Removes file from staging but keeps your edits.
+
+### Undo Last Commit (Before Pushing)
+```bash
+git reset --soft HEAD~1
+```
+
+Undo commit but keep changes staged.
+
+### Undo Last Commit (Delete Changes)
+```bash
+git reset --hard HEAD~1
+```
+
+⚠️ WARNING: This deletes your changes! Use carefully.
+
+### Push Code to GitHub
+```bash
+git push origin main
+```
+
+Uploads all committed changes to GitHub.
+
+### Pull Latest Code from GitHub
+```bash
+git pull origin main
+```
+
+Downloads latest changes from GitHub.
+
+### See Remote Repository
+```bash
+git remote -v
+```
+
+Shows which GitHub repo you're connected to.
+
+### Switch Branches
+```bash
+git checkout develop
+```
+
+Switches to the `develop` branch.
+
+### Create New Branch
+```bash
+git checkout -b feature/new-feature
+```
+
+Creates and switches to new branch.
+
+### Merge Branch into Main
+```bash
+git checkout main
+git pull origin main
+git merge feature/new-feature
+git push origin main
+```
+
+---
+
+## DEPLOYMENT WORKFLOW WITH GIT
+
+### When You Want to Deploy New Code:
+
+#### On Your Local Computer:
+
+**1. Make changes to your code**
+
+**2. Check what changed:**
+```bash
+git status
+```
+
+**3. Stage all changes:**
+```bash
+git add .
+```
+
+**4. Commit with message:**
+```bash
+git commit -m "Fix bug in user authentication"
+```
+
+**5. Push to GitHub:**
+```bash
+git push origin main
+```
+
+#### On Your VPS:
+
+**6. SSH into VPS:**
+```bash
+ssh root@185.230.63.171
+```
+
+**7. Go to project:**
+```bash
+cd /home/sssfurniture
+```
+
+**8. Pull latest code:**
+```bash
+git pull origin main
+```
+
+**9. Install dependencies (if changed):**
+```bash
+npm install
+cd apps/api && npm install && cd ../..
+cd apps/web && npm install && cd ../..
+```
+
+**10. Rebuild (if backend changed):**
+```bash
+cd apps/api
+npm run build
+cd ../..
+```
+
+**11. Restart services:**
+```bash
+pm2 restart all
+```
+
+**12. Verify:**
+```bash
+pm2 status
+```
+
+✅ **Deployment complete!**
+
+---
+
+## COMMON GIT SCENARIOS
+
+### Scenario 1: You Changed Files and Want to Upload
+
+```bash
+# Check changes
+git status
+
+# Stage all
+git add .
+
+# Commit
+git commit -m "Added new feature"
+
+# Push
+git push origin main
+```
+
+### Scenario 2: You Made Mistakes and Want to Undo
+
+**Undo unstaged changes:**
+```bash
+git checkout filename.js
+```
+
+**Undo all unstaged changes:**
+```bash
+git checkout .
+```
+
+**Undo staged changes:**
+```bash
+git reset filename.js
+```
+
+**Undo last commit (keep changes):**
+```bash
+git reset --soft HEAD~1
+```
+
+**Undo last commit (delete changes):**
+```bash
+git reset --hard HEAD~1
+```
+
+### Scenario 3: You Want to See What Changed
+
+```bash
+# See what you modified
+git diff
+
+# See your commit history
+git log --oneline -10
+
+# See changes in specific file
+git diff filename.js
+```
+
+### Scenario 4: You Want to Update Local Code from GitHub
+
+```bash
+git pull origin main
+```
+
+**This downloads latest changes from GitHub.**
+
+### Scenario 5: You Want to Compare Your Code with GitHub
+
+```bash
+# See commits ahead/behind
+git status
+
+# See all differences
+git diff origin/main
+```
+
+### Scenario 6: You Accidentally Deleted a File
+
+```bash
+# Restore the file
+git checkout filename.js
+```
+
+### Scenario 7: You Pushed Code but It Has a Bug
+
+**Option 1: Fix and push again**
+```bash
+# Fix the file
+# Then:
+git add filename.js
+git commit -m "Fix: corrected bug in authentication"
+git push origin main
+```
+
+**Option 2: Revert to previous version**
+```bash
+# See commit history
+git log --oneline -5
+
+# Revert to previous commit
+git revert <commit-hash>
+git push origin main
+```
+
+Example:
+```bash
+git log --oneline -5
+# Output:
+# a1b2c3d Fix authentication
+# b2c3d4e Add user login
+# c3d4e5f Initial commit
+
+git revert a1b2c3d
+git push origin main
+```
+
+---
+
+## GIT BRANCHES EXPLAINED
+
+### What is a Branch?
+
+A branch is like a separate copy of your code. You can work on one branch without affecting the main code.
+
+### Main Branch
+```bash
+git checkout main
+```
+
+This is your production code. Always keep it working.
+
+### Create Feature Branch
+```bash
+git checkout -b feature/user-authentication
+```
+
+Work on new features in branches, then merge to main.
+
+### See All Branches
+```bash
+git branch -a
+```
+
+### Delete Branch
+```bash
+git branch -D feature/old-feature
+```
+
+### Merge Branch to Main
+```bash
+git checkout main
+git pull origin main
+git merge feature/user-authentication
+git push origin main
+```
+
+---
+
+## GIT COMMIT MESSAGES (Best Practices)
+
+### Good Commit Messages
+
+```bash
+# Good ✅
+git commit -m "Add email verification feature"
+git commit -m "Fix database connection timeout"
+git commit -m "Update API response format"
+
+# Bad ❌
+git commit -m "fixed stuff"
+git commit -m "update"
+git commit -m "asdf"
+```
+
+### Message Format
+
+```
+<action> <what you did>
+```
+
+**Actions:**
+- `Add` - New feature
+- `Fix` - Bug fix
+- `Update` - Update existing code
+- `Remove` - Delete code
+- `Refactor` - Reorganize code
+- `Test` - Add tests
+
+**Examples:**
+```bash
+git commit -m "Add payment gateway integration"
+git commit -m "Fix memory leak in database pool"
+git commit -m "Update npm dependencies"
+git commit -m "Remove deprecated functions"
+git commit -m "Refactor authentication module"
+```
+
+---
+
+## GITHUB WORKFLOW SUMMARY
+
+### Daily Workflow:
+
+**Morning:** Pull latest code
+```bash
+git pull origin main
+```
+
+**Throughout Day:** Make changes, commit regularly
+```bash
+git add .
+git commit -m "Description"
+```
+
+**Evening:** Push all changes
+```bash
+git push origin main
+```
+
+**On VPS:** Pull and deploy
+```bash
+cd /home/sssfurniture
+git pull origin main
+npm install
+npm run build
+pm2 restart all
+```
+
+---
+
+## TROUBLESHOOTING GIT
+
+### Problem: "Permission denied" when pushing
+
+**Solution: Update GitHub credentials**
+
+GitHub no longer accepts password. Use Personal Access Token:
+
+1. Go to GitHub Settings → Developer Settings → Personal Access Tokens
+2. Generate new token
+3. When Git asks for password, paste the token instead
+
+### Problem: "Changes not staged for commit"
+
+**Solution:**
+```bash
+git add .
+git commit -m "Your message"
+```
+
+### Problem: "Merge conflict"
+
+**When you pull and there are conflicts:**
+
+1. Open the file with conflict (marked with `<<<<` and `>>>>`)
+2. Edit and keep the code you want
+3. Remove the conflict markers
+4. Stage and commit:
+```bash
+git add .
+git commit -m "Resolve merge conflict"
+git push origin main
+```
+
+### Problem: "Detached HEAD state"
+
+**Solution:**
+```bash
+git checkout main
+```
+
+### Problem: Can't Push - "Rejected"
+
+**Solution: Pull first**
+```bash
+git pull origin main
+git push origin main
+```
+
+### Problem: Accidentally Committed Wrong File
+
+**Solution:**
+```bash
+# See what's in last commit
+git show HEAD
+
+# Undo last commit
+git reset --soft HEAD~1
+
+# Remove the file from staging
+git reset filename.js
+
+# Recommit without that file
+git commit -m "Fixed: removed wrong file"
+```
+
+---
+
+## QUICK GIT REFERENCE
+
+```bash
+# Setup (once)
+git config --global user.name "Your Name"
+git config --global user.email "email@example.com"
+
+# Clone (first time)
+git clone https://github.com/username/repo.git
+
+# Daily work
+git status              # See changes
+git add .              # Stage all
+git commit -m "msg"    # Commit
+git push origin main   # Push
+
+# Update
+git pull origin main   # Get latest
+
+# View history
+git log --oneline -10  # See commits
+git diff              # See changes
+
+# Undo
+git checkout .        # Undo all changes
+git reset --hard HEAD~1  # Delete last commit
+
+# Branches
+git checkout -b feature/name  # Create branch
+git checkout main             # Switch to main
+git merge feature/name        # Merge branch
+```
+
+---
+
+## YOUR GITHUB CHECKLIST
+
+✅ GitHub account created
+✅ Repository created
+✅ Git installed locally
+✅ Git configured with your name/email
+✅ Repository cloned to VPS
+✅ Can push code to GitHub
+✅ Can pull code from GitHub
+✅ Deployment workflow tested
+
+---
+
+# STEP 14: TROUBLESHOOTING
 
 ### Problem: Services Show "Stopped"
+
+**Solution:**
 
 **Solution:**
 ```bash
