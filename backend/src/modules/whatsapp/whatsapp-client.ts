@@ -43,6 +43,13 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   private lidToPhoneJidCache = new Map<string, string>();
   private readonly sendTimeoutMs: number;
   private readonly lidResolutionTimeoutMs: number;
+  // Belt-and-suspenders against any future cause of client.initialize()
+  // never emitting anything (a bad Puppeteer arg, a wedged Chromium launch,
+  // a network stall loading web.whatsapp.com, ...) - self-heals by forcing
+  // a restart instead of sitting in INITIALIZING forever with no way to
+  // recover short of a manual PM2/container restart.
+  private initWatchdog: NodeJS.Timeout | null = null;
+  private static readonly INIT_TIMEOUT_MS = 90_000;
 
   constructor(private config: ConfigService) {
     this.sendTimeoutMs = Number(this.config.get('WHATSAPP_SEND_TIMEOUT_MS') ?? 30000);
@@ -102,6 +109,16 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     this.readyPromise = new Promise((resolve) => {
       this.readyResolve = resolve;
     });
+
+    if (this.initWatchdog) clearTimeout(this.initWatchdog);
+    this.initWatchdog = setTimeout(() => {
+      if (this.state === 'INITIALIZING') {
+        this.logger.error(
+          `[WhatsApp] Stuck in INITIALIZING for ${WhatsappClientWrapper.INIT_TIMEOUT_MS}ms - forcing a restart`,
+        );
+        this.restartClient();
+      }
+    }, WhatsappClientWrapper.INIT_TIMEOUT_MS);
 
     const authPath = this.config.get<string>('WWEBJS_AUTH_PATH') ?? '.wwebjs_auth';
     const chromePath = this.config.get<string>('PUPPETEER_EXECUTABLE_PATH');
@@ -234,6 +251,13 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     if (this.state !== newState) {
       this.logger.log(`[STATE] ${this.state} → ${newState}`);
       this.state = newState;
+    }
+    // Any forward progress out of INITIALIZING means client.initialize()
+    // is actually alive - disarm the watchdog. It only fires again once
+    // startClient() re-arms it (a fresh init or a restart).
+    if (newState !== 'INITIALIZING' && this.initWatchdog) {
+      clearTimeout(this.initWatchdog);
+      this.initWatchdog = null;
     }
   }
 
