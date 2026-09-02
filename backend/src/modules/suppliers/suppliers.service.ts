@@ -85,7 +85,17 @@ export class SuppliersService {
   }
 
   async remove(id: string) {
-    await this.findOne(id);
+    const supplier = await this.findOne(id);
+    // The relation is declared onDelete: Cascade in the schema, but MySQL
+    // FK constraints aren't guaranteed to have actually been created by
+    // `prisma db push` on every table (confirmed missing on at least one
+    // other relation in this project) - blocking instead of relying on
+    // cascade avoids silently orphaning purchase/payment rows.
+    if (supplier.purchases.length > 0 || supplier.payments.length > 0) {
+      throw new ConflictException(
+        'This supplier has purchase or payment history and cannot be deleted. Remove those entries first if you really need to delete the supplier.',
+      );
+    }
     await this.prisma.supplier.delete({ where: { id } });
     return { success: true };
   }

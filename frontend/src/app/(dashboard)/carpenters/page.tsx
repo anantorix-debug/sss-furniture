@@ -8,10 +8,13 @@ import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { Modal } from '@/components/Modal';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { UpdateModelNoModal } from '@/components/UpdateModelNoModal';
 import { BalanceBadge, Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
 import type { CarpenterSummary, WorkerType, CustomerOrder, PartyOrder } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+
+const emptyWorkerForm = { name: '', phone: '', workerType: 'CARPENTER' as WorkerType };
 
 const WORKER_TYPE_LABEL: Record<WorkerType, string> = {
   CARPENTER: 'Carpenter',
@@ -48,27 +51,56 @@ export default function CarpentersPage() {
     setPage(1);
   }
   const [formOpen, setFormOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [workerType, setWorkerType] = useState<WorkerType>('CARPENTER');
+  const [editing, setEditing] = useState<CarpenterSummary | null>(null);
+  const [form, setForm] = useState(emptyWorkerForm);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CarpenterSummary | null>(null);
+
+  function openCreate() {
+    setEditing(null);
+    setForm(emptyWorkerForm);
+    setError(null);
+    setFormOpen(true);
+  }
+
+  function openEditWorker(w: CarpenterSummary) {
+    setEditing(w);
+    setForm({ name: w.name, phone: w.phone ?? '', workerType: w.workerType });
+    setError(null);
+    setFormOpen(true);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await api.post('/carpenters', { name, phone: phone || undefined, workerType });
+      const payload = { name: form.name, phone: form.phone || undefined, workerType: form.workerType };
+      if (editing) {
+        await api.patch(`/carpenters/${editing.id}`, payload);
+      } else {
+        await api.post('/carpenters', payload);
+      }
       setFormOpen(false);
-      setName('');
-      setPhone('');
-      setWorkerType('CARPENTER');
       mutate();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create worker');
+      setError(err instanceof ApiError ? err.message : 'Failed to save worker');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteWorker() {
+    if (!deleteTarget) return;
+    setError(null);
+    try {
+      await api.delete(`/carpenters/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete worker');
+      setDeleteTarget(null);
     }
   }
 
@@ -82,11 +114,13 @@ export default function CarpentersPage() {
           </p>
         </div>
         {hasRole('ADMIN') && (
-          <button className="btn-primary" onClick={() => setFormOpen(true)}>
+          <button className="btn-primary" onClick={openCreate}>
             + New Worker
           </button>
         )}
       </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {isProductionEmployee && (
         <div className="flex gap-1 border-b border-brand-200">
@@ -164,6 +198,30 @@ export default function CarpentersPage() {
                 </div>
               )}
             </div>
+            {hasRole('ADMIN') && (
+              <div className="flex gap-3 mt-3 pt-3 border-t border-brand-100">
+                <button
+                  className="text-brand-600 hover:underline text-xs"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openEditWorker(c);
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  className="text-red-500 hover:underline text-xs"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDeleteTarget(c);
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
           </Link>
         ))}
       </div>
@@ -174,15 +232,15 @@ export default function CarpentersPage() {
       )}
 
       {formOpen && (
-        <Modal title="New Worker" onClose={() => setFormOpen(false)}>
+        <Modal title={editing ? `Edit ${editing.name}` : 'New Worker'} onClose={() => setFormOpen(false)}>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="label">Name</label>
-              <input className="input" required value={name} onChange={(e) => setName(e.target.value)} />
+              <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
             </div>
             <div>
               <label className="label">Worker Type</label>
-              <select className="input" value={workerType} onChange={(e) => setWorkerType(e.target.value as WorkerType)}>
+              <select className="input" value={form.workerType} onChange={(e) => setForm((f) => ({ ...f, workerType: e.target.value as WorkerType }))}>
                 <option value="CARPENTER">Carpenter</option>
                 <option value="POLISHER">Polisher</option>
                 <option value="CARVER">Carving Man</option>
@@ -190,7 +248,7 @@ export default function CarpentersPage() {
             </div>
             <div>
               <label className="label">WhatsApp Phone</label>
-              <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="9876543210" />
+              <input className="input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="9876543210" />
               <p className="text-xs text-brand-400 mt-1">Used to send work-assignment notifications via WhatsApp.</p>
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
@@ -199,11 +257,22 @@ export default function CarpentersPage() {
                 Cancel
               </button>
               <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? 'Saving...' : 'Create'}
+                {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Create'}
               </button>
             </div>
           </form>
         </Modal>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete Worker"
+          message={`Delete "${deleteTarget.name}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDeleteWorker}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );

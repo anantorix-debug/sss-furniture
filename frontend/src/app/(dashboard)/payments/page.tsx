@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
+import { PaymentDetailModal } from '@/components/PaymentDetailModal';
 import type { PaymentSource, UnifiedPaymentsResponse } from '@/types';
 
 const SOURCE_LABEL: Record<PaymentSource, string> = {
@@ -28,6 +29,7 @@ function PaymentsContent() {
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [detailTarget, setDetailTarget] = useState<{ source: PaymentSource; relatedId: string } | null>(null);
 
   const { data, isLoading } = useSWR<UnifiedPaymentsResponse>(
     `/payments?${new URLSearchParams({ ...(source ? { source } : {}), ...(search ? { search } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}) })}`,
@@ -89,7 +91,11 @@ function PaymentsContent() {
               </tr>
             )}
             {data?.payments.map((p) => (
-              <tr key={`${p.source}-${p.id}`}>
+              <tr
+                key={`${p.source}-${p.id}`}
+                className="cursor-pointer hover:bg-brand-50"
+                onClick={() => setDetailTarget({ source: p.source, relatedId: p.relatedId })}
+              >
                 <td>{formatDate(p.date)}</td>
                 <td>
                   <Chip color={SOURCE_CHIP[p.source]} label={SOURCE_LABEL[p.source]} />
@@ -104,6 +110,10 @@ function PaymentsContent() {
           </tbody>
         </table>
       </div>
+
+      {detailTarget && (
+        <PaymentDetailModal source={detailTarget.source} relatedId={detailTarget.relatedId} onClose={() => setDetailTarget(null)} />
+      )}
     </div>
   );
 }

@@ -8,11 +8,14 @@ import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency } from '@/lib/format';
 import { Modal } from '@/components/Modal';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { BalanceBadge } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
 import { downloadCsv } from '@/lib/csv';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import type { SupplierSummary } from '@/types';
+
+const emptySupplierForm = { name: '', phone: '', address: '' };
 
 function SuppliersContent() {
   const { hasRole } = useAuth();
@@ -28,27 +31,58 @@ function SuppliersContent() {
     setPage(1);
   }
   const [formOpen, setFormOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
+  const [editing, setEditing] = useState<SupplierSummary | null>(null);
+  const [form, setForm] = useState(emptySupplierForm);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SupplierSummary | null>(null);
+
+  function openCreate() {
+    setEditing(null);
+    setForm(emptySupplierForm);
+    setError(null);
+    setFormOpen(true);
+  }
+
+  function openEdit(e: React.MouseEvent, s: SupplierSummary) {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditing(s);
+    setForm({ name: s.name, phone: s.phone ?? '', address: s.address ?? '' });
+    setError(null);
+    setFormOpen(true);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await api.post('/suppliers', { name, phone: phone || undefined, address: address || undefined });
+      const payload = { name: form.name, phone: form.phone || undefined, address: form.address || undefined };
+      if (editing) {
+        await api.patch(`/suppliers/${editing.id}`, payload);
+      } else {
+        await api.post('/suppliers', payload);
+      }
       setFormOpen(false);
-      setName('');
-      setPhone('');
-      setAddress('');
       mutate();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create supplier');
+      setError(err instanceof ApiError ? err.message : 'Failed to save supplier');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setError(null);
+    try {
+      await api.delete(`/suppliers/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete supplier');
+      setDeleteTarget(null);
     }
   }
 
@@ -79,12 +113,14 @@ function SuppliersContent() {
             Export Excel
           </button>
           {hasRole('ADMIN') && (
-            <button className="btn-primary" onClick={() => setFormOpen(true)}>
+            <button className="btn-primary" onClick={openCreate}>
               + New Supplier
             </button>
           )}
         </div>
       </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <input
         className="input max-w-xs"
@@ -118,6 +154,23 @@ function SuppliersContent() {
                 <p className={`font-semibold ${s.balance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatCurrency(s.balance)}</p>
               </div>
             </div>
+            {hasRole('ADMIN') && (
+              <div className="flex gap-3 mt-3 pt-3 border-t border-brand-100">
+                <button className="text-brand-600 hover:underline text-xs" onClick={(e) => openEdit(e, s)}>
+                  Edit
+                </button>
+                <button
+                  className="text-red-500 hover:underline text-xs"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDeleteTarget(s);
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
           </Link>
         ))}
       </div>
@@ -126,19 +179,19 @@ function SuppliersContent() {
       )}
 
       {formOpen && (
-        <Modal title="New Supplier" onClose={() => setFormOpen(false)}>
+        <Modal title={editing ? `Edit ${editing.name}` : 'New Supplier'} onClose={() => setFormOpen(false)}>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="label">Name</label>
-              <input className="input" required value={name} onChange={(e) => setName(e.target.value)} />
+              <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
             </div>
             <div>
               <label className="label">Phone</label>
-              <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <input className="input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
             </div>
             <div>
               <label className="label">Address</label>
-              <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} />
+              <input className="input" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <div className="flex justify-end gap-2 pt-2">
@@ -146,11 +199,22 @@ function SuppliersContent() {
                 Cancel
               </button>
               <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? 'Saving...' : 'Create'}
+                {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Create'}
               </button>
             </div>
           </form>
         </Modal>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete Supplier"
+          message={`Delete "${deleteTarget.name}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );

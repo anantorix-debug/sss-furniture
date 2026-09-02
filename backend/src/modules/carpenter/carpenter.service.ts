@@ -99,6 +99,20 @@ export class CarpenterService {
 
   async removeCarpenter(id: string) {
     await this.findOneCarpenter(id);
+    // Same defensive check as SuppliersService.remove: don't rely on the
+    // schema's onDelete behavior alone (MySQL FK constraints aren't
+    // guaranteed to have actually been created by every `prisma db push`
+    // in this project's history) - block deletion when there's real
+    // history instead of risking an orphaned or unexpectedly-cascaded row.
+    const [workItemCount, paymentCount] = await Promise.all([
+      this.prisma.carpenterWorkItem.count({ where: { carpenterId: id } }),
+      this.prisma.carpenterPayment.count({ where: { carpenterId: id } }),
+    ]);
+    if (workItemCount > 0 || paymentCount > 0) {
+      throw new ConflictException(
+        'This worker has work items or payment history and cannot be deleted. Remove those first if you really need to delete the worker.',
+      );
+    }
     await this.prisma.carpenter.delete({ where: { id } });
     return { success: true };
   }
