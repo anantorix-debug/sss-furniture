@@ -32,8 +32,10 @@ export const FURNITURE_UNITS: UnitOption[] = [
   { value: 'Tin', label: 'Tin', group: 'finish' },
 
   { value: 'Bag', label: 'Bag', group: 'general' },
-  { value: 'Meter', label: 'Meter', group: 'general' },
+  { value: 'Ft', label: 'Ft (feet)', group: 'general' },
   { value: 'Inch', label: 'Inch', group: 'general' },
+  { value: 'Meter', label: 'Meter', group: 'general' },
+  { value: 'Cm', label: 'Cm (centimetre)', group: 'general' },
 ];
 
 export const UNIT_GROUP_LABELS: Record<UnitOption['group'], string> = {

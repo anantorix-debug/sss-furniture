@@ -51,6 +51,10 @@ export interface CustomerOrder {
   phone?: string | null;
   address?: string | null;
   product: string;
+  size?: string | null;
+  sizeUnit?: string | null;
+  colour?: string | null;
+  specialInstructions?: string | null;
   cotTrack?: string | null;
   actualDeliveryDate?: string | null;
   deliveryStatus: DeliveryStatus;
@@ -79,6 +83,8 @@ export interface PartyOrder {
   shopName: string;
   phone?: string | null;
   model: string;
+  size?: string | null;
+  sizeUnit?: string | null;
   finish?: string | null;
   details?: string | null;
   qty: number;

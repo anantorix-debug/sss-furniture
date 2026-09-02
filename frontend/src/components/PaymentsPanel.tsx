@@ -30,6 +30,30 @@ function suggestType(totalAmount: number, totalReceived: number, payments: Payme
   return isFirst ? 'ADVANCE' : 'PARTIAL';
 }
 
+// Mirrors the business's own "PAYMENT STATUS" WhatsApp template: an
+// internal itemized reconciliation block, plus a ready customer-facing
+// sentence underneath - sent as one message.
+function buildPaymentStatusMessage(totalAmount: number, totalReceived: number, balanceAmount: number, thisPayment: Payment): string {
+  const fullyPaid = balanceAmount <= 0.01;
+  const statusLine = fullyPaid ? '✅ FULLY PAID' : '⏳ PARTIALLY PAID';
+  const lines = [
+    `*PAYMENT STATUS — ${fullyPaid ? 'FULLY PAID ✅' : 'PARTIALLY PAID ⏳'}*`,
+    ``,
+    `• Revised Total Amount: ₹${totalAmount}/-`,
+    `• This Payment: ₹${thisPayment.amount}/-${thisPayment.mode ? ` (${thisPayment.mode})` : ''}`,
+    `• Total Paid: ₹${totalReceived}/-`,
+    `• Balance Due: ₹${balanceAmount}/-`,
+    `• Payment Status: ${statusLine}`,
+    ``,
+    `Dear Sir, we have received ${fullyPaid ? 'the full payment' : 'a payment'} of ₹${thisPayment.amount}. ${
+      fullyPaid ? 'Your payment is now fully settled.' : `Your balance amount is ₹${balanceAmount}.`
+    } Thank you for choosing SSS Furniture.`,
+    ``,
+    `*WE ARE ALWAYS WORKING FOR YOU*`,
+  ];
+  return lines.join('\n');
+}
+
 export function PaymentsPanel({
   totalAmount,
   totalReceived,
@@ -39,6 +63,7 @@ export function PaymentsPanel({
   onDeletePayment,
   canDelete,
   canAdd = true,
+  onSendWhatsApp,
 }: {
   totalAmount: number;
   totalReceived: number;
@@ -48,6 +73,10 @@ export function PaymentsPanel({
   onDeletePayment?: (paymentId: string) => Promise<void>;
   canDelete?: boolean;
   canAdd?: boolean;
+  // Present only when the parent knows who to send to (has a phone number
+  // on file) - renders a per-payment "Send via WhatsApp" action that hands
+  // the composed template text back up to open the send modal.
+  onSendWhatsApp?: (message: string) => void;
 }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState('');
@@ -109,13 +138,13 @@ export function PaymentsPanel({
               <th>Type</th>
               <th>Mode</th>
               <th>Note</th>
-              {canDelete && <th></th>}
+              {(canDelete || onSendWhatsApp) && <th></th>}
             </tr>
           </thead>
           <tbody>
             {payments.length === 0 && (
               <tr>
-                <td colSpan={canDelete ? 6 : 5} className="text-center text-brand-400 py-4">
+                <td colSpan={canDelete || onSendWhatsApp ? 6 : 5} className="text-center text-brand-400 py-4">
                   No payments recorded yet
                 </td>
               </tr>
@@ -127,11 +156,21 @@ export function PaymentsPanel({
                 <td>{p.type ? <Chip color={TYPE_CHIP[p.type]} label={TYPE_LABEL[p.type]} /> : '-'}</td>
                 <td>{p.mode ?? '-'}</td>
                 <td className="text-brand-500">{p.note ?? '-'}</td>
-                {canDelete && (
-                  <td>
-                    <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => onDeletePayment?.(p.id)}>
-                      Remove
-                    </button>
+                {(canDelete || onSendWhatsApp) && (
+                  <td className="whitespace-nowrap text-right">
+                    {onSendWhatsApp && (
+                      <button
+                        className="text-green-700 hover:underline text-xs mr-3"
+                        onClick={() => onSendWhatsApp(buildPaymentStatusMessage(totalAmount, totalReceived, balanceAmount, p))}
+                      >
+                        💬 Send
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => onDeletePayment?.(p.id)}>
+                        Remove
+                      </button>
+                    )}
                   </td>
                 )}
               </tr>

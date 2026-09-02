@@ -20,6 +20,7 @@ import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { UnitSelect } from '@/components/UnitSelect';
 import type { CustomerOrder, DeliveryStatus } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -38,6 +39,8 @@ const emptyForm = {
   customerName: '',
   phone: '',
   address: '',
+  size: '',
+  sizeUnit: '',
   actualDeliveryDate: '',
   deliveryStatus: 'PENDING' as DeliveryStatus,
 };
@@ -116,6 +119,8 @@ function CustomerOrdersContent() {
       customerName: order.customerName,
       phone: order.phone ?? '',
       address: order.address ?? '',
+      size: order.size ?? '',
+      sizeUnit: order.sizeUnit ?? '',
       actualDeliveryDate: toDateInputValue(order.actualDeliveryDate),
       deliveryStatus: order.deliveryStatus,
     });
@@ -139,6 +144,8 @@ function CustomerOrdersContent() {
         customerName: form.customerName,
         phone: form.phone || undefined,
         address: form.address || undefined,
+        size: form.size || undefined,
+        sizeUnit: form.sizeUnit || undefined,
         actualDeliveryDate: form.actualDeliveryDate || undefined,
         deliveryStatus: form.deliveryStatus,
         items: items
@@ -187,15 +194,48 @@ function CustomerOrdersContent() {
     URL.revokeObjectURL(url);
   }
 
+  // Mirrors the "Dear Sir, kindly check and confirm..." confirmation
+  // format, built from whatever this order actually has on file - there's
+  // no separate COT/MATTRESS/DRESSING TABLE breakdown in the schema (that
+  // level of detail lives in specialInstructions as free text today), so
+  // this stays to Order/Size/Colour/Items/Payment, all real data.
+  function buildOrderConfirmationMessage(order: CustomerOrder): string {
+    const lines = [
+      `Dear Sir,`,
+      ``,
+      `Kindly check and confirm the following order details:`,
+      ``,
+      `*ORDER DETAILS*`,
+      `Order ID: ${order.orderId}`,
+      order.size ? `Size: ${order.size}${order.sizeUnit ? ` ${order.sizeUnit}` : ''}` : null,
+      order.colour ? `Colour: ${order.colour}` : null,
+      ``,
+      ...(order.items?.length
+        ? order.items.map((i) => `${i.productName} - Qty: ${i.quantity} x ₹${i.unitPrice}`)
+        : [`Product: ${order.product}`]),
+      order.specialInstructions ? `` : null,
+      order.specialInstructions ? `Special Instructions: ${order.specialInstructions}` : null,
+      ``,
+      `*PAYMENT DETAILS*`,
+      `Order Value: ₹${order.orderValue ?? 0}`,
+      order.totalReceived ? `Advance Paid: ₹${order.totalReceived}` : null,
+      `Balance Amount: ₹${order.balanceAmount ?? order.orderValue ?? 0}`,
+      ``,
+      `Please check all the above details carefully. Once confirmed, changes cannot be made. If everything is correct, kindly reply:`,
+      ``,
+      `"Confirmed – All Details OK."`,
+      ``,
+      `Thank you.`,
+    ].filter((l) => l !== null);
+    return lines.join('\n');
+  }
+
   function handleSendWhatsApp(order: CustomerOrder) {
     openWhatsApp({
       recipientName: (order.customerName ?? '') || 'Customer',
       recipientPhone: order.phone ?? undefined,
-      defaultMessage: `Order Confirmation
-Order ID: ${order.orderId}
-Product: ${order.product}
-Quantity: ${order.items?.[0]?.quantity || 1}
-Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
+      defaultMessage: buildOrderConfirmationMessage(order),
+      defaultImageUrl: '/wa-template.jpeg',
     });
   }
 
@@ -400,6 +440,19 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
             <FormField label="Address" full>
               <input className="input" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
             </FormField>
+            <FormRow>
+              <FormField label="Size">
+                <input
+                  className="input"
+                  placeholder="e.g. 78x72"
+                  value={form.size}
+                  onChange={(e) => setForm((f) => ({ ...f, size: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Size Unit">
+                <UnitSelect value={form.sizeUnit} onChange={(v) => setForm((f) => ({ ...f, sizeUnit: v }))} />
+              </FormField>
+            </FormRow>
 
             <div>
               <div className="grid grid-cols-2 sm:grid-cols-[1fr_70px_110px_100px_auto] gap-2 text-[11px] font-medium text-ink-muted px-0.5 hidden sm:grid">
@@ -508,6 +561,14 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
             payments={paymentsOrder.payments ?? []}
             canDelete={hasRole('ADMIN')}
             canAdd={hasRole('ADMIN')}
+            onSendWhatsApp={(message) =>
+              openWhatsApp({
+                recipientName: paymentsOrder.customerName || 'Customer',
+                recipientPhone: paymentsOrder.phone ?? undefined,
+                defaultMessage: message,
+                defaultImageUrl: '/wa-template.jpeg',
+              })
+            }
             onAddPayment={async (payload) => {
               await api.post(`/customer-orders/${paymentsOrder.id}/payments`, payload);
               await refreshPaymentsOrder(paymentsOrder.id);
@@ -572,6 +633,7 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
             phone: whatsappOptions.recipientPhone,
           }}
           defaultMessage={whatsappOptions.defaultMessage}
+          defaultImageUrl={whatsappOptions.defaultImageUrl}
           onSuccess={() => mutate()}
         />
       )}

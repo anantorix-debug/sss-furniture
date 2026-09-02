@@ -23,6 +23,14 @@ export class CreatePartyOrderDto {
 
   @IsString()
   @IsOptional()
+  size?: string;
+
+  @IsString()
+  @IsOptional()
+  sizeUnit?: string;
+
+  @IsString()
+  @IsOptional()
   finish?: string;
 
   @IsString()

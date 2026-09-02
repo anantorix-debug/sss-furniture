@@ -43,6 +43,14 @@ export class CreateCustomerOrderDto {
   @IsOptional()
   product?: string;
 
+  @IsString()
+  @IsOptional()
+  size?: string;
+
+  @IsString()
+  @IsOptional()
+  sizeUnit?: string;
+
   // Required unless `items` is given, in which case it's derived from the
   // sum of the line items instead of being entered by hand.
   @IsNumber()

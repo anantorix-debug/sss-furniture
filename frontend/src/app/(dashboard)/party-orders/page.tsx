@@ -19,6 +19,7 @@ import { downloadCsv } from '@/lib/csv';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { UnitSelect } from '@/components/UnitSelect';
 import type { PartyOrder, DeliveryStatus } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
@@ -27,6 +28,8 @@ const emptyForm = {
   shopName: '',
   phone: '',
   model: '',
+  size: '',
+  sizeUnit: '',
   finish: '',
   details: '',
   qty: '1',
@@ -94,6 +97,8 @@ function PartyOrdersContent() {
       shopName: order.shopName,
       phone: order.phone ?? '',
       model: order.model,
+      size: order.size ?? '',
+      sizeUnit: order.sizeUnit ?? '',
       finish: order.finish ?? '',
       details: order.details ?? '',
       qty: String(order.qty),
@@ -117,6 +122,8 @@ function PartyOrdersContent() {
         shopName: form.shopName,
         phone: form.phone || undefined,
         model: form.model,
+        size: form.size || undefined,
+        sizeUnit: form.sizeUnit || undefined,
         finish: form.finish || undefined,
         details: form.details || undefined,
         qty: parseInt(form.qty, 10) || 1,
@@ -154,15 +161,46 @@ function PartyOrdersContent() {
     mutate();
   }
 
+  // Same "Dear Sir, kindly check and confirm..." format as the Customer
+  // Orders template, built from what a Party Order actually tracks (shop,
+  // model, size, qty/price, finish) rather than a COT/MATTRESS breakdown
+  // this order type has no fields for.
+  function buildOrderConfirmationMessage(order: PartyOrder): string {
+    const lines = [
+      `Dear Sir,`,
+      ``,
+      `Kindly check and confirm the following order details:`,
+      ``,
+      `*ORDER DETAILS*`,
+      `Shop: ${order.shopName}`,
+      `Model: ${order.model}`,
+      order.size ? `Size: ${order.size}${order.sizeUnit ? ` ${order.sizeUnit}` : ''}` : null,
+      order.finish ? `Finish: ${order.finish}` : null,
+      `Quantity: ${order.qty}`,
+      order.details ? `` : null,
+      order.details ? `Details: ${order.details}` : null,
+      ``,
+      `*PAYMENT DETAILS*`,
+      `Price per unit: ₹${order.price ?? 0}`,
+      `Total Amount: ₹${order.totalAmount ?? 0}`,
+      order.receivedAmount ? `Received: ₹${order.receivedAmount}` : null,
+      `Balance Amount: ₹${order.balanceAmount ?? order.totalAmount ?? 0}`,
+      ``,
+      `Please check all the above details carefully. Once confirmed, changes cannot be made. If everything is correct, kindly reply:`,
+      ``,
+      `"Confirmed – All Details OK."`,
+      ``,
+      `Thank you.`,
+    ].filter((l) => l !== null);
+    return lines.join('\n');
+  }
+
   function handleSendWhatsApp(order: PartyOrder) {
     openWhatsApp({
       recipientName: (order.shopName ?? '') || 'Shop',
       recipientPhone: order.phone ?? undefined,
-      defaultMessage: `New Order
-Shop: ${order.shopName}
-Model: ${order.model}
-Quantity: ${order.qty}
-Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
+      defaultMessage: buildOrderConfirmationMessage(order),
+      defaultImageUrl: '/wa-template.jpeg',
     });
   }
 
@@ -371,6 +409,19 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
               </FormField>
             </FormRow>
             <FormRow>
+              <FormField label="Size">
+                <input
+                  className="input"
+                  placeholder="e.g. 78x72"
+                  value={form.size}
+                  onChange={(e) => setForm((f) => ({ ...f, size: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Size Unit">
+                <UnitSelect value={form.sizeUnit} onChange={(v) => setForm((f) => ({ ...f, sizeUnit: v }))} />
+              </FormField>
+            </FormRow>
+            <FormRow>
               <FormField label="Finish">
                 <input className="input" value={form.finish} onChange={(e) => setForm((f) => ({ ...f, finish: e.target.value }))} placeholder="Teak-Finish / Rose Wood" />
               </FormField>
@@ -456,6 +507,14 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
             payments={paymentsOrder.payments ?? []}
             canDelete={hasRole('ADMIN')}
             canAdd={hasRole('ADMIN')}
+            onSendWhatsApp={(message) =>
+              openWhatsApp({
+                recipientName: paymentsOrder.shopName || 'Shop',
+                recipientPhone: paymentsOrder.phone ?? undefined,
+                defaultMessage: message,
+                defaultImageUrl: '/wa-template.jpeg',
+              })
+            }
             onAddPayment={async (payload) => {
               await api.post(`/party-orders/${paymentsOrder.id}/payments`, payload);
               await refreshPaymentsOrder(paymentsOrder.id);
@@ -520,6 +579,7 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
             phone: whatsappOptions.recipientPhone,
           }}
           defaultMessage={whatsappOptions.defaultMessage}
+          defaultImageUrl={whatsappOptions.defaultImageUrl}
           onSuccess={() => mutate()}
         />
       )}

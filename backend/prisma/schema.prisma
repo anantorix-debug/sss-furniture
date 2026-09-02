@@ -188,6 +188,12 @@ model CustomerOrder {
   address            String?
   deliveryLocation   String?
   product            String
+  // Dimensions kept separate from the free-text product name/description
+  // (e.g. size "78x72", sizeUnit "Inch") so they can be shown, filtered, and
+  // put into WhatsApp templates as their own field rather than parsed out
+  // of a string like "Z-Model 78*72 -BC -COT".
+  size               String?
+  sizeUnit           String?
   colour             String?
   carvingRequired    Boolean        @default(false)
   specialInstructions String?
@@ -278,6 +284,9 @@ model PartyOrder {
   shopName           String
   phone              String?
   model              String
+  // See the identical note on CustomerOrder.size/sizeUnit.
+  size               String?
+  sizeUnit           String?
   finish             String?
   details            String?
   qty                Int            @default(1)

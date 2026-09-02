@@ -27,6 +27,11 @@ interface WhatsAppModalProps {
   };
   onSuccess?: () => void;
   defaultMessage?: string;
+  // A path under /public (e.g. "/wa-template.jpeg") to auto-attach as the
+  // outgoing media, for templated sends (order confirmation, payment
+  // update) that always go out with the same branded header image. Still
+  // removable/replaceable via the file picker like any other attachment.
+  defaultImageUrl?: string;
 }
 
 export function WhatsAppModal({
@@ -34,6 +39,7 @@ export function WhatsAppModal({
   recipientInfo,
   onSuccess,
   defaultMessage = '',
+  defaultImageUrl,
 }: WhatsAppModalProps) {
   const router = useRouter();
   const [selectedChat, setSelectedChat] = useState<WhatsappChat | null>(null);
@@ -86,6 +92,31 @@ export function WhatsAppModal({
     setError(null);
     setSuccess(false);
   }, [defaultMessage]);
+
+  // Pre-fill the chat search with the recipient's known phone number so the
+  // right contact is usually the only (or first) result, instead of making
+  // the sender hunt through the full chat list every time.
+  useEffect(() => {
+    if (recipientInfo.phone) setSearchQuery(recipientInfo.phone);
+  }, [recipientInfo.phone]);
+
+  useEffect(() => {
+    if (!defaultImageUrl) return;
+    let cancelled = false;
+    fetch(defaultImageUrl)
+      .then((res) => res.blob())
+      .then((blob) => {
+        if (cancelled) return;
+        const filename = defaultImageUrl.split('/').pop() || 'image.jpg';
+        setMediaFile(new File([blob], filename, { type: blob.type || 'image/jpeg' }));
+      })
+      .catch(() => {
+        // Non-fatal - sender can still attach a file manually.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [defaultImageUrl]);
 
   const filteredChats = chats?.filter(
     (chat) =>
