@@ -4,6 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { join } from 'path';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import type { Request, Response } from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -36,6 +37,9 @@ async function bootstrap() {
   );
 
   app.setGlobalPrefix('api');
+
+  // Health check — used by Docker HEALTHCHECK and deployment platforms
+  app.getHttpAdapter().get('/api/health', (_req: Request, res: Response) => res.send('ok'));
 
   const port = process.env.PORT ?? 4000;
   await app.listen(port);

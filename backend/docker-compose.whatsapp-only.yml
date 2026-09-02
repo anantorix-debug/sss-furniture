@@ -1,39 +1,46 @@
 version: '3.8'
 
 # ============================================================================
-# WHATSAPP-ONLY DOCKER SETUP
+# WHATSAPP-ONLY DOCKER SETUP (dev mode, hot-reload)
 # ============================================================================
-# Use this when API and DB run locally, only WhatsApp runs in Docker.
-# This is useful for production where WhatsApp needs isolated chromium/puppeteer.
+# Runs the backend inside Docker (for a real Chromium, needed by
+# whatsapp-web.js) while your source code is bind-mounted from the host, so
+# `npm run dev` inside the container watches and rebuilds on every save —
+# same workflow as running it locally, just with Chromium guaranteed.
 #
-# Usage:
-#   docker-compose -f docker-compose.whatsapp-only.yml up -d
-#   (run from backend/ folder)
+# Usage (from backend/ folder):
+#   docker-compose -f docker-compose.whatsapp-only.yml up
 #
-# Environment:
-#   - Connect API to this container via network: whatsapp_network
-#   - Pass WHATSAPP_API_URL=http://localhost:4001 (if exposing) or
-#     http://whatsapp:4000 (if on same network)
+# Requires a running MySQL reachable from the container. On Windows/Mac,
+# `host.docker.internal` reaches services on your host machine (e.g. WampServer).
 
 services:
   whatsapp:
     build:
       context: .
-      dockerfile: Dockerfile.whatsapp
+      dockerfile: Dockerfile
+    command: npm run dev
     ports:
-      - "4001:4000"  # WhatsApp service on separate port
+      - "4000:4000"
     container_name: sss-whatsapp
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: 4000
 
-      # WhatsApp specific config
+      # Point at your host's MySQL (WampServer default: root, no password)
+      DATABASE_URL: "mysql://root:@host.docker.internal:3306/sss"
+
+      CORS_ORIGIN: "http://localhost:3000"
+      JWT_ACCESS_SECRET: "dev-access-secret-change-in-production"
+      JWT_ACCESS_EXPIRES_IN: "15m"
+      JWT_REFRESH_SECRET: "dev-refresh-secret-change-in-production"
+      JWT_REFRESH_EXPIRES_IN: "7d"
+
+      # WhatsApp
       WHATSAPP_ENABLED: "true"
       WWEBJS_AUTH_PATH: /app/.wwebjs_auth
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_SKIP_DOWNLOAD: "true"
-
-      # Rate limiting
       WHATSAPP_MIN_DELAY_MS: 4000
       WHATSAPP_MAX_DELAY_MS: 9000
       WHATSAPP_MAX_PER_RECIPIENT_PER_DAY: 5
@@ -42,25 +49,19 @@ services:
       WHATSAPP_SEND_TIMEOUT_MS: 30000
       WHATSAPP_LID_RESOLUTION_TIMEOUT_MS: 8000
 
-      # Database (point to local DB or remote)
-      DATABASE_URL: "mysql://root:root@host.docker.internal:3306/sss"
-
     volumes:
-      - .wwebjs_auth:/app/.wwebjs_auth
-      - whatsapp-session:/app/data/whatsapp-session
-    networks:
-      - whatsapp_network
+      # Live-reload: source and config from the host
+      - ./src:/app/src
+      - ./prisma:/app/prisma
+      - ./uploads:/app/uploads
+      # Session persistence across container restarts
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+      # Keep the container's own node_modules (don't shadow with host's)
+      - /app/node_modules
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/api/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-
-networks:
-  whatsapp_network:
-    driver: bridge
-
-volumes:
-  whatsapp-session:
+      start_period: 15s
