@@ -8,6 +8,7 @@ version: '3.8'
 #
 # Usage:
 #   docker-compose -f docker-compose.whatsapp-only.yml up -d
+#   (run from backend/ folder)
 #
 # Environment:
 #   - Connect API to this container via network: whatsapp_network
@@ -17,7 +18,7 @@ version: '3.8'
 services:
   whatsapp:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile.whatsapp
     ports:
       - "4001:4000"  # WhatsApp service on separate port
@@ -45,8 +46,8 @@ services:
       DATABASE_URL: "mysql://root:root@host.docker.internal:3306/sss"
 
     volumes:
-      - ./.wwebjs_auth:/app/.wwebjs_auth
-      - ./data/whatsapp-session:/app/data/whatsapp-session
+      - .wwebjs_auth:/app/.wwebjs_auth
+      - whatsapp-session:/app/data/whatsapp-session
     networks:
       - whatsapp_network
     restart: unless-stopped
@@ -60,3 +61,6 @@ services:
 networks:
   whatsapp_network:
     driver: bridge
+
+volumes:
+  whatsapp-session:
