@@ -1,0 +1,62 @@
+version: '3.8'
+
+# ============================================================================
+# WHATSAPP-ONLY DOCKER SETUP
+# ============================================================================
+# Use this when API and DB run locally, only WhatsApp runs in Docker.
+# This is useful for production where WhatsApp needs isolated chromium/puppeteer.
+#
+# Usage:
+#   docker-compose -f docker-compose.whatsapp-only.yml up -d
+#
+# Environment:
+#   - Connect API to this container via network: whatsapp_network
+#   - Pass WHATSAPP_API_URL=http://localhost:4001 (if exposing) or
+#     http://whatsapp:4000 (if on same network)
+
+services:
+  whatsapp:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.whatsapp
+    ports:
+      - "4001:4000"  # WhatsApp service on separate port
+    container_name: sss-whatsapp
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+
+      # WhatsApp specific config
+      WHATSAPP_ENABLED: "true"
+      WWEBJS_AUTH_PATH: /app/.wwebjs_auth
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+
+      # Rate limiting
+      WHATSAPP_MIN_DELAY_MS: 4000
+      WHATSAPP_MAX_DELAY_MS: 9000
+      WHATSAPP_MAX_PER_RECIPIENT_PER_DAY: 5
+      WHATSAPP_MAX_PER_HOUR: 30
+      WHATSAPP_MAX_QUEUE_DEPTH: 50
+      WHATSAPP_SEND_TIMEOUT_MS: 30000
+      WHATSAPP_LID_RESOLUTION_TIMEOUT_MS: 8000
+
+      # Database (point to local DB or remote)
+      DATABASE_URL: "mysql://root:root@host.docker.internal:3306/sss"
+
+    volumes:
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+      - ./data/whatsapp-session:/app/data/whatsapp-session
+    networks:
+      - whatsapp_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/api/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  whatsapp_network:
+    driver: bridge
