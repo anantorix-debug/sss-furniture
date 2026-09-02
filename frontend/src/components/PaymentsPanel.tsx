@@ -1,8 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { formatCurrency, formatDate } from '@/lib/format';
-import type { Payment } from '@/types';
+import { Chip, type ChipColor } from '@/components/StatusBadge';
+import type { Payment, PaymentType } from '@/types';
+
+const TYPE_LABEL: Record<PaymentType, string> = {
+  ADVANCE: 'Advance',
+  PARTIAL: 'Partial',
+  BALANCE: 'Balance',
+  FULL: 'Full',
+};
+
+const TYPE_CHIP: Record<PaymentType, ChipColor> = {
+  ADVANCE: 'blue',
+  PARTIAL: 'amber',
+  BALANCE: 'green',
+  FULL: 'darkGreen',
+};
+
+// Auto-suggest the same way the backend does, so the dropdown starts on
+// the right value instead of always defaulting to one choice - first
+// payment against the order is the Advance, one that clears the balance
+// is the Balance (or Full if it's also the only one), else Partial.
+function suggestType(totalAmount: number, totalReceived: number, payments: Payment[], newAmount: number): PaymentType {
+  const isFirst = payments.length === 0;
+  const willClear = totalReceived + newAmount >= totalAmount - 0.01;
+  if (willClear) return isFirst ? 'FULL' : 'BALANCE';
+  return isFirst ? 'ADVANCE' : 'PARTIAL';
+}
 
 export function PaymentsPanel({
   totalAmount,
@@ -18,30 +44,37 @@ export function PaymentsPanel({
   totalReceived: number;
   balanceAmount: number;
   payments: Payment[];
-  onAddPayment: (payload: { date: string; amount: number; mode?: string; note?: string }) => Promise<void>;
+  onAddPayment: (payload: { date: string; amount: number; type?: PaymentType; mode?: string; note?: string }) => Promise<void>;
   onDeletePayment?: (paymentId: string) => Promise<void>;
   canDelete?: boolean;
   canAdd?: boolean;
 }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState('');
+  const [type, setType] = useState<PaymentType | ''>('');
   const [mode, setMode] = useState('UPI');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const numAmount = parseFloat(amount) || 0;
+  const autoType = useMemo(
+    () => suggestType(totalAmount, totalReceived, payments, numAmount),
+    [totalAmount, totalReceived, payments, numAmount],
+  );
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const numAmount = parseFloat(amount);
     if (!numAmount || numAmount <= 0) {
       setError('Enter a valid amount');
       return;
     }
     setSubmitting(true);
     try {
-      await onAddPayment({ date, amount: numAmount, mode, note: note || undefined });
+      await onAddPayment({ date, amount: numAmount, type: type || autoType, mode, note: note || undefined });
       setAmount('');
+      setType('');
       setNote('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add payment');
@@ -73,6 +106,7 @@ export function PaymentsPanel({
             <tr>
               <th>Date</th>
               <th>Amount</th>
+              <th>Type</th>
               <th>Mode</th>
               <th>Note</th>
               {canDelete && <th></th>}
@@ -81,7 +115,7 @@ export function PaymentsPanel({
           <tbody>
             {payments.length === 0 && (
               <tr>
-                <td colSpan={canDelete ? 5 : 4} className="text-center text-brand-400 py-4">
+                <td colSpan={canDelete ? 6 : 5} className="text-center text-brand-400 py-4">
                   No payments recorded yet
                 </td>
               </tr>
@@ -90,6 +124,7 @@ export function PaymentsPanel({
               <tr key={p.id}>
                 <td>{formatDate(p.date)}</td>
                 <td className="font-medium">{formatCurrency(p.amount)}</td>
+                <td>{p.type ? <Chip color={TYPE_CHIP[p.type]} label={TYPE_LABEL[p.type]} /> : '-'}</td>
                 <td>{p.mode ?? '-'}</td>
                 <td className="text-brand-500">{p.note ?? '-'}</td>
                 {canDelete && (
@@ -106,7 +141,7 @@ export function PaymentsPanel({
       </div>
 
       {canAdd && (
-        <form onSubmit={handleAdd} className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+        <form onSubmit={handleAdd} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
           <div>
             <label className="label">Date</label>
             <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} required />
@@ -114,6 +149,16 @@ export function PaymentsPanel({
           <div>
             <label className="label">Amount</label>
             <input type="number" min="0.01" step="0.01" className="input" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+          </div>
+          <div>
+            <label className="label">Type</label>
+            <select className="input" value={type} onChange={(e) => setType(e.target.value as PaymentType | '')}>
+              <option value="">Auto: {TYPE_LABEL[autoType]}</option>
+              <option value="ADVANCE">Advance</option>
+              <option value="PARTIAL">Partial</option>
+              <option value="BALANCE">Balance</option>
+              <option value="FULL">Full</option>
+            </select>
           </div>
           <div>
             <label className="label">Mode</label>
@@ -127,7 +172,7 @@ export function PaymentsPanel({
           <button type="submit" disabled={submitting} className="btn-primary h-[38px]">
             {submitting ? 'Adding...' : 'Add'}
           </button>
-          <div className="col-span-2 sm:col-span-4">
+          <div className="col-span-2 sm:col-span-5">
             <input type="text" placeholder="Note (optional)" className="input" value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
         </form>

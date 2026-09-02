@@ -60,7 +60,6 @@ function CarpenterDetailContent() {
   const { data: carpenter, isLoading, mutate } = useSWR<CarpenterDetail>(`/carpenters/${id}`, fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
   const {
-    canUseWhatsApp,
     showModal,
     whatsappOptions,
     openWhatsApp,

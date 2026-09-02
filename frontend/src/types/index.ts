@@ -23,10 +23,13 @@ export interface User {
   updatedAt: string;
 }
 
+export type PaymentType = 'ADVANCE' | 'PARTIAL' | 'BALANCE' | 'FULL';
+
 export interface Payment {
   id: string;
   date: string;
   amount: number;
+  type?: PaymentType;
   mode?: string | null;
   note?: string | null;
   createdAt: string;

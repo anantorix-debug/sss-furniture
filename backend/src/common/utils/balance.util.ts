@@ -21,3 +21,20 @@ export function computeBalance(total: number | string, payments: AmountLike[]) {
     balanceAmount: Math.round((totalNum - totalReceived) * 100) / 100,
   };
 }
+
+export type SuggestedPaymentType = 'ADVANCE' | 'PARTIAL' | 'BALANCE' | 'FULL';
+
+// Auto-labels a payment the same way the original tracking sheet reads:
+// the first payment against an order is the Advance, a payment that clears
+// the balance is the Balance (or Full, if it's also the first and only
+// one), anything else in between is Partial. Always overridable by an
+// explicit `type` on the request - this is only the default.
+export function suggestPaymentType(orderValue: number, existingPayments: AmountLike[], newAmount: number): SuggestedPaymentType {
+  const existingPaid = sumAmounts(existingPayments);
+  const isFirst = existingPayments.length === 0;
+  const totalAfter = existingPaid + newAmount;
+  const willClearBalance = totalAfter >= orderValue - 0.01; // tolerate rounding
+
+  if (willClearBalance) return isFirst ? 'FULL' : 'BALANCE';
+  return isFirst ? 'ADVANCE' : 'PARTIAL';
+}

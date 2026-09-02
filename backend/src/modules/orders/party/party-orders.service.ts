@@ -8,7 +8,7 @@ import { CreatePaymentDto } from '../customer/dto/create-payment.dto';
 import { AssignProductionDto } from '../customer/dto/assign-production.dto';
 import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
 import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
-import { computeBalance } from '../../../common/utils/balance.util';
+import { computeBalance, suggestPaymentType } from '../../../common/utils/balance.util';
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { Role } from '../../../common/enums/role.enum';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
@@ -150,12 +150,14 @@ export class PartyOrdersService {
   }
 
   async addPayment(orderId: string, dto: CreatePaymentDto, userId: string) {
-    await this.findOne(orderId);
+    const existing = await this.findOne(orderId);
+    const type = dto.type ?? suggestPaymentType(Number(existing.totalAmount), existing.payments, dto.amount);
     await this.prisma.partyOrderPayment.create({
       data: {
         orderId,
         date: new Date(dto.date),
         amount: dto.amount,
+        type,
         mode: dto.mode,
         note: dto.note,
         createdById: userId,

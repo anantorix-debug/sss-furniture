@@ -26,6 +26,18 @@ enum DeliveryStatus {
   CANCELLED
 }
 
+// Structured payment stage - matches the original tracking sheet's
+// ADVANCE | DATE-RECEIVED | BALANCE columns instead of relying on someone
+// typing "Advance" into a free-text note. Auto-suggested by the service
+// (first payment -> ADVANCE, one that zeroes the balance -> BALANCE,
+// anything in between -> PARTIAL) but always overridable by whoever logs it.
+enum PaymentType {
+  ADVANCE
+  PARTIAL
+  BALANCE
+  FULL
+}
+
 enum WorkStatus {
   ASSIGNED
   IN_PROGRESS
@@ -240,6 +252,7 @@ model CustomerOrderPayment {
   order   CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   date    DateTime
   amount  Decimal       @db.Decimal(12, 2)
+  type    PaymentType   @default(PARTIAL)
   mode    String? // UPI / CASH / GPAY / ...
   note    String?
 
@@ -309,6 +322,7 @@ model PartyOrderPayment {
   order   PartyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   date    DateTime
   amount  Decimal    @db.Decimal(12, 2)
+  type    PaymentType @default(PARTIAL)
   mode    String?
   note    String?
 
