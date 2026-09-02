@@ -74,6 +74,15 @@ export class WhatsappService implements OnModuleInit {
       if (payload.kind === 'chat') {
         return this.client.sendToChat(chatId || payload.chatId, payload.text);
       }
+      if (payload.kind === 'chat-document') {
+        return this.client.sendMediaToChat(
+          chatId || payload.chatId,
+          payload.buffer,
+          payload.filename,
+          payload.mimetype,
+          payload.caption,
+        );
+      }
       return this.client.sendGroupMessage(payload.groupId, payload.text);
     });
   }
@@ -293,6 +302,43 @@ export class WhatsappService implements OnModuleInit {
       }
       const errorMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(`[WHATSAPP SEND FAILED] chatId=${chatId}, error=${errorMsg}`);
+      return { sent: false, reason: 'send_failed', error: errorMsg, chatId };
+    }
+  }
+
+  // Media is never written to disk anywhere in this path: the controller
+  // parses the upload with multer's in-memory storage, hands the Buffer
+  // straight here, and it's discarded once the WhatsApp send resolves - see
+  // whatsapp-client.ts#sendMediaToChat for the base64-in-memory MessageMedia
+  // construction.
+  async sendMediaMessage(
+    chatId: string,
+    doc: WhatsappDocument,
+  ): Promise<{ sent: boolean; reason?: string; error?: string; chatId?: string }> {
+    const status = this.client.getStatus();
+    if (!status.operational) {
+      return { sent: false, reason: 'whatsapp_not_ready', chatId };
+    }
+
+    if (!chatId || !doc.buffer?.length) {
+      throw new BadRequestException('chatId and a file are required');
+    }
+
+    try {
+      let rateLimitKey = chatId;
+      if (chatId.endsWith('@c.us')) {
+        rateLimitKey = chatId.replace('@c.us', '');
+      }
+
+      await this.queue.enqueue(rateLimitKey, { kind: 'chat-document', chatId, ...doc }, chatId);
+      return { sent: true, chatId };
+    } catch (err) {
+      if (err instanceof WhatsappRateLimitError) {
+        this.logger.warn(`WhatsApp media send rate-limited for ${chatId}: ${err.message}`);
+        return { sent: false, reason: 'rate_limited', error: err.message, chatId };
+      }
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[WHATSAPP MEDIA SEND FAILED] chatId=${chatId}, error=${errorMsg}`);
       return { sent: false, reason: 'send_failed', error: errorMsg, chatId };
     }
   }

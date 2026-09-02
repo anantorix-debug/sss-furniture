@@ -34,6 +34,36 @@ export async function uploadProductImage(productId: string, file: File): Promise
   }
 }
 
+export const WHATSAPP_MEDIA_MAX_BYTES = 64 * 1024 * 1024;
+
+export interface WhatsappSendResult {
+  sent: boolean;
+  reason?: string;
+  error?: string;
+  chatId?: string;
+}
+
+// Multipart, not JSON, so this bypasses apiFetch's Content-Type: application/json
+// - the browser sets the multipart boundary header itself. The file goes
+// straight from the <input> into this FormData and out over the wire; it's
+// never written anywhere on this frontend either.
+export async function sendWhatsappMedia(chatId: string, file: File, caption?: string): Promise<WhatsappSendResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (caption) formData.append('caption', caption);
+  const res = await fetch(`${API_BASE_URL}/whatsapp/send-media/${encodeURIComponent(chatId)}`, {
+    method: 'POST',
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    credentials: 'include',
+    body: formData,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new ApiError(res.status, data?.message || 'Failed to send media', data);
+  }
+  return data as WhatsappSendResult;
+}
+
 let accessToken: string | null = null;
 let refreshPromise: Promise<string | null> | null = null;
 

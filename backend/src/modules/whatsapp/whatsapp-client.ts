@@ -516,66 +516,62 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     throw new Error(`Unsupported WhatsApp chat ID format: ${id}`);
   }
 
+  // Shared by sendToChat (text) and sendMediaToChat (media) - resolves
+  // whatever chat ID shape the frontend hands over (@g.us group, @c.us
+  // contact, raw phone digits, or an @lid that needs async resolution) down
+  // to the one WhatsApp will actually accept as a sendMessage target.
+  private async resolveIncomingChatId(chatId: string): Promise<string> {
+    const incomingChatId = chatId.trim();
+    this.logger.log(`[WA SEND] Incoming chat ID: ${incomingChatId}`);
+
+    if (incomingChatId.endsWith('@g.us')) {
+      this.logger.log(`[WA SEND] Detected chat type: GROUP`);
+      return incomingChatId;
+    }
+    if (incomingChatId.endsWith('@c.us')) {
+      this.logger.log(`[WA SEND] Detected chat type: CONTACT`);
+      const numberId = await this.client.getNumberId(incomingChatId).catch(() => null);
+      if (!numberId) throw new Error(`Phone number is not registered on WhatsApp: ${incomingChatId}`);
+      return numberId._serialized;
+    }
+    if (/^\d+$/.test(incomingChatId)) {
+      this.logger.log(`[WA SEND] Normalizing raw phone: ${incomingChatId}`);
+      const chatIdWithSuffix = `${incomingChatId}@c.us`;
+      const numberId = await this.client.getNumberId(chatIdWithSuffix).catch(() => null);
+      if (!numberId) throw new Error(`Phone number is not registered on WhatsApp: ${incomingChatId}`);
+      this.logger.log(`[WA SEND] Normalized to: ${numberId._serialized}`);
+      return numberId._serialized;
+    }
+    if (incomingChatId.endsWith('@lid')) {
+      this.logger.log(`[WA SEND] Detected chat type: LID, resolving: ${incomingChatId}`);
+      try {
+        const resolvePromise = this.resolveChatIdForSending(incomingChatId);
+        const resolveTimeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`LID resolution timeout after ${this.lidResolutionTimeoutMs}ms`)), this.lidResolutionTimeoutMs)
+        );
+        const resolved = await Promise.race([resolvePromise, resolveTimeoutPromise]);
+        this.logger.log(`[WA SEND] LID resolved to: ${resolved}`);
+        return resolved;
+      } catch (resolveErr) {
+        const msg = resolveErr instanceof Error ? resolveErr.message : String(resolveErr);
+        this.logger.error(`[WA SEND] LID resolution failed: ${msg}`);
+        throw new Error(`Unable to resolve LID. ${msg}`);
+      }
+    }
+    throw new Error(`Unsupported WhatsApp chat ID format: ${incomingChatId}`);
+  }
+
   async sendToChat(chatId: string, message: string) {
     if (!this.isOperational()) {
       throw new Error(`WhatsApp client not operational. State: ${this.state}`);
     }
-
     if (!chatId || !message?.trim()) {
       throw new Error('chatId and message are required');
     }
 
     try {
-      const incomingChatId = chatId.trim();
-      this.logger.log(`[WA SEND] Incoming chat ID: ${incomingChatId}`);
+      const resolvedChatId = await this.resolveIncomingChatId(chatId);
 
-      let resolvedChatId: string;
-
-      // For @g.us (groups), @c.us (individuals), and raw phone - resolve instantly
-      if (incomingChatId.endsWith('@g.us')) {
-        this.logger.log(`[WA SEND] Detected chat type: GROUP`);
-        resolvedChatId = incomingChatId;
-      } else if (incomingChatId.endsWith('@c.us')) {
-        this.logger.log(`[WA SEND] Detected chat type: CONTACT`);
-        // Validate that the number is registered on WhatsApp
-        const numberId = await this.client.getNumberId(incomingChatId).catch(() => null);
-        if (!numberId) {
-          throw new Error(`Phone number is not registered on WhatsApp: ${incomingChatId}`);
-        }
-        resolvedChatId = numberId._serialized;
-      } else if (/^\d+$/.test(incomingChatId)) {
-        this.logger.log(`[WA SEND] Normalizing raw phone: ${incomingChatId}`);
-        const chatIdWithSuffix = `${incomingChatId}@c.us`;
-        // Validate that the number is registered on WhatsApp
-        const numberId = await this.client.getNumberId(chatIdWithSuffix).catch(() => null);
-        if (!numberId) {
-          throw new Error(`Phone number is not registered on WhatsApp: ${incomingChatId}`);
-        }
-        resolvedChatId = numberId._serialized;
-        this.logger.log(`[WA SEND] Normalized to: ${resolvedChatId}`);
-      } else if (incomingChatId.endsWith('@lid')) {
-        // Only @lid needs timeout protection during resolution
-        this.logger.log(`[WA SEND] Detected chat type: LID`);
-        this.logger.log(`[WA SEND] Resolving LID: ${incomingChatId}`);
-
-        try {
-          const resolvePromise = this.resolveChatIdForSending(incomingChatId);
-          const resolveTimeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`LID resolution timeout after ${this.lidResolutionTimeoutMs}ms`)), this.lidResolutionTimeoutMs)
-          );
-
-          resolvedChatId = await Promise.race([resolvePromise, resolveTimeoutPromise]);
-          this.logger.log(`[WA SEND] LID resolved to: ${resolvedChatId}`);
-        } catch (resolveErr) {
-          const resolveErrorMsg = resolveErr instanceof Error ? resolveErr.message : String(resolveErr);
-          this.logger.error(`[WA SEND] LID resolution failed: ${resolveErrorMsg}`);
-          throw new Error(`Unable to resolve LID. ${resolveErrorMsg}`);
-        }
-      } else {
-        throw new Error(`Unsupported WhatsApp chat ID format: ${incomingChatId}`);
-      }
-
-      // Send message with timeout
       this.logger.log(`[WA SEND] Sending message to: ${resolvedChatId}`);
       const sendPromise = this.client.sendMessage(resolvedChatId, message);
       const sendTimeoutPromise = new Promise<never>((_, reject) =>
@@ -590,6 +586,45 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
         const sendErrorMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
         this.logger.error(`[WA SEND] Send operation failed: ${sendErrorMsg}`);
         throw new Error(`Failed to send message: ${sendErrorMsg}`);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[WA SEND] Final error: chatId=${chatId}, error=${errorMsg}`);
+      throw err;
+    }
+  }
+
+  // Media never touches disk: the caller (multer, memory storage - see
+  // whatsapp.controller.ts) hands over the file as an in-memory Buffer, it's
+  // base64-encoded straight into whatsapp-web.js's MessageMedia, and the
+  // buffer is discarded once this call returns. Nothing is written under
+  // apps/uploads or any other project storage path.
+  async sendMediaToChat(chatId: string, buffer: Buffer, filename: string, mimetype: string, caption?: string) {
+    if (!this.isOperational()) {
+      throw new Error(`WhatsApp client not operational. State: ${this.state}`);
+    }
+    if (!chatId || !buffer?.length) {
+      throw new Error('chatId and a file are required');
+    }
+
+    try {
+      const resolvedChatId = await this.resolveIncomingChatId(chatId);
+      const media = new MessageMedia(mimetype, buffer.toString('base64'), filename);
+
+      this.logger.log(`[WA SEND] Sending media (${mimetype}, ${buffer.length} bytes) to: ${resolvedChatId}`);
+      const sendPromise = this.client.sendMessage(resolvedChatId, media, caption ? { caption } : undefined);
+      const sendTimeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`SendMessage timeout after ${this.sendTimeoutMs}ms`)), this.sendTimeoutMs)
+      );
+
+      try {
+        const result = await Promise.race([sendPromise, sendTimeoutPromise]);
+        this.logger.log(`[WA SEND] Media sent successfully`);
+        return result;
+      } catch (sendErr) {
+        const sendErrorMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+        this.logger.error(`[WA SEND] Media send failed: ${sendErrorMsg}`);
+        throw new Error(`Failed to send media: ${sendErrorMsg}`);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);

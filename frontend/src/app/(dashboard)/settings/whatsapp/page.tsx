@@ -1,11 +1,21 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, sendWhatsappMedia, WHATSAPP_MEDIA_MAX_BYTES } from '@/lib/api';
 import { RoleGate } from '@/components/RoleGate';
 import type { WhatsappChat } from '@/types';
+
+// WhatsApp renders no HTML - these are its own native markdown wrappers, so
+// this toolbar wraps the textarea's selection with the syntax WhatsApp
+// itself will format on the recipient's end.
+const FORMAT_BUTTONS: { label: string; wrap: string; title: string }[] = [
+  { label: 'B', wrap: '*', title: 'Bold' },
+  { label: 'I', wrap: '_', title: 'Italic' },
+  { label: 'S', wrap: '~', title: 'Strikethrough' },
+  { label: '</>', wrap: '```', title: 'Monospace' },
+];
 
 interface WhatsappStatus {
   ready: boolean;
@@ -48,6 +58,34 @@ function WhatsappSettingsContent() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function applyFormat(wrap: string) {
+    const el = textareaRef.current;
+    if (!el) return;
+    const { selectionStart, selectionEnd, value } = el;
+    const selected = value.slice(selectionStart, selectionEnd) || 'text';
+    const next = value.slice(0, selectionStart) + wrap + selected + wrap + value.slice(selectionEnd);
+    setMessageText(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(selectionStart + wrap.length, selectionStart + wrap.length + selected.length);
+    });
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setSendError(null);
+    if (file && file.size > WHATSAPP_MEDIA_MAX_BYTES) {
+      setSendError('File must be 64 MB or less.');
+      setMediaFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    setMediaFile(file);
+  }
 
   const filteredChats = useMemo(() => {
     if (!chats) return [];
@@ -76,15 +114,22 @@ function WhatsappSettingsContent() {
   }
 
   async function handleSendMessage() {
-    if (!selectedChat || !messageText.trim()) return;
+    if (!selectedChat || (!messageText.trim() && !mediaFile)) return;
     setSending(true);
     setSendError(null);
     setSendSuccess(false);
 
     try {
-      await api.post(`/whatsapp/send/${encodeURIComponent(selectedChat.id)}`, { message: messageText });
+      if (mediaFile) {
+        const result = await sendWhatsappMedia(selectedChat.id, mediaFile, messageText.trim() || undefined);
+        if (!result.sent) throw new ApiError(502, result.error || result.reason || 'Failed to send media', result);
+      } else {
+        await api.post(`/whatsapp/send/${encodeURIComponent(selectedChat.id)}`, { message: messageText });
+      }
       setSendSuccess(true);
       setMessageText('');
+      setMediaFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       setTimeout(() => setSendSuccess(false), 3000);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -238,22 +283,65 @@ function WhatsappSettingsContent() {
                 )}
               </div>
 
+              <div className="flex gap-1 border border-brand-100 rounded-t-lg border-b-0 bg-brand-50 px-2 py-1">
+                {FORMAT_BUTTONS.map((btn) => (
+                  <button
+                    key={btn.label}
+                    type="button"
+                    title={btn.title}
+                    onClick={() => applyFormat(btn.wrap)}
+                    className="px-2 py-1 text-xs font-semibold rounded hover:bg-brand-100 text-brand-700"
+                  >
+                    {btn.label}
+                  </button>
+                ))}
+              </div>
+
               <textarea
+                ref={textareaRef}
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
-                placeholder="Type your message here..."
+                placeholder={mediaFile ? 'Add a caption (optional)...' : 'Type your message here...'}
                 rows={4}
-                className="input w-full resize-none"
+                className="input w-full resize-none rounded-t-none"
               />
 
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFileChange}
+                  className="text-xs text-brand-600 flex-1"
+                />
+                {mediaFile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMediaFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="text-xs text-red-500 hover:underline whitespace-nowrap"
+                  >
+                    Remove file
+                  </button>
+                )}
+              </div>
+              {mediaFile && (
+                <p className="text-xs text-brand-500">
+                  📎 {mediaFile.name} ({(mediaFile.size / 1024).toFixed(0)} KB) — sent directly, never stored on this server.
+                </p>
+              )}
+
               {sendError && <p className="text-xs text-red-600">{sendError}</p>}
-              {sendSuccess && <p className="text-xs text-emerald-600">✓ Message sent successfully</p>}
+              {sendSuccess && <p className="text-xs text-emerald-600">✓ Sent successfully</p>}
 
               <div className="flex gap-2">
                 <button
                   onClick={() => {
                     setSelectedChat(null);
                     setMessageText('');
+                    setMediaFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
                   }}
                   className="btn-secondary flex-1"
                   disabled={sending}
@@ -262,10 +350,10 @@ function WhatsappSettingsContent() {
                 </button>
                 <button
                   onClick={handleSendMessage}
-                  disabled={!messageText.trim() || sending}
+                  disabled={(!messageText.trim() && !mediaFile) || sending}
                   className="btn-primary flex-1"
                 >
-                  {sending ? 'Sending...' : 'Send Message'}
+                  {sending ? 'Sending...' : mediaFile ? 'Send File' : 'Send Message'}
                 </button>
               </div>
             </div>

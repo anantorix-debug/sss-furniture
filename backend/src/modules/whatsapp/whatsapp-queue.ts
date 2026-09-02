@@ -26,7 +26,8 @@ export type WhatsappPayload =
   | { kind: 'text'; text: string }
   | { kind: 'document'; buffer: Buffer; filename: string; mimetype: string; caption?: string }
   | { kind: 'group-text'; groupId: string; text: string }
-  | { kind: 'chat'; chatId: string; text: string };
+  | { kind: 'chat'; chatId: string; text: string }
+  | { kind: 'chat-document'; chatId: string; buffer: Buffer; filename: string; mimetype: string; caption?: string };
 
 interface QueueJob {
   phone: string;
