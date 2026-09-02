@@ -1,19 +1,19 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../audit/audit.service';
-import { CarpenterService } from '../carpenter/carpenter.service';
-import { PdfService } from '../pdf/pdf.service';
-import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../../audit/audit.service';
+import { CarpenterService } from '../../carpenter/carpenter.service';
+import { PdfService } from '../../pdf/pdf.service';
+import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { CreateCustomerOrderDto, CustomerOrderItemDto } from './dto/create-customer-order.dto';
 import { UpdateCustomerOrderDto } from './dto/update-customer-order.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { AssignProductionDto } from './dto/assign-production.dto';
 import { AssignEmployeeDto } from './dto/assign-employee.dto';
 import { UpdateModelNoDto } from './dto/update-model-no.dto';
-import { computeBalance } from '../common/utils/balance.util';
-import { generateJobNumber } from '../common/utils/job-number.util';
-import { Role } from '../common/enums/role.enum';
-import { AuthUser } from '../common/decorators/current-user.decorator';
+import { computeBalance } from '../../../common/utils/balance.util';
+import { generateJobNumber } from '../../../common/utils/job-number.util';
+import { Role } from '../../../common/enums/role.enum';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
 

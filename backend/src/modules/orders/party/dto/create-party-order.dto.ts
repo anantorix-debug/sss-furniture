@@ -1,5 +1,5 @@
 import { IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
-import { DeliveryStatus } from '../../common/enums/delivery-status.enum';
+import { DeliveryStatus } from '../../../../common/enums/delivery-status.enum';
 
 export class CreatePartyOrderDto {
   // Model No (cotNo) is intentionally NOT settable here - only the

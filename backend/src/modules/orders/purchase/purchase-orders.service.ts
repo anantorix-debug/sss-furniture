@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { WhatsappService } from '../whatsapp/whatsapp.service';
-import { PdfService } from '../pdf/pdf.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { WhatsappService } from '../../whatsapp/whatsapp.service';
+import { PdfService } from '../../pdf/pdf.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { RejectPurchaseOrderDto } from './dto/reject-purchase-order.dto';

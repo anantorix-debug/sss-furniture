@@ -1,8 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../audit/audit.service';
-import { Role } from '../common/enums/role.enum';
-import { sumAmounts } from '../common/utils/balance.util';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../../audit/audit.service';
+import { Role } from '../../../common/enums/role.enum';
+import { sumAmounts } from '../../../common/utils/balance.util';
 import { CreateRawMaterialDto } from './dto/create-raw-material.dto';
 import { UpdateRawMaterialDto } from './dto/update-raw-material.dto';
 import { StockInDto } from './dto/stock-in.dto';

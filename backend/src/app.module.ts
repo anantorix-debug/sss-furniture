@@ -14,6 +14,11 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { SearchModule } from './modules/search/search.module';
 import { PdfModule } from './modules/pdf/pdf.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
+import { CustomerOrdersModule } from './modules/orders/customer/customer-orders.module';
+import { PartyOrdersModule } from './modules/orders/party/party-orders.module';
+import { PurchaseOrdersModule } from './modules/orders/purchase/purchase-orders.module';
+import { ProductsModule } from './modules/inventory/products/products.module';
+import { RawMaterialsModule } from './modules/inventory/raw-materials/raw-materials.module';
 
 @Module({
   imports: [
@@ -31,6 +36,11 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
     SearchModule,
     PdfModule,
     SuppliersModule,
+    CustomerOrdersModule,
+    PartyOrdersModule,
+    PurchaseOrdersModule,
+    ProductsModule,
+    RawMaterialsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

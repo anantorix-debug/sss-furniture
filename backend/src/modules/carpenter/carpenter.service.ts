@@ -7,7 +7,7 @@ import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
 import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
-import { Role } from '../common/enums/role.enum';
+import { Role } from '../../common/enums/role.enum';
 
 const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
 

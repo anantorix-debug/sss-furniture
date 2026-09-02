@@ -1,6 +1,6 @@
 import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { DeliveryStatus } from '../../common/enums/delivery-status.enum';
+import { DeliveryStatus } from '../../../../common/enums/delivery-status.enum';
 
 export class CustomerOrderItemDto {
   @IsString()

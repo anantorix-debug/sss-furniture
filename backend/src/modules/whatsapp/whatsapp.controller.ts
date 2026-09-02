@@ -4,9 +4,9 @@ import { WhatsappService } from './whatsapp.service';
 import { SetGroupSettingDto } from './dto/set-group-setting.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../common/enums/role.enum';
-import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { Role } from '../../common/enums/role.enum';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 function parseWorkerType(value: string): WorkerType {
   if (!(value in WorkerType)) throw new BadRequestException(`Invalid worker type "${value}"`);

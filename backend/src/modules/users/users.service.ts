@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { Role } from '../common/enums/role.enum';
+import { Role } from '../../common/enums/role.enum';
 
 const SAFE_SELECT = {
   id: true,

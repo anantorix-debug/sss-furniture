@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { Role } from '../common/enums/role.enum';
+import { Role } from '../../common/enums/role.enum';
 
 describe('UsersService', () => {
   let prisma: any;

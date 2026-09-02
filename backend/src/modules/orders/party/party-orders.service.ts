@@ -1,17 +1,17 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../audit/audit.service';
-import { CarpenterService } from '../carpenter/carpenter.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../../audit/audit.service';
+import { CarpenterService } from '../../carpenter/carpenter.service';
 import { CreatePartyOrderDto } from './dto/create-party-order.dto';
 import { UpdatePartyOrderDto } from './dto/update-party-order.dto';
-import { CreatePaymentDto } from '../customer-orders/dto/create-payment.dto';
-import { AssignProductionDto } from '../customer-orders/dto/assign-production.dto';
-import { AssignEmployeeDto } from '../customer-orders/dto/assign-employee.dto';
-import { UpdateModelNoDto } from '../customer-orders/dto/update-model-no.dto';
-import { computeBalance } from '../common/utils/balance.util';
-import { generateJobNumber } from '../common/utils/job-number.util';
-import { Role } from '../common/enums/role.enum';
-import { AuthUser } from '../common/decorators/current-user.decorator';
+import { CreatePaymentDto } from '../customer/dto/create-payment.dto';
+import { AssignProductionDto } from '../customer/dto/assign-production.dto';
+import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
+import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
+import { computeBalance } from '../../../common/utils/balance.util';
+import { generateJobNumber } from '../../../common/utils/job-number.util';
+import { Role } from '../../../common/enums/role.enum';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 function withBalance<T extends { totalAmount: any; payments: { amount: any }[] }>(order: T) {
   const { totalReceived: receivedAmount, balanceAmount } = computeBalance(order.totalAmount, order.payments);

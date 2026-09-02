@@ -2,8 +2,8 @@ import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/
 import { SearchService } from './search.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
-import { Role } from '../common/enums/role.enum';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { Role } from '../../common/enums/role.enum';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('search')

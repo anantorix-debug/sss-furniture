@@ -2,15 +2,15 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { PartyOrdersService } from './party-orders.service';
 import { CreatePartyOrderDto } from './dto/create-party-order.dto';
 import { UpdatePartyOrderDto } from './dto/update-party-order.dto';
-import { CreatePaymentDto } from '../customer-orders/dto/create-payment.dto';
-import { AssignProductionDto } from '../customer-orders/dto/assign-production.dto';
-import { AssignEmployeeDto } from '../customer-orders/dto/assign-employee.dto';
-import { UpdateModelNoDto } from '../customer-orders/dto/update-model-no.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '../common/enums/role.enum';
-import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
+import { CreatePaymentDto } from '../customer/dto/create-payment.dto';
+import { AssignProductionDto } from '../customer/dto/assign-production.dto';
+import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
+import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { Roles } from '../../../common/decorators/roles.decorator';
+import { Role } from '../../../common/enums/role.enum';
+import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('party-orders')

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Role } from '../common/enums/role.enum';
-import { computeBalance } from '../common/utils/balance.util';
+import { Role } from '../../common/enums/role.enum';
+import { computeBalance } from '../../common/utils/balance.util';
 
 const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
 

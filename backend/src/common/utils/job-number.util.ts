@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '../../modules/prisma/prisma.service';
 
 // JOB-<year>-00001, sequential per calendar year - one shared sequence
 // across CustomerOrder and PartyOrder so a Job No unambiguously identifies
