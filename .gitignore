@@ -7,3 +7,4 @@ coverage/
 *.log
 .wwebjs_auth/
 .wwebjs_cache/
+*.tsbuildinfo
