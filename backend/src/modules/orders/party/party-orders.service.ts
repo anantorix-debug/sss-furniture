@@ -94,7 +94,7 @@ export class PartyOrdersService {
         details: dto.details,
         qty: dto.qty ?? 1,
         price: dto.price,
-        totalAmount: dto.totalAmount,
+        totalAmount: (dto.qty ?? 1) * dto.price,
         cashTrack: dto.cashTrack,
         courierTrack: dto.courierTrack,
         actualDeliveryDate: dto.actualDeliveryDate ? new Date(dto.actualDeliveryDate) : undefined,
@@ -116,7 +116,9 @@ export class PartyOrdersService {
   }
 
   async update(id: string, dto: UpdatePartyOrderDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+    const qty = dto.qty ?? existing.qty;
+    const price = dto.price ?? Number(existing.price);
     const order = await this.prisma.partyOrder.update({
       where: { id },
       data: {
@@ -128,7 +130,9 @@ export class PartyOrdersService {
         details: dto.details,
         qty: dto.qty,
         price: dto.price,
-        totalAmount: dto.totalAmount,
+        // Always recomputed from the effective qty/price, whichever
+        // changed - see the note on CreatePartyOrderDto.totalAmount.
+        totalAmount: dto.qty !== undefined || dto.price !== undefined ? qty * price : undefined,
         cashTrack: dto.cashTrack,
         courierTrack: dto.courierTrack,
         actualDeliveryDate: dto.actualDeliveryDate ? new Date(dto.actualDeliveryDate) : undefined,

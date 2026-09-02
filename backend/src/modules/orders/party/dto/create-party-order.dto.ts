@@ -38,9 +38,9 @@ export class CreatePartyOrderDto {
   @Min(0)
   price: number;
 
-  @IsNumber()
-  @Min(0)
-  totalAmount: number;
+  // Not accepted from the client - always server-computed as qty * price
+  // (see PartyOrdersService.create/update) so it can never drift out of
+  // sync with what was actually typed for qty/price.
 
   @IsString()
   @IsOptional()

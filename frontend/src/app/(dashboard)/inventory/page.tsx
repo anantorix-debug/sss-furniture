@@ -12,6 +12,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { StatCard } from '@/components/StatCard';
 import { Chip } from '@/components/StatusBadge';
 import { ProductImages } from '@/components/ProductImages';
+import { UnitSelect } from '@/components/UnitSelect';
 import { downloadCsv } from '@/lib/csv';
 import { assetUrl, uploadProductImage, validateProductImageFile } from '@/lib/api';
 import type { Product, RawMaterial, StockMovement, WorkerType } from '@/types';
@@ -391,7 +392,7 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
               </div>
               <div>
                 <label className="label">Unit</label>
-                <input className="input" value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))} placeholder="Nos / Set" />
+                <UnitSelect id="product-unit" value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} />
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -457,7 +458,7 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
                   <div className="grid grid-cols-2 sm:grid-cols-[1fr_120px_90px_100px_100px_100px_80px_auto] gap-2 sm:items-center">
                     <input className="input col-span-2 sm:col-span-1" placeholder="Name" required value={row.name} onChange={(e) => updateBulkRow(idx, { name: e.target.value })} />
                     <input className="input" placeholder="Category" value={row.category} onChange={(e) => updateBulkRow(idx, { category: e.target.value })} />
-                    <input className="input" placeholder="Unit" value={row.unit} onChange={(e) => updateBulkRow(idx, { unit: e.target.value })} />
+                    <UnitSelect id={`bulk-unit-${idx}`} value={row.unit} onChange={(v) => updateBulkRow(idx, { unit: v })} />
                     <input type="number" step="0.01" className="input" placeholder="Retail" required value={row.retailPrice} onChange={(e) => updateBulkRow(idx, { retailPrice: e.target.value })} />
                     <input type="number" step="0.01" className="input" placeholder="Wholesale" value={row.wholesalePrice} onChange={(e) => updateBulkRow(idx, { wholesalePrice: e.target.value })} />
                     <input type="number" step="0.01" className="input" placeholder="MFG" value={row.costPrice} onChange={(e) => updateBulkRow(idx, { costPrice: e.target.value })} />
@@ -659,7 +660,7 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
               </div>
               <div>
                 <label className="label">Unit</label>
-                <input className="input" required value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))} placeholder="sheet / cu ft / set" />
+                <UnitSelect id="material-unit" required value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} />
               </div>
             </div>
             <div>

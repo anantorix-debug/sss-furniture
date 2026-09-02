@@ -345,6 +345,13 @@ model SupplierPurchase {
   date        DateTime
   particulars String // e.g. "18mm 8*4 PLYWOOD"
   qty         Decimal? @db.Decimal(12, 2)
+  // Unit the qty/price are measured in - e.g. "Sathuram" for round/sawn
+  // timber logs (Maghagani, Teakwood), "Sheet" for plywood/chipboard,
+  // "Sq.ft" for laminate/veneer. Free text (see src/common/constants/
+  // units.constants.ts for the suggested list) rather than a DB enum, since
+  // suppliers use varied trade-specific units that shouldn't require a
+  // migration to add.
+  unit        String?
   price       Decimal? @db.Decimal(12, 2)
   value       Decimal  @db.Decimal(12, 2)
 

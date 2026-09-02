@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
@@ -76,6 +76,16 @@ export class SuppliersService {
     return { success: true };
   }
 
+  // Devi Ply Wood / Timber Hari sheets are always qty * price = value
+  // exactly - so whenever both are given, that's what we store, ignoring
+  // whatever the client sent for value. Lump-sum lines with no qty/price
+  // (e.g. a flat "RENT" entry) keep the manually entered value.
+  private computeValue(qty: number | undefined, price: number | undefined, fallback: number | undefined): number {
+    if (qty != null && price != null) return qty * price;
+    if (fallback == null) throw new BadRequestException('Enter a value, or provide both qty and price so it can be calculated');
+    return fallback;
+  }
+
   async addPurchase(supplierId: string, dto: CreatePurchaseDto, userId: string) {
     await this.findOne(supplierId);
     await this.prisma.supplierPurchase.create({
@@ -84,9 +94,29 @@ export class SuppliersService {
         date: new Date(dto.date),
         particulars: dto.particulars,
         qty: dto.qty,
+        unit: dto.unit,
         price: dto.price,
-        value: dto.value,
+        value: this.computeValue(dto.qty, dto.price, dto.value),
         createdById: userId,
+      },
+    });
+    return this.findOne(supplierId);
+  }
+
+  async updatePurchase(supplierId: string, purchaseId: string, dto: Partial<CreatePurchaseDto>) {
+    const purchase = await this.prisma.supplierPurchase.findUnique({ where: { id: purchaseId } });
+    if (!purchase || purchase.supplierId !== supplierId) throw new NotFoundException('Purchase entry not found');
+    const qty = dto.qty ?? (purchase.qty != null ? Number(purchase.qty) : undefined);
+    const price = dto.price ?? (purchase.price != null ? Number(purchase.price) : undefined);
+    await this.prisma.supplierPurchase.update({
+      where: { id: purchaseId },
+      data: {
+        date: dto.date ? new Date(dto.date) : undefined,
+        particulars: dto.particulars,
+        qty: dto.qty,
+        unit: dto.unit,
+        price: dto.price,
+        value: this.computeValue(qty, price, dto.value ?? Number(purchase.value)),
       },
     });
     return this.findOne(supplierId);
@@ -110,6 +140,22 @@ export class SuppliersService {
         amount: dto.amount,
         mode: dto.mode,
         createdById: userId,
+      },
+    });
+    return this.findOne(supplierId);
+  }
+
+  async updatePayment(supplierId: string, paymentId: string, dto: Partial<CreateSupplierPaymentDto>) {
+    const payment = await this.prisma.supplierPayment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.supplierId !== supplierId) throw new NotFoundException('Payment not found');
+    await this.prisma.supplierPayment.update({
+      where: { id: paymentId },
+      data: {
+        date: dto.date ? new Date(dto.date) : undefined,
+        particulars: dto.particulars,
+        voucherNo: dto.voucherNo,
+        amount: dto.amount,
+        mode: dto.mode,
       },
     });
     return this.findOne(supplierId);

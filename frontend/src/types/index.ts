@@ -115,6 +115,7 @@ export interface SupplierPurchase {
   date: string;
   particulars: string;
   qty?: number | null;
+  unit?: string | null;
   price?: number | null;
   value: number;
 }
@@ -197,6 +198,42 @@ export interface CarpenterWorkItem {
   createdBy?: { name: string };
   whatsapp?: { sent: boolean; reason?: string };
   stockMovements?: StockMovement[];
+}
+
+export type QcResult = 'PASSED' | 'FAILED' | 'REWORK_REQUIRED';
+
+export interface QualityCheck {
+  id: string;
+  jobNumber: string;
+  workItemId?: string | null;
+  result: QcResult;
+  remarks?: string | null;
+  inspectedBy?: { id: string; name: string };
+  createdAt: string;
+}
+
+export type FinishedStockStatus = 'AVAILABLE' | 'RESERVED' | 'DISPATCHED';
+
+export interface FinishedStockItem {
+  id: string;
+  jobNumber: string;
+  productName: string;
+  quantity: number;
+  completionDate: string;
+  location?: string | null;
+  status: FinishedStockStatus;
+}
+
+export interface DispatchRecord {
+  id: string;
+  jobNumber: string;
+  finishedStockId?: string | null;
+  dispatchDate: string;
+  vehicle?: string | null;
+  driverName?: string | null;
+  driverContact?: string | null;
+  remarks?: string | null;
+  dispatchedBy?: { id: string; name: string };
 }
 
 export interface CarpenterPayment {

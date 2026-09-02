@@ -23,7 +23,11 @@ function WhatsappSettingsContent() {
     fetcher,
     {
       revalidateOnFocus: false,
-      dedupingInterval: 5000,
+      dedupingInterval: 2000,
+      // Auto-poll while not connected so a fresh QR code (or a successful
+      // reconnect after disconnect) shows up without the user hitting
+      // "Refresh" manually. Stop polling once connected to save requests.
+      refreshInterval: (data) => (data?.operational ? 0 : 3000),
     }
   );
 
@@ -43,6 +47,7 @@ function WhatsappSettingsContent() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const filteredChats = useMemo(() => {
     if (!chats) return [];
@@ -53,14 +58,20 @@ function WhatsappSettingsContent() {
 
   async function handleLogout() {
     if (!confirm('Are you sure you want to disconnect WhatsApp?')) return;
+    setDisconnecting(true);
     try {
       await api.post('/whatsapp/logout');
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await mutateStatus();
+    } catch (err) {
+      // The backend always rebuilds the client after a logout attempt even
+      // if the call itself errors/times out, so treat this as a soft
+      // failure - refresh status below rather than blocking the user.
+      console.warn('WhatsApp logout request failed:', err instanceof ApiError ? err.message : err);
+    } finally {
       setSelectedChat(null);
       setMessageText('');
-    } catch (err) {
-      alert(err instanceof ApiError ? err.message : 'Failed to logout');
+      await new Promise(resolve => setTimeout(resolve, 800));
+      await mutateStatus();
+      setDisconnecting(false);
     }
   }
 
@@ -71,7 +82,7 @@ function WhatsappSettingsContent() {
     setSendSuccess(false);
 
     try {
-      const result = await api.post(`/whatsapp/send/${encodeURIComponent(selectedChat.id)}`, { message: messageText });
+      await api.post(`/whatsapp/send/${encodeURIComponent(selectedChat.id)}`, { message: messageText });
       setSendSuccess(true);
       setMessageText('');
       setTimeout(() => setSendSuccess(false), 3000);
@@ -110,8 +121,8 @@ function WhatsappSettingsContent() {
             </div>
             <p className="font-semibold text-emerald-700">Connected</p>
             <p className="text-sm text-brand-500">Your WhatsApp account is connected and ready to send messages.</p>
-            <button className="btn-danger mt-2" onClick={handleLogout}>
-              Disconnect WhatsApp
+            <button className="btn-danger mt-2" onClick={handleLogout} disabled={disconnecting}>
+              {disconnecting ? 'Disconnecting…' : 'Disconnect WhatsApp'}
             </button>
           </div>
         )}

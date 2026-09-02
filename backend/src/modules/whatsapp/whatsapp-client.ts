@@ -60,6 +60,44 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       return;
     }
 
+    this.startClient();
+  }
+
+  // Tears down the current client (if any) and builds a fresh one after a
+  // short delay. Used both for unexpected disconnects and for a deliberate
+  // logout — either way we want the app to land back on a scannable QR
+  // code on its own, without requiring a server restart.
+  private restarting = false;
+
+  private async restartClient(delayMs = 3000) {
+    if (this.restarting) return;
+    this.restarting = true;
+
+    this.setState('RECONNECTING');
+    this.authenticated = false;
+    this.ready = false;
+    this.storesReady = false;
+    this.latestQr = null;
+
+    if (this.client) {
+      try {
+        await Promise.race([
+          this.client.destroy(),
+          new Promise((resolve) => setTimeout(resolve, 5000)),
+        ]);
+      } catch (err) {
+        this.logger.warn(`[WhatsApp] Error destroying old client (ignored): ${err}`);
+      }
+      this.client = null;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+    this.restarting = false;
+    this.startClient();
+  }
+
+  private startClient() {
     this.setState('INITIALIZING');
     this.readyPromise = new Promise((resolve) => {
       this.readyResolve = resolve;
@@ -147,22 +185,27 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       }
     });
 
-    // Disconnected event - connection lost
+    // Disconnected event - connection lost (phone unlinked, network drop, or
+    // a deliberate logout() call). Auto-recover so a fresh QR shows up on
+    // its own instead of leaving the app stuck until someone restarts it.
     this.client.on('disconnected', (reason: string) => {
       this.logger.warn(`[WhatsApp] Disconnected: ${reason}`);
       this.setState('DISCONNECTED');
       this.ready = false;
       this.latestQr = null;
       this.lastError = `Disconnected: ${reason}`;
+      this.restartClient();
     });
 
-    // Auth failure event - session invalid
+    // Auth failure event - session invalid. Same recovery: tear down and
+    // rebuild so a new QR is generated instead of dead-ending in ERROR.
     this.client.on('auth_failure', (msg: string) => {
       this.logger.error(`[WhatsApp] Auth failure: ${msg}`);
       this.setState('ERROR');
       this.authenticated = false;
       this.ready = false;
       this.lastError = msg;
+      this.restartClient();
     });
 
     // Error event - unexpected error
@@ -656,10 +699,16 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   private async fetchChatsWithDiagnostics(): Promise<any[]> {
     this.logger.log(`[CHATS] Starting chat retrieval`);
 
-    // STEP 1: Try official whatsapp-web.js API first
+    // STEP 1: Try official whatsapp-web.js API first. This call is known to
+    // hang on some WhatsApp Web versions (see fetchChatsWithRetry comment
+    // below) so it's bounded by a timeout instead of being awaited directly -
+    // on timeout we fall through to the direct store-access fallback.
     try {
       this.logger.log(`[CHATS] Attempting official client.getChats() API`);
-      const chats = await this.client.getChats();
+      const chats = await Promise.race([
+        this.client.getChats(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('getChats() timed out after 6s')), 6000)),
+      ]) as any[];
 
       if (Array.isArray(chats) && chats.length > 0) {
         const normalized = (await Promise.all(chats.map((c: any) => this.normalizeWhatsAppChat(c)))).filter(Boolean);
@@ -671,10 +720,13 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       this.logger.warn(`[CHATS] getChats() failed, attempting fallback: ${apiErr instanceof Error ? apiErr.message : String(apiErr)}`);
     }
 
-    // STEP 2: Safe fallback - check for existence before accessing
+    // STEP 2: Safe fallback - check for existence before accessing. Also
+    // timeout-bounded: an unresponsive page would otherwise hang this
+    // evaluate() call (and the HTTP request behind it) forever.
     try {
       this.logger.log(`[CHATS] Attempting safe fallback using browser context`);
-      const chatsFromFallback = await this.client.pupPage.evaluate(async () => {
+      const chatsFromFallback = await Promise.race([
+        this.client.pupPage.evaluate(async () => {
         try {
           const w = window as any;
 
@@ -731,7 +783,9 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
         } catch (fallbackErr: any) {
           throw new Error(`Fallback failed: ${fallbackErr?.message || String(fallbackErr)}`);
         }
-      });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('store fallback timed out after 10s')), 10000)),
+      ]) as any[];
 
       if (Array.isArray(chatsFromFallback) && chatsFromFallback.length > 0) {
         this.logger.log(`[CHATS] Fallback success: ${chatsFromFallback.length} chats`);
@@ -905,15 +959,24 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   async logout() {
     this.logger.log('[WhatsApp] Logout initiated');
     this.setState('DISCONNECTED');
+
     if (this.client) {
       try {
-        await this.client.logout();
+        // client.logout() can hang if the browser page is unresponsive -
+        // never let it block the request indefinitely.
+        await Promise.race([
+          this.client.logout(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('logout timeout')), 15000)),
+        ]);
         this.logger.log('[WhatsApp] Logged out successfully');
       } catch (err) {
-        this.logger.error(`[WhatsApp] Logout error: ${err}`);
-        throw err;
+        this.logger.warn(`[WhatsApp] Logout call did not complete cleanly (continuing anyway): ${err}`);
       }
     }
+
+    // Regardless of how the logout call went, always tear down and rebuild
+    // the client so the user lands on a fresh, scannable QR code.
+    this.restartClient(1500);
   }
 
   async onModuleDestroy() {

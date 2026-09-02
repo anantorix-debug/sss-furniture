@@ -80,13 +80,14 @@ export class CarpenterController {
     return this.service.updateWorkStatus(id, dto, user.role as Role, user.userId);
   }
 
-  // Setting a work item's price/extra/total is a wage-setting action, not
-  // "do your work" CRUD - kept Admin-only even though status updates above
-  // stay open to the assigned Carpenter/Polisher.
-  @Roles(Role.ADMIN)
+  // Carpenter/Polisher may add their own cot entry ("Direct Cot Entry" in
+  // the reference workflow); the service forces price/total to 0 for them
+  // regardless of what's submitted - only Admin sets a price at creation,
+  // and normally that happens later via Weekly Labour, not here.
+  @Roles(Role.ADMIN, Role.CARPENTER, Role.POLISHER)
   @Post('carpenter-work-items')
   createWorkItem(@Body() dto: CreateWorkItemDto, @CurrentUser() user: AuthUser) {
-    return this.service.createWorkItem(dto, user.userId);
+    return this.service.createWorkItem(dto, user.userId, user.role as Role);
   }
 
   @Roles(Role.ADMIN)

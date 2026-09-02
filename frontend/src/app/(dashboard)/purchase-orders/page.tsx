@@ -42,7 +42,6 @@ function PurchaseOrdersContent() {
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
 
   const {
-    canUseWhatsApp,
     showModal,
     whatsappOptions,
     openWhatsApp,

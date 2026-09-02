@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/suppliers', label: 'Suppliers', icon: '⇩', minRole: 'ADMIN' },
   { href: '/purchase-orders', label: 'Purchase Orders', icon: '⇩', minRole: 'ADMIN' },
   { href: '/carpenters', label: 'Production', icon: '✦' },
+  { href: '/production', label: 'Dispatch Pipeline', icon: '⇒', minRole: 'ADMIN' },
   { href: '/payments', label: 'Payments', icon: '▣', minRole: 'ADMIN' },
   { href: '/reports', label: 'Reports', icon: '▥', minRole: 'ADMIN' },
   { href: '/users', label: 'Users & Roles', icon: '◍', minRole: 'SUPERADMIN' },

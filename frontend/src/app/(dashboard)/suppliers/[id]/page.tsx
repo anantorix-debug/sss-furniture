@@ -9,7 +9,11 @@ import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { RoleGate } from '@/components/RoleGate';
-import type { SupplierDetail } from '@/types';
+import { UnitSelect } from '@/components/UnitSelect';
+import type { SupplierDetail, SupplierPurchase, SupplierPayment } from '@/types';
+
+const emptyPurchaseForm = { date: new Date().toISOString().slice(0, 10), particulars: '', qty: '', unit: '', price: '', value: '' };
+const emptyPaymentForm = { date: new Date().toISOString().slice(0, 10), particulars: '', voucherNo: '', amount: '', mode: 'CASH' };
 
 function SupplierDetailContent() {
   const { id } = useParams<{ id: string }>();
@@ -17,8 +21,12 @@ function SupplierDetailContent() {
   const { hasRole } = useAuth();
   const { data: supplier, isLoading, mutate } = useSWR<SupplierDetail>(`/suppliers/${id}`, fetcher);
 
-  const [purchaseForm, setPurchaseForm] = useState({ date: new Date().toISOString().slice(0, 10), particulars: '', qty: '', price: '', value: '' });
-  const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().slice(0, 10), particulars: '', voucherNo: '', amount: '', mode: 'CASH' });
+  const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm);
+  const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
+  const [editingPurchaseId, setEditingPurchaseId] = useState<string | null>(null);
+  const [editPurchaseForm, setEditPurchaseForm] = useState(emptyPurchaseForm);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editPaymentForm, setEditPaymentForm] = useState(emptyPaymentForm);
   const [error, setError] = useState<string | null>(null);
   const canEdit = hasRole('ADMIN');
 
@@ -30,13 +38,46 @@ function SupplierDetailContent() {
         date: purchaseForm.date,
         particulars: purchaseForm.particulars,
         qty: purchaseForm.qty ? parseFloat(purchaseForm.qty) : undefined,
+        unit: purchaseForm.unit || undefined,
         price: purchaseForm.price ? parseFloat(purchaseForm.price) : undefined,
-        value: parseFloat(purchaseForm.value),
+        // Server computes value from qty*price when both are present;
+        // only send it manually for a lump-sum entry (no qty/price).
+        value: purchaseForm.qty && purchaseForm.price ? undefined : parseFloat(purchaseForm.value),
       });
-      setPurchaseForm({ date: new Date().toISOString().slice(0, 10), particulars: '', qty: '', price: '', value: '' });
+      setPurchaseForm(emptyPurchaseForm);
       mutate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to add purchase');
+    }
+  }
+
+  function startEditPurchase(p: SupplierPurchase) {
+    setEditingPurchaseId(p.id);
+    setEditPurchaseForm({
+      date: p.date.slice(0, 10),
+      particulars: p.particulars,
+      qty: p.qty != null ? String(p.qty) : '',
+      unit: p.unit ?? '',
+      price: p.price != null ? String(p.price) : '',
+      value: String(p.value),
+    });
+  }
+
+  async function saveEditPurchase(purchaseId: string) {
+    setError(null);
+    try {
+      await api.patch(`/suppliers/${id}/purchases/${purchaseId}`, {
+        date: editPurchaseForm.date,
+        particulars: editPurchaseForm.particulars,
+        qty: editPurchaseForm.qty ? parseFloat(editPurchaseForm.qty) : undefined,
+        unit: editPurchaseForm.unit || undefined,
+        price: editPurchaseForm.price ? parseFloat(editPurchaseForm.price) : undefined,
+        value: editPurchaseForm.qty && editPurchaseForm.price ? undefined : parseFloat(editPurchaseForm.value),
+      });
+      setEditingPurchaseId(null);
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update purchase');
     }
   }
 
@@ -51,10 +92,38 @@ function SupplierDetailContent() {
         amount: parseFloat(paymentForm.amount),
         mode: paymentForm.mode,
       });
-      setPaymentForm({ date: new Date().toISOString().slice(0, 10), particulars: '', voucherNo: '', amount: '', mode: 'CASH' });
+      setPaymentForm(emptyPaymentForm);
       mutate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to add payment');
+    }
+  }
+
+  function startEditPayment(p: SupplierPayment) {
+    setEditingPaymentId(p.id);
+    setEditPaymentForm({
+      date: p.date.slice(0, 10),
+      particulars: p.particulars ?? '',
+      voucherNo: p.voucherNo ?? '',
+      amount: String(p.amount),
+      mode: p.mode ?? 'CASH',
+    });
+  }
+
+  async function saveEditPayment(paymentId: string) {
+    setError(null);
+    try {
+      await api.patch(`/suppliers/${id}/payments/${paymentId}`, {
+        date: editPaymentForm.date,
+        particulars: editPaymentForm.particulars || undefined,
+        voucherNo: editPaymentForm.voucherNo || undefined,
+        amount: parseFloat(editPaymentForm.amount),
+        mode: editPaymentForm.mode,
+      });
+      setEditingPaymentId(null);
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update payment');
     }
   }
 
@@ -98,6 +167,7 @@ function SupplierDetailContent() {
                   <th>Date</th>
                   <th>Particulars</th>
                   <th>Qty</th>
+                  <th>Unit</th>
                   <th>Price</th>
                   <th>Value</th>
                   {canEdit && <th></th>}
@@ -106,27 +176,46 @@ function SupplierDetailContent() {
               <tbody>
                 {supplier.purchases.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="text-center text-brand-400 py-4">
+                    <td colSpan={7} className="text-center text-brand-400 py-4">
                       No purchases recorded
                     </td>
                   </tr>
                 )}
-                {supplier.purchases.map((p) => (
-                  <tr key={p.id}>
-                    <td>{formatDate(p.date)}</td>
-                    <td>{p.particulars}</td>
-                    <td>{p.qty ?? '-'}</td>
-                    <td>{p.price != null ? formatCurrency(p.price) : '-'}</td>
-                    <td className="font-medium">{formatCurrency(p.value)}</td>
-                    {canEdit && (
-                      <td>
-                        <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => removePurchase(p.id)}>
-                          Remove
-                        </button>
+                {supplier.purchases.map((p) =>
+                  editingPurchaseId === p.id ? (
+                    <tr key={p.id} className="bg-blue-50">
+                      <td><input type="date" className="input py-1 text-xs" value={editPurchaseForm.date} onChange={(e) => setEditPurchaseForm((f) => ({ ...f, date: e.target.value }))} /></td>
+                      <td><input className="input py-1 text-xs" value={editPurchaseForm.particulars} onChange={(e) => setEditPurchaseForm((f) => ({ ...f, particulars: e.target.value }))} /></td>
+                      <td><input type="number" step="0.01" className="input py-1 text-xs w-16" value={editPurchaseForm.qty} onChange={(e) => setEditPurchaseForm((f) => ({ ...f, qty: e.target.value }))} /></td>
+                      <td><UnitSelect id="edit-purchase-unit" className="input py-1 text-xs w-24" value={editPurchaseForm.unit} onChange={(v) => setEditPurchaseForm((f) => ({ ...f, unit: v }))} /></td>
+                      <td><input type="number" step="0.01" className="input py-1 text-xs w-20" value={editPurchaseForm.price} onChange={(e) => setEditPurchaseForm((f) => ({ ...f, price: e.target.value }))} /></td>
+                      <td><input type="number" step="0.01" className="input py-1 text-xs w-24" value={editPurchaseForm.value} onChange={(e) => setEditPurchaseForm((f) => ({ ...f, value: e.target.value }))} /></td>
+                      <td className="whitespace-nowrap">
+                        <button className="text-emerald-600 hover:text-emerald-800 text-xs mr-2" onClick={() => saveEditPurchase(p.id)}>Save</button>
+                        <button className="text-brand-400 hover:text-brand-600 text-xs" onClick={() => setEditingPurchaseId(null)}>Cancel</button>
                       </td>
-                    )}
-                  </tr>
-                ))}
+                    </tr>
+                  ) : (
+                    <tr key={p.id}>
+                      <td>{formatDate(p.date)}</td>
+                      <td>{p.particulars}</td>
+                      <td>{p.qty ?? '-'}</td>
+                      <td>{p.unit ?? '-'}</td>
+                      <td>{p.price != null ? formatCurrency(p.price) : '-'}</td>
+                      <td className="font-medium">{formatCurrency(p.value)}</td>
+                      {canEdit && (
+                        <td className="whitespace-nowrap">
+                          <button className="text-brand-600 hover:underline text-xs mr-2" onClick={() => startEditPurchase(p)}>
+                            Edit
+                          </button>
+                          <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => removePurchase(p.id)}>
+                            Remove
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
           </div>
@@ -136,10 +225,17 @@ function SupplierDetailContent() {
                 <input type="date" className="input" required value={purchaseForm.date} onChange={(e) => setPurchaseForm((f) => ({ ...f, date: e.target.value }))} />
                 <input className="input" placeholder="Particulars" required value={purchaseForm.particulars} onChange={(e) => setPurchaseForm((f) => ({ ...f, particulars: e.target.value }))} />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <input type="number" step="0.01" className="input" placeholder="Qty" value={purchaseForm.qty} onChange={(e) => setPurchaseForm((f) => ({ ...f, qty: e.target.value }))} />
+                <UnitSelect id="new-purchase-unit" value={purchaseForm.unit} onChange={(v) => setPurchaseForm((f) => ({ ...f, unit: v }))} />
                 <input type="number" step="0.01" className="input" placeholder="Price" value={purchaseForm.price} onChange={(e) => setPurchaseForm((f) => ({ ...f, price: e.target.value }))} />
-                <input type="number" step="0.01" className="input" placeholder="Value" required value={purchaseForm.value} onChange={(e) => setPurchaseForm((f) => ({ ...f, value: e.target.value }))} />
+                {purchaseForm.qty && purchaseForm.price ? (
+                  <div className="input bg-brand-50 text-brand-700 font-medium flex items-center text-sm" title="Value = Qty x Price, calculated automatically">
+                    {formatCurrency(parseFloat(purchaseForm.qty) * parseFloat(purchaseForm.price))}
+                  </div>
+                ) : (
+                  <input type="number" step="0.01" className="input" placeholder="Value (no qty/price)" required value={purchaseForm.value} onChange={(e) => setPurchaseForm((f) => ({ ...f, value: e.target.value }))} />
+                )}
               </div>
               <button type="submit" className="btn-primary w-full">
                 Add Purchase Entry
@@ -170,22 +266,45 @@ function SupplierDetailContent() {
                     </td>
                   </tr>
                 )}
-                {supplier.payments.map((p) => (
-                  <tr key={p.id}>
-                    <td>{formatDate(p.date)}</td>
-                    <td>{p.voucherNo ?? '-'}</td>
-                    <td className="font-medium">{formatCurrency(p.amount)}</td>
-                    <td>{p.balanceAfter != null ? formatCurrency(p.balanceAfter) : '-'}</td>
-                    <td>{p.mode ?? '-'}</td>
-                    {canEdit && (
+                {supplier.payments.map((p) =>
+                  editingPaymentId === p.id ? (
+                    <tr key={p.id} className="bg-blue-50">
+                      <td><input type="date" className="input py-1 text-xs" value={editPaymentForm.date} onChange={(e) => setEditPaymentForm((f) => ({ ...f, date: e.target.value }))} /></td>
+                      <td><input className="input py-1 text-xs w-20" value={editPaymentForm.voucherNo} onChange={(e) => setEditPaymentForm((f) => ({ ...f, voucherNo: e.target.value }))} /></td>
+                      <td><input type="number" step="0.01" className="input py-1 text-xs w-24" value={editPaymentForm.amount} onChange={(e) => setEditPaymentForm((f) => ({ ...f, amount: e.target.value }))} /></td>
+                      <td>-</td>
                       <td>
-                        <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => removePayment(p.id)}>
-                          Remove
-                        </button>
+                        <select className="input py-1 text-xs" value={editPaymentForm.mode} onChange={(e) => setEditPaymentForm((f) => ({ ...f, mode: e.target.value }))}>
+                          <option>CASH</option>
+                          <option>GPAY</option>
+                          <option>UPI</option>
+                        </select>
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      <td className="whitespace-nowrap">
+                        <button className="text-emerald-600 hover:text-emerald-800 text-xs mr-2" onClick={() => saveEditPayment(p.id)}>Save</button>
+                        <button className="text-brand-400 hover:text-brand-600 text-xs" onClick={() => setEditingPaymentId(null)}>Cancel</button>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr key={p.id}>
+                      <td>{formatDate(p.date)}</td>
+                      <td>{p.voucherNo ?? '-'}</td>
+                      <td className="font-medium">{formatCurrency(p.amount)}</td>
+                      <td>{p.balanceAfter != null ? formatCurrency(p.balanceAfter) : '-'}</td>
+                      <td>{p.mode ?? '-'}</td>
+                      {canEdit && (
+                        <td className="whitespace-nowrap">
+                          <button className="text-brand-600 hover:underline text-xs mr-2" onClick={() => startEditPayment(p)}>
+                            Edit
+                          </button>
+                          <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => removePayment(p.id)}>
+                            Remove
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
           </div>

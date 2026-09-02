@@ -19,6 +19,10 @@ import { PartyOrdersModule } from './modules/orders/party/party-orders.module';
 import { PurchaseOrdersModule } from './modules/orders/purchase/purchase-orders.module';
 import { ProductsModule } from './modules/inventory/products/products.module';
 import { RawMaterialsModule } from './modules/inventory/raw-materials/raw-materials.module';
+import { QualityCheckModule } from './modules/quality-check/quality-check.module';
+import { FinishedStockModule } from './modules/finished-stock/finished-stock.module';
+import { DispatchModule } from './modules/dispatch/dispatch.module';
+import { WeeklyLabourModule } from './modules/weekly-labour/weekly-labour.module';
 
 @Module({
   imports: [
@@ -41,6 +45,10 @@ import { RawMaterialsModule } from './modules/inventory/raw-materials/raw-materi
     PurchaseOrdersModule,
     ProductsModule,
     RawMaterialsModule,
+    QualityCheckModule,
+    FinishedStockModule,
+    DispatchModule,
+    WeeklyLabourModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

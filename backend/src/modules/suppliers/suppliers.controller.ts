@@ -50,6 +50,12 @@ export class SuppliersController {
   }
 
   @Roles(Role.ADMIN)
+  @Patch(':id/purchases/:purchaseId')
+  updatePurchase(@Param('id') id: string, @Param('purchaseId') purchaseId: string, @Body() dto: CreatePurchaseDto) {
+    return this.service.updatePurchase(id, purchaseId, dto);
+  }
+
+  @Roles(Role.ADMIN)
   @Delete(':id/purchases/:purchaseId')
   removePurchase(@Param('id') id: string, @Param('purchaseId') purchaseId: string) {
     return this.service.removePurchase(id, purchaseId);
@@ -59,6 +65,12 @@ export class SuppliersController {
   @Post(':id/payments')
   addPayment(@Param('id') id: string, @Body() dto: CreateSupplierPaymentDto, @CurrentUser() user: AuthUser) {
     return this.service.addPayment(id, dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Patch(':id/payments/:paymentId')
+  updatePayment(@Param('id') id: string, @Param('paymentId') paymentId: string, @Body() dto: CreateSupplierPaymentDto) {
+    return this.service.updatePayment(id, paymentId, dto);
   }
 
   @Roles(Role.ADMIN)

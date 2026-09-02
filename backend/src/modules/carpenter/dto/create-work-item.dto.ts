@@ -38,9 +38,15 @@ export class CreateWorkItemDto {
   @IsOptional()
   size?: string;
 
+  // Optional: a Carpenter/Polisher adding their own cot entry doesn't set a
+  // price - that's entered by Co-Admin at week-end labour review (see
+  // WeeklyLabourService). Required in practice only when an Admin creates
+  // the entry directly; the service zeroes these out for non-Admin callers
+  // regardless of what's submitted here, as defense in depth.
   @IsNumber()
   @Min(0)
-  price: number;
+  @IsOptional()
+  price?: number;
 
   @IsNumber()
   @Min(0)
@@ -54,7 +60,8 @@ export class CreateWorkItemDto {
 
   @IsNumber()
   @Min(0)
-  total: number;
+  @IsOptional()
+  total?: number;
 
   @IsOptional()
   notifyWhatsapp?: boolean;

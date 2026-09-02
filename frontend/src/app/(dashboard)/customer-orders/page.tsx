@@ -50,7 +50,6 @@ function CustomerOrdersContent() {
     fetcher,
   );
   const {
-    canUseWhatsApp,
     showModal,
     whatsappOptions,
     openWhatsApp,

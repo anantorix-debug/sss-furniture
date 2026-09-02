@@ -49,7 +49,6 @@ function PurchaseOrderDetailContent() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const {
-    canUseWhatsApp,
     showModal,
     whatsappOptions,
     openWhatsApp,

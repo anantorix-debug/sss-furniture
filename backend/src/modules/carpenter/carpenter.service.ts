@@ -111,7 +111,21 @@ export class CarpenterService {
     return items.map((w) => stripWorkItemMoney(w, hide));
   }
 
-  async createWorkItem(dto: CreateWorkItemDto, userId: string) {
+  async createWorkItem(dto: CreateWorkItemDto, userId: string, viewerRole?: Role) {
+    // Matches the reference workflow: "Carpenter Can Add & Update Own Cot
+    // Work" but "Carpenter Cannot Edit Labour Price - Co-Admin Enters
+    // Labour Price at Week End". A Carpenter/Polisher creating their own
+    // entry gets price/total forced to 0 no matter what they send; only
+    // Admin (or above) may set a price directly at creation time.
+    const isWorkerSelfEntry = viewerRole === Role.CARPENTER || viewerRole === Role.POLISHER;
+    const price = isWorkerSelfEntry ? 0 : (dto.price ?? 0);
+    const extra = isWorkerSelfEntry ? 0 : (dto.extra ?? 0);
+    const quantity = dto.quantity ?? 1;
+    // total is never taken from the client - always (price + extra) *
+    // quantity, matching the reference sheet's PRICE / EXTRA+ / NO / TOTAL
+    // columns, so it can never be typed wrong or left inconsistent.
+    const total = (price + extra) * quantity;
+
     const workItem = await this.prisma.carpenterWorkItem.create({
       data: {
         carpenterId: dto.carpenterId,
@@ -121,10 +135,10 @@ export class CarpenterService {
         productName: dto.productName,
         category: dto.category,
         size: dto.size,
-        price: dto.price,
-        extra: dto.extra ?? 0,
-        quantity: dto.quantity ?? 1,
-        total: dto.total,
+        price,
+        extra,
+        quantity,
+        total,
         createdById: userId,
       },
       include: { carpenter: true },
@@ -168,6 +182,13 @@ export class CarpenterService {
 
     const previousCarpenterId = existing.carpenterId;
 
+    // Recompute total from whichever of price/extra/quantity changed,
+    // merged with the existing values - same rule as createWorkItem.
+    const priceChanged = dto.price !== undefined || dto.extra !== undefined || dto.quantity !== undefined;
+    const price = dto.price ?? Number(existing.price);
+    const extra = dto.extra ?? Number(existing.extra);
+    const quantity = dto.quantity ?? existing.quantity;
+
     const workItem = await this.prisma.carpenterWorkItem.update({
       where: { id },
       data: {
@@ -181,7 +202,7 @@ export class CarpenterService {
         price: dto.price,
         extra: dto.extra,
         quantity: dto.quantity,
-        total: dto.total,
+        total: priceChanged ? (price + extra) * quantity : undefined,
       },
       include: { carpenter: true },
     });

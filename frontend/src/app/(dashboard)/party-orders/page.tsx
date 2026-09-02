@@ -30,7 +30,6 @@ const emptyForm = {
   details: '',
   qty: '1',
   price: '',
-  totalAmount: '',
   cashTrack: '',
   courierTrack: '',
   actualDeliveryDate: '',
@@ -46,7 +45,6 @@ function PartyOrdersContent() {
     fetcher,
   );
   const {
-    canUseWhatsApp,
     showModal,
     whatsappOptions,
     openWhatsApp,
@@ -83,7 +81,6 @@ function PartyOrdersContent() {
       details: order.details ?? '',
       qty: String(order.qty),
       price: String(order.price ?? 0),
-      totalAmount: String(order.totalAmount ?? 0),
       cashTrack: order.cashTrack ?? '',
       courierTrack: order.courierTrack ?? '',
       actualDeliveryDate: toDateInputValue(order.actualDeliveryDate),
@@ -107,7 +104,7 @@ function PartyOrdersContent() {
         details: form.details || undefined,
         qty: parseInt(form.qty, 10) || 1,
         price: parseFloat(form.price),
-        totalAmount: parseFloat(form.totalAmount),
+        // Total is always server-computed as qty * price - not sent.
         cashTrack: form.cashTrack || undefined,
         courierTrack: form.courierTrack || undefined,
         actualDeliveryDate: form.actualDeliveryDate || undefined,
@@ -377,16 +374,10 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
               </FormField>
             </FormRow>
             <FormRow>
-              <FormField label="Total Amount (Rs.)">
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  className="input"
-                  required
-                  value={form.totalAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, totalAmount: e.target.value }))}
-                />
+              <FormField label="Total Amount (auto)">
+                <div className="input bg-brand-50 text-brand-700 font-medium flex items-center">
+                  {formatCurrency((parseInt(form.qty, 10) || 1) * (parseFloat(form.price) || 0))}
+                </div>
               </FormField>
               <FormField label="Cash Track">
                 <input className="input" value={form.cashTrack} onChange={(e) => setForm((f) => ({ ...f, cashTrack: e.target.value }))} />
