@@ -516,3 +516,89 @@ export interface AuditLogEntry {
   createdAt: string;
   user?: { name: string; role: Role } | null;
 }
+
+// ---------------------------------------------------------------------------
+// Expenses (Super Admin financial control center)
+// ---------------------------------------------------------------------------
+
+export type ExpenseScope = 'COMPANY' | 'PERSONAL';
+export type ExpenseRecordStatus = 'ACTIVE' | 'ARCHIVED';
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  scope: ExpenseScope | null;
+  defaultReferenceTypeId?: string | null;
+  defaultReferenceType?: ExpenseReferenceType | null;
+  isActive: boolean;
+}
+
+export interface ExpenseReferenceType {
+  id: string;
+  code: string;
+  label: string;
+  isActive: boolean;
+}
+
+export interface ExpensePaymentMode {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface Expense {
+  id: string;
+  date: string;
+  voucherNumber: number;
+  referenceTypeId?: string | null;
+  referenceType?: ExpenseReferenceType | null;
+  categoryId: string;
+  category: ExpenseCategory;
+  particulars: string;
+  amount: number;
+  paymentModeId: string;
+  paymentMode: ExpensePaymentMode;
+  scope: ExpenseScope;
+  paidBy?: string | null;
+  employeeId?: string | null;
+  employee?: { id: string; name: string; phone?: string | null } | null;
+  vendorName?: string | null;
+  description?: string | null;
+  notes?: string | null;
+  attachmentUrl?: string | null;
+  tags?: string | null;
+  status: ExpenseRecordStatus;
+  createdBy?: { id: string; name: string };
+  updatedBy?: { id: string; name: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExpenseAuditEntry {
+  id: string;
+  action: string;
+  changes?: Record<string, { old: unknown; new: unknown }> | null;
+  user?: { id: string; name: string } | null;
+  createdAt: string;
+}
+
+export interface ExpenseSummary {
+  overallTotal: number;
+  companyTotal: number;
+  personalTotal: number;
+  today: number;
+  thisWeek: number;
+  thisMonth: number;
+  thisYear: number;
+  byCategory: { categoryId: string; categoryName: string; total: number }[];
+  byPaymentMode: { paymentModeId: string; paymentModeName: string; total: number }[];
+}
+
+export interface ExpenseMonthly {
+  year: number;
+  month: number;
+  total: number;
+  company: number;
+  personal: number;
+  byCategory: { categoryId: string; categoryName: string; total: number }[];
+}

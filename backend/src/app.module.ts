@@ -23,6 +23,7 @@ import { QualityCheckModule } from './modules/quality-check/quality-check.module
 import { FinishedStockModule } from './modules/finished-stock/finished-stock.module';
 import { DispatchModule } from './modules/dispatch/dispatch.module';
 import { WeeklyLabourModule } from './modules/weekly-labour/weekly-labour.module';
+import { ExpensesModule } from './modules/expenses/expenses.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { WeeklyLabourModule } from './modules/weekly-labour/weekly-labour.module
     FinishedStockModule,
     DispatchModule,
     WeeklyLabourModule,
+    ExpensesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

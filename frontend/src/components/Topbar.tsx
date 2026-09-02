@@ -16,6 +16,7 @@ const TITLES: Record<string, { title: string; crumb: string }> = {
   '/purchase-orders': { title: 'Purchase Orders', crumb: 'Purchases › Purchase Orders' },
   '/carpenters': { title: 'Production', crumb: 'Production › Carpenter Work' },
   '/payments': { title: 'Payments', crumb: 'Payments' },
+  '/expenses': { title: 'Expenses', crumb: 'Expenses' },
   '/reports': { title: 'Reports', crumb: 'Reports' },
   '/users': { title: 'Users', crumb: 'Users & Roles › Users' },
   '/audit-log': { title: 'Audit Log', crumb: 'Users & Roles › Audit Log' },

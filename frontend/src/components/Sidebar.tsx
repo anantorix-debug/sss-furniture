@@ -23,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/carpenters', label: 'Production', icon: '✦' },
   { href: '/production', label: 'Dispatch Pipeline', icon: '⇒', minRole: 'ADMIN' },
   { href: '/payments', label: 'Payments', icon: '▣', minRole: 'ADMIN' },
+  { href: '/expenses', label: 'Expenses', icon: '⛁', minRole: 'SUPERADMIN' },
   { href: '/reports', label: 'Reports', icon: '▥', minRole: 'ADMIN' },
   { href: '/users', label: 'Users & Roles', icon: '◍', minRole: 'SUPERADMIN' },
   { href: '/audit-log', label: 'Audit Log', icon: '◪', minRole: 'SUPERADMIN' },
