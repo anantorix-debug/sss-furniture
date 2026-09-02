@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f8f7f2;
+  --foreground: #1f2933;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-white hover:bg-accent-600 shadow-[0px_1px_3px_0px_rgba(0,0,0,0.06)];
+  }
+  .btn-secondary {
+    @apply btn bg-white text-ink border border-brand-200 hover:bg-brand-50;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+  .card {
+    @apply bg-white rounded-card border border-brand-200 shadow-card;
+  }
+  .input {
+    @apply w-full rounded-control border border-brand-200 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent-500/40 focus:border-accent-500;
+  }
+  .label {
+    @apply block text-xs font-medium text-ink-muted mb-1;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .table-shell {
+    @apply w-full text-sm text-left border-collapse;
+  }
+  .table-shell th {
+    @apply px-3.5 h-10 bg-[#f4f2ec] text-ink-muted font-medium text-[9.5px] uppercase tracking-[0.6px] border-b border-brand-100 whitespace-nowrap text-left;
+  }
+  .table-shell td {
+    @apply px-3.5 py-2.5 border-b border-brand-100 text-[12.5px] text-ink whitespace-nowrap;
+  }
+  .table-shell tbody tr:hover {
+    @apply bg-brand-50/50;
+  }
+}
