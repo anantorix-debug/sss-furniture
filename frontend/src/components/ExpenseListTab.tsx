@@ -24,12 +24,14 @@ export function ExpenseListTab({
   categoryId,
   scope,
   exportName,
+  onCreate,
 }: {
   title: string;
   description: string;
   categoryId?: string;
   scope?: ExpenseScope;
   exportName: string;
+  onCreate?: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -98,33 +100,28 @@ export function ExpenseListTab({
           <h2 className="text-lg font-semibold text-brand-900">{title}</h2>
           <p className="text-sm text-brand-500">{description}</p>
         </div>
-        <div className="flex gap-2">
-          <button
-            className="btn-secondary text-sm"
-            onClick={() =>
-              downloadCsv(
-                exportName,
-                (result?.data ?? []).map((e) => ({
-                  'S.No': e.voucherNumber,
-                  Date: formatDate(e.date),
-                  Ref: e.referenceType?.code ?? '',
-                  Category: e.category.name,
-                  Particulars: e.particulars,
-                  Mode: e.paymentMode.name,
-                  Debit: e.amount,
-                  Type: e.scope,
-                  'Paid By': e.paidBy ?? '',
-                  Status: e.status,
-                })),
-              )
-            }
-          >
-            Export CSV
-          </button>
-          <button className="btn-primary text-sm" onClick={() => { setEditing(null); setFormOpen(true); }}>
-            + Add Expense
-          </button>
-        </div>
+        <button
+          className="btn-secondary text-sm"
+          onClick={() =>
+            downloadCsv(
+              exportName,
+              (result?.data ?? []).map((e) => ({
+                'S.No': e.voucherNumber,
+                Date: formatDate(e.date),
+                Ref: e.referenceType?.code ?? '',
+                Category: e.category.name,
+                Particulars: e.particulars,
+                Mode: e.paymentMode.name,
+                Debit: e.amount,
+                Type: e.scope,
+                'Paid By': e.paidBy ?? '',
+                Status: e.status,
+              })),
+            )
+          }
+        >
+          Export CSV
+        </button>
       </div>
 
       <div className="card p-3">
@@ -194,8 +191,13 @@ export function ExpenseListTab({
             )}
             {!isLoading && result?.data.length === 0 && (
               <tr>
-                <td colSpan={10} className="text-center py-8 text-brand-400">
-                  No transactions recorded yet
+                <td colSpan={10} className="text-center py-10">
+                  <p className="text-brand-400 mb-3">No transactions recorded yet</p>
+                  {onCreate && (
+                    <button className="btn-primary text-sm" onClick={onCreate}>
+                      + Add Expense
+                    </button>
+                  )}
                 </td>
               </tr>
             )}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { mutate as globalMutate } from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
@@ -9,49 +9,51 @@ import { StatCard } from '@/components/StatCard';
 import { RoleGate } from '@/components/RoleGate';
 import { ExpenseListTab } from '@/components/ExpenseListTab';
 import { ExpenseSettingsTab } from '@/components/ExpenseSettingsTab';
+import { ExpenseFormModal } from '@/components/ExpenseFormModal';
 import { downloadCsv } from '@/lib/csv';
 import { formatDate } from '@/lib/format';
 import type { ExpenseSummary, ExpenseMonthly, ExpenseCategory, Expense } from '@/types';
 
-type Tab = 'overview' | 'overall' | 'purchase' | 'salary' | 'transport' | 'expense' | 'company' | 'personal' | 'settings' | 'reports';
-
-const TABS: { value: Tab; label: string }[] = [
-  { value: 'overview', label: 'Overview' },
-  { value: 'overall', label: 'Overall' },
-  { value: 'purchase', label: 'Purchase' },
-  { value: 'salary', label: 'Salary' },
-  { value: 'transport', label: 'Transport & Toll' },
-  { value: 'expense', label: 'Expense' },
-  { value: 'company', label: 'Company Expense' },
-  { value: 'personal', label: 'Personal Expense' },
-  { value: 'settings', label: 'Settings' },
-  { value: 'reports', label: 'Reports' },
-];
-
-// Maps a tab to the category it filters by name - resolved to an id once
-// categories have loaded. "Overall" (no filter) and "Personal" (scope
-// filter, not category) are handled separately.
-const TAB_CATEGORY_NAME: Partial<Record<Tab, string>> = {
-  purchase: 'Purchase',
-  salary: 'Salary',
-  transport: 'Transport & Toll',
-  expense: 'Expense',
-  company: 'Company Expense',
-};
+// Fixed tabs that always exist, plus one dynamically-generated tab per
+// active expense category (so a category created in Settings - "petty
+// cash", or any future one - shows up here immediately with no code
+// change). "Personal Expense" stays a separate scope-filtered tab rather
+// than a category tab, even though a "Personal Expense" category also
+// exists, to avoid showing the same data under two tabs.
+type FixedTab = 'overview' | 'overall' | 'personal' | 'settings' | 'reports';
+type Tab = FixedTab | string; // non-fixed values are ExpenseCategory ids
 
 function ExpensesContent() {
   const [tab, setTab] = useState<Tab>('overview');
+  const [addOpen, setAddOpen] = useState(false);
   const { data: categories } = useSWR<ExpenseCategory[]>('/expense-config/categories', fetcher);
+
+  const categoryTabs = (categories ?? []).filter((c) => c.scope !== 'PERSONAL');
+  const activeCategory = categoryTabs.find((c) => c.id === tab);
+
+  const tabs: { value: Tab; label: string }[] = [
+    { value: 'overview', label: 'Overview' },
+    { value: 'overall', label: 'Overall' },
+    ...categoryTabs.map((c) => ({ value: c.id, label: c.name })),
+    { value: 'personal', label: 'Personal Expense' },
+    { value: 'settings', label: 'Settings' },
+    { value: 'reports', label: 'Reports' },
+  ];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-brand-900">Expenses</h1>
-        <p className="text-sm text-brand-500 mt-1">Company financial control center - every rupee going out, where it went, and who paid it.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-900">Expenses</h1>
+          <p className="text-sm text-brand-500 mt-1">Company financial control center - every rupee going out, where it went, and who paid it.</p>
+        </div>
+        <button className="btn-primary text-sm" onClick={() => setAddOpen(true)}>
+          + Add Expense
+        </button>
       </div>
 
       <div className="flex gap-1 border-b border-brand-200 overflow-x-auto">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.value}
             onClick={() => setTab(t.value)}
@@ -65,30 +67,42 @@ function ExpensesContent() {
       </div>
 
       {tab === 'overview' && <OverviewTab />}
-      {tab === 'overall' && <ExpenseListTab title="Overall Outgoing" description="Every outgoing transaction, unified." exportName="expenses-overall" />}
+      {tab === 'overall' && <ExpenseListTab title="Overall Outgoing" description="Every outgoing transaction, unified." exportName="expenses-overall" onCreate={() => setAddOpen(true)} />}
       {tab === 'personal' && (
-        <ExpenseListTab title="Personal Expense" description="Super Admin's private tracking - never counted in company totals." scope="PERSONAL" exportName="expenses-personal" />
+        <ExpenseListTab
+          title="Personal Expense"
+          description="Super Admin's private tracking - never counted in company totals."
+          scope="PERSONAL"
+          exportName="expenses-personal"
+          onCreate={() => setAddOpen(true)}
+        />
       )}
-      {(['purchase', 'salary', 'transport', 'expense', 'company'] as Tab[]).includes(tab) && (
-        <CategoryTab tabLabel={TABS.find((t) => t.value === tab)!.label} categoryName={TAB_CATEGORY_NAME[tab]!} categories={categories} />
+      {activeCategory && (
+        <ExpenseListTab
+          title={activeCategory.name}
+          description={`Transactions categorized as ${activeCategory.name}.`}
+          categoryId={activeCategory.id}
+          exportName={`expenses-${activeCategory.name.toLowerCase().replace(/[^a-z]+/g, '-')}`}
+          onCreate={() => setAddOpen(true)}
+        />
       )}
       {tab === 'settings' && <ExpenseSettingsTab />}
       {tab === 'reports' && <ReportsTab />}
-    </div>
-  );
-}
 
-function CategoryTab({ tabLabel, categoryName, categories }: { tabLabel: string; categoryName: string; categories?: ExpenseCategory[] }) {
-  const category = categories?.find((c) => c.name === categoryName);
-  if (!categories) return <p className="text-brand-400 text-sm">Loading...</p>;
-  if (!category) return <p className="text-brand-400 text-sm">Category &quot;{categoryName}&quot; not found - check Settings.</p>;
-  return (
-    <ExpenseListTab
-      title={tabLabel}
-      description={`Transactions categorized as ${categoryName}.`}
-      categoryId={category.id}
-      exportName={`expenses-${categoryName.toLowerCase().replace(/[^a-z]+/g, '-')}`}
-    />
+      {addOpen && (
+        <ExpenseFormModal
+          editing={null}
+          onClose={() => setAddOpen(false)}
+          onSaved={() => {
+            setAddOpen(false);
+            // Whichever list tab is active reads its own /expenses?... SWR
+            // key - revalidate every key under that prefix so the new entry
+            // shows up without needing to know which tab is on screen.
+            globalMutate((key) => typeof key === 'string' && key.startsWith('/expenses'));
+          }}
+        />
+      )}
+    </div>
   );
 }
 

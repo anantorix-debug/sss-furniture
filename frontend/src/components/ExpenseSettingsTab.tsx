@@ -5,6 +5,7 @@ import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
 import { Chip } from '@/components/StatusBadge';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import type { ExpenseCategory, ExpenseReferenceType, ExpensePaymentMode, ExpenseScope } from '@/types';
 
 type ConfigTab = 'categories' | 'reference' | 'modes';
@@ -53,6 +54,7 @@ function CategoriesPanel() {
   const [scope, setScope] = useState<ExpenseScope | ''>('');
   const [defaultReferenceTypeId, setDefaultReferenceTypeId] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ExpenseCategory | null>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -77,6 +79,13 @@ function CategoriesPanel() {
     mutate();
   }
 
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    await api.delete(`/expense-config/categories/${deleteTarget.id}`);
+    setDeleteTarget(null);
+    mutate();
+  }
+
   return (
     <div className="space-y-4">
       <div className="card overflow-x-auto">
@@ -97,9 +106,12 @@ function CategoriesPanel() {
                 <td>{c.scope ? <Chip color={c.scope === 'COMPANY' ? 'blue' : 'darkGreen'} label={c.scope} /> : <span className="text-brand-400">Either</span>}</td>
                 <td>{c.defaultReferenceType ? `${c.defaultReferenceType.code} - ${c.defaultReferenceType.label}` : '-'}</td>
                 <td>{c.isActive ? <Chip color="green" label="Active" /> : <Chip color="gray" label="Disabled" />}</td>
-                <td className="text-right">
+                <td className="text-right whitespace-nowrap">
                   <button className="text-brand-600 hover:underline text-xs" onClick={() => toggleActive(c)}>
                     {c.isActive ? 'Disable' : 'Enable'}
+                  </button>
+                  <button className="text-red-500 hover:underline text-xs ml-3" onClick={() => setDeleteTarget(c)}>
+                    Delete
                   </button>
                 </td>
               </tr>
@@ -107,6 +119,17 @@ function CategoriesPanel() {
           </tbody>
         </table>
       </div>
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete Category"
+          message={`Delete "${deleteTarget.name}"? If it's already used by any expense, it will be disabled instead of deleted, to keep those records valid.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
 
       <form onSubmit={handleCreate} className="card p-4 grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
         <div>
@@ -146,6 +169,7 @@ function ReferenceTypesPanel() {
   const [code, setCode] = useState('');
   const [label, setLabel] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ExpenseReferenceType | null>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -162,6 +186,13 @@ function ReferenceTypesPanel() {
 
   async function toggleActive(r: ExpenseReferenceType) {
     await api.patch(`/expense-config/reference-types/${r.id}`, { isActive: !r.isActive });
+    mutate();
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    await api.delete(`/expense-config/reference-types/${deleteTarget.id}`);
+    setDeleteTarget(null);
     mutate();
   }
 
@@ -183,9 +214,12 @@ function ReferenceTypesPanel() {
                 <td className="font-mono font-medium">{r.code}</td>
                 <td>{r.label}</td>
                 <td>{r.isActive ? <Chip color="green" label="Active" /> : <Chip color="gray" label="Disabled" />}</td>
-                <td className="text-right">
+                <td className="text-right whitespace-nowrap">
                   <button className="text-brand-600 hover:underline text-xs" onClick={() => toggleActive(r)}>
                     {r.isActive ? 'Disable' : 'Enable'}
+                  </button>
+                  <button className="text-red-500 hover:underline text-xs ml-3" onClick={() => setDeleteTarget(r)}>
+                    Delete
                   </button>
                 </td>
               </tr>
@@ -208,6 +242,17 @@ function ReferenceTypesPanel() {
         </button>
         {error && <p className="text-sm text-red-600 col-span-full">{error}</p>}
       </form>
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete Reference Code"
+          message={`Delete "${deleteTarget.code} - ${deleteTarget.label}"? If it's already used by any expense, it will be disabled instead of deleted, to keep those records valid.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -216,6 +261,7 @@ function PaymentModesPanel() {
   const { data: modes, mutate } = useSWR<ExpensePaymentMode[]>('/expense-config/payment-modes?includeInactive=true', fetcher);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ExpensePaymentMode | null>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -231,6 +277,13 @@ function PaymentModesPanel() {
 
   async function toggleActive(m: ExpensePaymentMode) {
     await api.patch(`/expense-config/payment-modes/${m.id}`, { isActive: !m.isActive });
+    mutate();
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    await api.delete(`/expense-config/payment-modes/${deleteTarget.id}`);
+    setDeleteTarget(null);
     mutate();
   }
 
@@ -250,9 +303,12 @@ function PaymentModesPanel() {
               <tr key={m.id}>
                 <td className="font-medium">{m.name}</td>
                 <td>{m.isActive ? <Chip color="green" label="Active" /> : <Chip color="gray" label="Disabled" />}</td>
-                <td className="text-right">
+                <td className="text-right whitespace-nowrap">
                   <button className="text-brand-600 hover:underline text-xs" onClick={() => toggleActive(m)}>
                     {m.isActive ? 'Disable' : 'Enable'}
+                  </button>
+                  <button className="text-red-500 hover:underline text-xs ml-3" onClick={() => setDeleteTarget(m)}>
+                    Delete
                   </button>
                 </td>
               </tr>
@@ -271,6 +327,17 @@ function PaymentModesPanel() {
         </button>
       </form>
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete Payment Mode"
+          message={`Delete "${deleteTarget.name}"? If it's already used by any expense, it will be disabled instead of deleted, to keep those records valid.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }
