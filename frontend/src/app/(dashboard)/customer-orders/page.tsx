@@ -16,6 +16,7 @@ import { AssignEmployeeModal } from '@/components/AssignEmployeeModal';
 import { ActionsMenu } from '@/components/ActionsMenu';
 import { RoleGate } from '@/components/RoleGate';
 import { downloadCsv } from '@/lib/csv';
+import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
@@ -45,10 +46,28 @@ function CustomerOrdersContent() {
   const { hasRole } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const { data, isLoading, mutate } = useSWR<CustomerOrder[]>(
-    `/customer-orders?${new URLSearchParams({ ...(search ? { search } : {}), ...(statusFilter ? { status: statusFilter } : {}) })}`,
+  const [page, setPage] = useState(1);
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<CustomerOrder>>(
+    `/customer-orders?${new URLSearchParams({
+      ...(search ? { search } : {}),
+      ...(statusFilter ? { status: statusFilter } : {}),
+      page: String(page),
+      limit: '20',
+    })}`,
     fetcher,
   );
+  const data = result?.data;
+
+  // Any filter change starts back at page 1 - otherwise you can land on a
+  // now-empty page 4 after narrowing a search down to 2 results.
+  function updateSearch(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
+  function updateStatusFilter(value: string) {
+    setStatusFilter(value);
+    setPage(1);
+  }
   const {
     showModal,
     whatsappOptions,
@@ -224,9 +243,9 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
           className="input max-w-xs"
           placeholder="Search order, customer, phone, product..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => updateSearch(e.target.value)}
         />
-        <select className="input max-w-[160px]" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select className="input max-w-[160px]" value={statusFilter} onChange={(e) => updateStatusFilter(e.target.value)}>
           <option value="">All statuses</option>
           <option value="PENDING">Pending</option>
           <option value="DELIVERED">Delivered</option>
@@ -337,6 +356,9 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
             ))}
           </tbody>
         </table>
+        {result && (
+          <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+        )}
       </div>
 
       {formOpen && (

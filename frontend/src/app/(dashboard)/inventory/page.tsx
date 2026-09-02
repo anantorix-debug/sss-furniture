@@ -16,6 +16,7 @@ import { UnitSelect } from '@/components/UnitSelect';
 import { downloadCsv } from '@/lib/csv';
 import { assetUrl, uploadProductImage, validateProductImageFile } from '@/lib/api';
 import type { Product, RawMaterial, StockMovement, WorkerType } from '@/types';
+import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
 type Tab = 'products' | 'materials' | 'movements';
 
@@ -95,7 +96,16 @@ export default function InventoryPage() {
 
 function ProductsTab({ canEdit }: { canEdit: boolean }) {
   const [search, setSearch] = useState('');
-  const { data, isLoading, mutate } = useSWR<Product[]>(`/products?${new URLSearchParams(search ? { search } : {})}`, fetcher);
+  const [page, setPage] = useState(1);
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<Product>>(
+    `/products?${new URLSearchParams({ ...(search ? { search } : {}), page: String(page), limit: '20' })}`,
+    fetcher,
+  );
+  const data = result?.data;
+  function updateSearch(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -256,7 +266,7 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <input className="input max-w-xs" placeholder="Search name, SKU, category..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input className="input max-w-xs" placeholder="Search name, SKU, category..." value={search} onChange={(e) => updateSearch(e.target.value)} />
         <div className="flex gap-2">
           <button
             className="btn-secondary"
@@ -370,6 +380,9 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
             })}
           </tbody>
         </table>
+        {result && (
+          <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+        )}
       </div>
 
       {formOpen && (
@@ -518,7 +531,16 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
 
 function MaterialsTab({ canEdit }: { canEdit: boolean }) {
   const [search, setSearch] = useState('');
-  const { data, isLoading, mutate } = useSWR<RawMaterial[]>(`/raw-materials?${new URLSearchParams(search ? { search } : {})}`, fetcher);
+  const [page, setPage] = useState(1);
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<RawMaterial>>(
+    `/raw-materials?${new URLSearchParams({ ...(search ? { search } : {}), page: String(page), limit: '20' })}`,
+    fetcher,
+  );
+  const data = result?.data;
+  function updateSearch(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
 
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptyMaterialForm);
@@ -558,7 +580,7 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <input className="input max-w-xs" placeholder="Search material name or type..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input className="input max-w-xs" placeholder="Search material name or type..." value={search} onChange={(e) => updateSearch(e.target.value)} />
         <div className="flex gap-2">
           <button
             className="btn-secondary"
@@ -644,6 +666,9 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
             ))}
           </tbody>
         </table>
+        {result && (
+          <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+        )}
       </div>
 
       {formOpen && (
@@ -691,10 +716,16 @@ const WORKER_MATERIAL_TABS: { value: WorkerType | ''; label: string }[] = [
 
 function MovementsTab() {
   const [workerType, setWorkerType] = useState<WorkerType | ''>('');
-  const { data, isLoading } = useSWR<StockMovement[]>(
-    `/stock-movements${workerType ? `?workerType=${workerType}` : ''}`,
+  const [page, setPage] = useState(1);
+  const { data: result, isLoading } = useSWR<PaginatedResult<StockMovement>>(
+    `/stock-movements?${new URLSearchParams({ ...(workerType ? { workerType } : {}), page: String(page), limit: '20' })}`,
     fetcher,
   );
+  const data = result?.data;
+  function updateWorkerType(value: WorkerType | '') {
+    setWorkerType(value);
+    setPage(1);
+  }
 
   const typeChip = (type: string) => {
     if (type === 'IN') return <Chip color="green" label="Stock In" />;
@@ -708,7 +739,7 @@ function MovementsTab() {
         {WORKER_MATERIAL_TABS.map((t) => (
           <button
             key={t.value}
-            onClick={() => setWorkerType(t.value)}
+            onClick={() => updateWorkerType(t.value)}
             className={`px-3.5 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
               workerType === t.value ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
             }`}
@@ -763,6 +794,9 @@ function MovementsTab() {
           ))}
         </tbody>
       </table>
+      {result && (
+        <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+      )}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { AuditService } from '../audit/audit.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Role } from '../../common/enums/role.enum';
+import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
 const SAFE_SELECT = {
   id: true,
@@ -23,11 +24,25 @@ export class UsersService {
     private audit: AuditService,
   ) {}
 
-  async findAll() {
-    return this.prisma.user.findMany({
-      select: SAFE_SELECT,
-      orderBy: { createdAt: 'asc' },
-    });
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { search?: string; page?: number; limit?: number } = {}) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = params.search
+      ? { OR: [{ name: { contains: params.search } }, { email: { contains: params.search } }] }
+      : {};
+
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        select: SAFE_SELECT,
+        orderBy: { createdAt: 'asc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.user.count({ where }) : Promise.resolve(0),
+    ]);
+    return paginated ? paginate(users, total, page, limit) : users;
   }
 
   async findOne(id: string) {

@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { Role } from '../../../common/enums/role.enum';
 import { sumAmounts } from '../../../common/utils/balance.util';
+import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 import { CreateRawMaterialDto } from './dto/create-raw-material.dto';
 import { UpdateRawMaterialDto } from './dto/update-raw-material.dto';
 import { StockInDto } from './dto/stock-in.dto';
@@ -43,7 +44,12 @@ export class RawMaterialsService {
     return { inStock, purchaseRate, stockValue: inStock * purchaseRate };
   }
 
-  async findAll(params: { search?: string; lowStockOnly?: boolean; viewerRole?: Role }) {
+  // Opt-in pagination, applied in JS rather than at the DB level: isLow is
+  // derived from summarizing each material's stock movements, and
+  // lowStockOnly filters on that derived value - paginating in SQL first
+  // would silently drop matching rows that fell outside the current page
+  // before the filter even ran.
+  async findAll(params: { search?: string; lowStockOnly?: boolean; viewerRole?: Role; page?: number; limit?: number }) {
     const group = params.viewerRole ? GROUP_FOR_ROLE[params.viewerRole] : undefined;
 
     const materials = await this.prisma.rawMaterial.findMany({
@@ -62,7 +68,13 @@ export class RawMaterialsService {
       return stripFinancials({ ...rest, inStock, purchaseRate, stockValue, isLow }, params.viewerRole);
     });
 
-    return params.lowStockOnly ? summarized.filter((m) => (m as any).isLow) : summarized;
+    const filtered = params.lowStockOnly ? summarized.filter((m) => (m as any).isLow) : summarized;
+
+    if (params.page == null) return filtered;
+    const page = params.page;
+    const limit = params.limit ?? 20;
+    const { skip, take } = toSkipTake(page, limit);
+    return paginate(filtered.slice(skip, skip + take), filtered.length, page, limit);
   }
 
   async findOne(id: string, viewerRole?: Role) {
@@ -182,27 +194,46 @@ export class RawMaterialsService {
     });
   }
 
-  async findAllMovements(params: { rawMaterialId?: string; type?: string; workItemId?: string; workerType?: string; viewerRole?: Role }) {
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  // Without `page`, keeps the previous 200-row cap so existing callers see
+  // the same behavior as before.
+  async findAllMovements(params: {
+    rawMaterialId?: string;
+    type?: string;
+    workItemId?: string;
+    workerType?: string;
+    viewerRole?: Role;
+    page?: number;
+    limit?: number;
+  }) {
     const group = params.viewerRole ? GROUP_FOR_ROLE[params.viewerRole] : undefined;
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = {
+      rawMaterialId: params.rawMaterialId,
+      type: params.type as any,
+      workItemId: params.workItemId,
+      workItem: params.workerType ? { carpenter: { workerType: params.workerType as any } } : undefined,
+      rawMaterial: group ? { materialGroup: group } : undefined,
+    };
 
-    const movements = await this.prisma.stockMovement.findMany({
-      where: {
-        rawMaterialId: params.rawMaterialId,
-        type: params.type as any,
-        workItemId: params.workItemId,
-        workItem: params.workerType ? { carpenter: { workerType: params.workerType as any } } : undefined,
-        rawMaterial: group ? { materialGroup: group } : undefined,
-      },
-      include: {
-        rawMaterial: { select: { id: true, name: true, unit: true } },
-        workItem: { select: { id: true, productName: true, carpenter: { select: { name: true, workerType: true } } } },
-        purchaseOrder: { select: { id: true, poNumber: true } },
-        createdBy: { select: { name: true } },
-      },
-      orderBy: { date: 'desc' },
-      take: 200,
-    });
+    const [movements, total] = await Promise.all([
+      this.prisma.stockMovement.findMany({
+        where,
+        include: {
+          rawMaterial: { select: { id: true, name: true, unit: true } },
+          workItem: { select: { id: true, productName: true, carpenter: { select: { name: true, workerType: true } } } },
+          purchaseOrder: { select: { id: true, poNumber: true } },
+          createdBy: { select: { name: true } },
+        },
+        orderBy: { date: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : { skip: 0, take: 200 }),
+      }),
+      paginated ? this.prisma.stockMovement.count({ where }) : Promise.resolve(0),
+    ]);
 
-    return movements.map((m) => stripFinancials(m, params.viewerRole));
+    const mapped = movements.map((m) => stripFinancials(m, params.viewerRole));
+    return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 }

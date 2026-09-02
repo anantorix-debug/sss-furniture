@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
@@ -20,8 +20,12 @@ export class SuppliersController {
   constructor(private service: SuppliersService) {}
 
   @Get()
-  findAll() {
-    return this.service.findAll();
+  findAll(@Query('search') search?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.service.findAll({
+      search,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get(':id')

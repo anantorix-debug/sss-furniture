@@ -1,21 +1,34 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
+import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class SuppliersService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    const suppliers = await this.prisma.supplier.findMany({
-      include: { purchases: true, payments: true },
-      orderBy: { name: 'asc' },
-    });
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { search?: string; page?: number; limit?: number } = {}) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where: Prisma.SupplierWhereInput = params.search ? { name: { contains: params.search } } : {};
 
-    return suppliers.map((s) => {
+    const [suppliers, total] = await Promise.all([
+      this.prisma.supplier.findMany({
+        where,
+        include: { purchases: true, payments: true },
+        orderBy: { name: 'asc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.supplier.count({ where }) : Promise.resolve(0),
+    ]);
+
+    const mapped = suppliers.map((s) => {
       const totalPurchaseValue = s.purchases.reduce((sum, p) => sum + Number(p.value), 0);
       const totalPaid = s.payments.reduce((sum, p) => sum + Number(p.amount), 0);
       return {
@@ -28,6 +41,7 @@ export class SuppliersService {
         balance: totalPurchaseValue - totalPaid,
       };
     });
+    return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 
   async findOne(id: string) {

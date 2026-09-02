@@ -19,8 +19,18 @@ export class WeeklyLabourController {
   constructor(private service: WeeklyLabourService) {}
 
   @Get()
-  findAll(@Query('carpenterId') carpenterId?: string, @Query('status') status?: string) {
-    return this.service.findAll({ carpenterId, status });
+  findAll(
+    @Query('carpenterId') carpenterId?: string,
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.findAll({
+      carpenterId,
+      status,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get('eligible-work-items')

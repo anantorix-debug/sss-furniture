@@ -20,6 +20,7 @@ import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import type { PartyOrder, DeliveryStatus } from '@/types';
+import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
 const emptyForm = {
   orderDate: new Date().toISOString().slice(0, 10),
@@ -40,10 +41,26 @@ function PartyOrdersContent() {
   const { hasRole } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const { data, isLoading, mutate } = useSWR<PartyOrder[]>(
-    `/party-orders?${new URLSearchParams({ ...(search ? { search } : {}), ...(statusFilter ? { status: statusFilter } : {}) })}`,
+  const [page, setPage] = useState(1);
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<PartyOrder>>(
+    `/party-orders?${new URLSearchParams({
+      ...(search ? { search } : {}),
+      ...(statusFilter ? { status: statusFilter } : {}),
+      page: String(page),
+      limit: '20',
+    })}`,
     fetcher,
   );
+  const data = result?.data;
+
+  function updateSearch(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
+  function updateStatusFilter(value: string) {
+    setStatusFilter(value);
+    setPage(1);
+  }
   const {
     showModal,
     whatsappOptions,
@@ -195,9 +212,9 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
           className="input max-w-xs"
           placeholder="Search shop, product, Model No..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => updateSearch(e.target.value)}
         />
-        <select className="input max-w-[160px]" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select className="input max-w-[160px]" value={statusFilter} onChange={(e) => updateStatusFilter(e.target.value)}>
           <option value="">All statuses</option>
           <option value="PENDING">Pending</option>
           <option value="DELIVERED">Delivered</option>
@@ -308,6 +325,9 @@ Expected Delivery: ${formatDate(order.actualDeliveryDate)}`,
             ))}
           </tbody>
         </table>
+        {result && (
+          <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+        )}
       </div>
 
       {formOpen && (

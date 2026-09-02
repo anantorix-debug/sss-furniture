@@ -10,6 +10,7 @@ import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
 import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
 import { computeBalance, suggestPaymentType } from '../../../common/utils/balance.util';
 import { generateJobNumber } from '../../../common/utils/job-number.util';
+import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 import { Role } from '../../../common/enums/role.enum';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
@@ -39,30 +40,40 @@ export class PartyOrdersService {
     private carpenter: CarpenterService,
   ) {}
 
-  async findAll(params: { status?: string; search?: string; viewerRole?: Role }) {
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { status?: string; search?: string; viewerRole?: Role; page?: number; limit?: number }) {
     const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
-    const orders = await this.prisma.partyOrder.findMany({
-      where: {
-        deliveryStatus: params.status ? (params.status as any) : undefined,
-        OR: params.search
-          ? [
-              { shopName: { contains: params.search } },
-              { model: { contains: params.search } },
-              { phone: { contains: params.search } },
-              { cotNo: { contains: params.search } },
-            ]
-          : undefined,
-      },
-      include: {
-        payments: true,
-        createdBy: { select: { id: true, name: true } },
-        assignedEmployee: { select: { id: true, name: true } },
-        assignedBy: { select: { id: true, name: true } },
-        modelNoUpdatedBy: { select: { id: true, name: true } },
-      },
-      orderBy: { orderDate: 'desc' },
-    });
-    return orders.map((o) => stripOrderMoney(withBalance(o), hide));
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = {
+      deliveryStatus: params.status ? (params.status as any) : undefined,
+      OR: params.search
+        ? [
+            { shopName: { contains: params.search } },
+            { model: { contains: params.search } },
+            { phone: { contains: params.search } },
+            { cotNo: { contains: params.search } },
+          ]
+        : undefined,
+    };
+    const [orders, total] = await Promise.all([
+      this.prisma.partyOrder.findMany({
+        where,
+        include: {
+          payments: true,
+          createdBy: { select: { id: true, name: true } },
+          assignedEmployee: { select: { id: true, name: true } },
+          assignedBy: { select: { id: true, name: true } },
+          modelNoUpdatedBy: { select: { id: true, name: true } },
+        },
+        orderBy: { orderDate: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.partyOrder.count({ where }) : Promise.resolve(0),
+    ]);
+    const mapped = orders.map((o) => stripOrderMoney(withBalance(o), hide));
+    return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 
   async findOne(id: string, viewerRole?: Role) {

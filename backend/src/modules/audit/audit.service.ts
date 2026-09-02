@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
 export interface AuditEntry {
   userId?: string;
@@ -34,12 +35,22 @@ export class AuditService {
     }
   }
 
-  async findAll(params: { action?: string; userId?: string; limit?: number }) {
-    return this.prisma.auditLog.findMany({
-      where: { action: params.action, userId: params.userId },
-      orderBy: { createdAt: 'desc' },
-      take: params.limit ?? 200,
-    });
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  // Without `page`, keeps the previous 200-row cap.
+  async findAll(params: { action?: string; userId?: string; page?: number; limit?: number }) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = { action: params.action, userId: params.userId };
+    const [logs, total] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : { skip: 0, take: 200 }),
+      }),
+      paginated ? this.prisma.auditLog.count({ where }) : Promise.resolve(0),
+    ]);
+    return paginated ? paginate(logs, total, page, limit) : logs;
   }
 
   /**

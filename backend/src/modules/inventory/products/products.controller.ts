@@ -21,9 +21,18 @@ export class ProductsController {
     @Query('search') search?: string,
     @Query('category') category?: string,
     @Query('modelNo') modelNo?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
   ) {
-    return this.service.findAll({ search, category, modelNo, viewerRole: user?.role as Role });
+    return this.service.findAll({
+      search,
+      category,
+      modelNo,
+      viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get(':id')

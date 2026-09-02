@@ -3,17 +3,28 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateWeeklyLabourDto } from './dto/create-weekly-labour.dto';
 import { UpdateWeeklyLabourDto } from './dto/update-weekly-labour.dto';
 import { RejectWeeklyLabourDto } from './dto/reject-weekly-labour.dto';
+import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class WeeklyLabourService {
   constructor(private prisma: PrismaService) {}
 
-  findAll(params: { carpenterId?: string; status?: string } = {}) {
-    return this.prisma.weeklyLabour.findMany({
-      where: { carpenterId: params.carpenterId, status: params.status as any },
-      include: { carpenter: true, submittedBy: { select: { id: true, name: true } }, reviewedBy: { select: { id: true, name: true } } },
-      orderBy: { weekStart: 'desc' },
-    });
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { carpenterId?: string; status?: string; page?: number; limit?: number } = {}) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = { carpenterId: params.carpenterId, status: params.status as any };
+    const [batches, total] = await Promise.all([
+      this.prisma.weeklyLabour.findMany({
+        where,
+        include: { carpenter: true, submittedBy: { select: { id: true, name: true } }, reviewedBy: { select: { id: true, name: true } } },
+        orderBy: { weekStart: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.weeklyLabour.count({ where }) : Promise.resolve(0),
+    ]);
+    return paginated ? paginate(batches, total, page, limit) : batches;
   }
 
   // Powers the "pick which completed cots go in this week's batch" step -

@@ -14,8 +14,12 @@ export class DispatchController {
   constructor(private service: DispatchService) {}
 
   @Get()
-  findAll(@Query('jobNumber') jobNumber?: string) {
-    return this.service.findAll(jobNumber);
+  findAll(@Query('jobNumber') jobNumber?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.service.findAll({
+      jobNumber,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get(':id')

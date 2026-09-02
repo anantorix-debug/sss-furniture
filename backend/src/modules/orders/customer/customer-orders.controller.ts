@@ -19,8 +19,20 @@ export class CustomerOrdersController {
   constructor(private service: CustomerOrdersService) {}
 
   @Get()
-  findAll(@Query('status') status?: string, @Query('search') search?: string, @CurrentUser() user?: AuthUser) {
-    return this.service.findAll({ status, search, viewerRole: user?.role as Role });
+  findAll(
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.service.findAll({
+      status,
+      search,
+      viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get(':id')

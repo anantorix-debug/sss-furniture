@@ -16,6 +16,7 @@ import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { PURCHASE_ORDER_STATUS_LABEL } from '@/types';
 import type { PurchaseOrder, PurchaseOrderStatus, RawMaterial, SupplierSummary } from '@/types';
+import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
 const STATUS_CHIP: Record<PurchaseOrderStatus, ChipColor> = {
   DRAFT: 'gray',
@@ -37,7 +38,12 @@ const emptyRow: ItemRow = { rawMaterialId: '', quantity: '', unitPrice: '' };
 
 function PurchaseOrdersContent() {
   const { hasRole } = useAuth();
-  const { data, isLoading, mutate } = useSWR<PurchaseOrder[]>('/purchase-orders', fetcher);
+  const [page, setPage] = useState(1);
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<PurchaseOrder>>(
+    `/purchase-orders?${new URLSearchParams({ page: String(page), limit: '20' })}`,
+    fetcher,
+  );
+  const data = result?.data;
   const { data: suppliers } = useSWR<SupplierSummary[]>('/suppliers', fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
 
@@ -310,6 +316,9 @@ function PurchaseOrdersContent() {
             ))}
           </tbody>
         </table>
+        {result && (
+          <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+        )}
       </div>
 
       {formOpen && (

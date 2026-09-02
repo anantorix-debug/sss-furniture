@@ -6,6 +6,7 @@ import { fetcher } from '@/lib/swr';
 import { RoleGate } from '@/components/RoleGate';
 import { formatDate } from '@/lib/format';
 import type { AuditLogEntry } from '@/types';
+import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
 const ACTION_LABEL: Record<string, string> = {
   LOGIN_SUCCESS: 'Login succeeded',
@@ -21,7 +22,16 @@ const ACTION_LABEL: Record<string, string> = {
 
 function AuditLogContent() {
   const [action, setAction] = useState('');
-  const { data, isLoading } = useSWR<AuditLogEntry[]>(`/audit-logs?${new URLSearchParams(action ? { action } : {})}`, fetcher);
+  const [page, setPage] = useState(1);
+  const { data: result, isLoading } = useSWR<PaginatedResult<AuditLogEntry>>(
+    `/audit-logs?${new URLSearchParams({ ...(action ? { action } : {}), page: String(page), limit: '20' })}`,
+    fetcher,
+  );
+  const data = result?.data;
+  function updateAction(value: string) {
+    setAction(value);
+    setPage(1);
+  }
 
   return (
     <div className="space-y-6">
@@ -30,7 +40,7 @@ function AuditLogContent() {
         <p className="text-sm text-brand-500 mt-1">Security-sensitive events: logins, password changes, role and access changes.</p>
       </div>
 
-      <select className="input max-w-xs" value={action} onChange={(e) => setAction(e.target.value)}>
+      <select className="input max-w-xs" value={action} onChange={(e) => updateAction(e.target.value)}>
         <option value="">All actions</option>
         {Object.entries(ACTION_LABEL).map(([value, label]) => (
           <option key={value} value={value}>
@@ -76,6 +86,9 @@ function AuditLogContent() {
             ))}
           </tbody>
         </table>
+        {result && (
+          <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+        )}
       </div>
     </div>
   );

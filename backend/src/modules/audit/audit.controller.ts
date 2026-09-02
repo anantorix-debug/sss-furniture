@@ -12,8 +12,18 @@ export class AuditController {
 
   @Roles(Role.SUPERADMIN)
   @Get()
-  findAll(@Query('action') action?: string, @Query('userId') userId?: string) {
-    return this.service.findAll({ action, userId });
+  findAll(
+    @Query('action') action?: string,
+    @Query('userId') userId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.findAll({
+      action,
+      userId,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Roles(Role.ADMIN)

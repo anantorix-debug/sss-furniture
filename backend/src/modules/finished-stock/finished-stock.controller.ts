@@ -13,8 +13,12 @@ export class FinishedStockController {
   constructor(private service: FinishedStockService) {}
 
   @Get()
-  findAll(@Query('status') status?: string) {
-    return this.service.findAll(status);
+  findAll(@Query('status') status?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.service.findAll({
+      status,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get(':id')

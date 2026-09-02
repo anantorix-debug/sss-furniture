@@ -17,8 +17,20 @@ export class RawMaterialsController {
   constructor(private service: RawMaterialsService) {}
 
   @Get('raw-materials')
-  findAll(@Query('search') search?: string, @Query('lowStockOnly') lowStockOnly?: string, @CurrentUser() user?: AuthUser) {
-    return this.service.findAll({ search, lowStockOnly: lowStockOnly === 'true', viewerRole: user?.role as Role });
+  findAll(
+    @Query('search') search?: string,
+    @Query('lowStockOnly') lowStockOnly?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.service.findAll({
+      search,
+      lowStockOnly: lowStockOnly === 'true',
+      viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get('raw-materials/:id')
@@ -75,8 +87,18 @@ export class RawMaterialsController {
     @Query('type') type?: string,
     @Query('workItemId') workItemId?: string,
     @Query('workerType') workerType?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
   ) {
-    return this.service.findAllMovements({ rawMaterialId, type, workItemId, workerType, viewerRole: user?.role as Role });
+    return this.service.findAllMovements({
+      rawMaterialId,
+      type,
+      workItemId,
+      workerType,
+      viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 }

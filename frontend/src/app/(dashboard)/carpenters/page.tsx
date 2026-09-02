@@ -11,6 +11,7 @@ import { Modal } from '@/components/Modal';
 import { UpdateModelNoModal } from '@/components/UpdateModelNoModal';
 import { BalanceBadge, Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
 import type { CarpenterSummary, WorkerType, CustomerOrder, PartyOrder } from '@/types';
+import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
 const WORKER_TYPE_LABEL: Record<WorkerType, string> = {
   CARPENTER: 'Carpenter',
@@ -35,11 +36,17 @@ export default function CarpentersPage() {
   const { hasRole } = useAuth();
   const [tab, setTab] = useState<WorkerType | ''>('');
   const [showMine, setShowMine] = useState(false);
+  const [page, setPage] = useState(1);
   const isProductionEmployee = hasRole('CARPENTER') || hasRole('POLISHER');
-  const { data, isLoading, mutate } = useSWR<CarpenterSummary[]>(
-    `/carpenters${tab ? `?workerType=${tab}` : ''}`,
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<CarpenterSummary>>(
+    `/carpenters?${new URLSearchParams({ ...(tab ? { workerType: tab } : {}), page: String(page), limit: '20' })}`,
     fetcher,
   );
+  const data = result?.data;
+  function updateTab(value: WorkerType | '') {
+    setTab(value);
+    setPage(1);
+  }
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -110,7 +117,7 @@ export default function CarpentersPage() {
         {TABS.map((t) => (
           <button
             key={t.value}
-            onClick={() => setTab(t.value)}
+            onClick={() => updateTab(t.value)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
               tab === t.value ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
             }`}
@@ -163,6 +170,9 @@ export default function CarpentersPage() {
           </Link>
         ))}
       </div>
+      {result && (
+        <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+      )}
         </>
       )}
 

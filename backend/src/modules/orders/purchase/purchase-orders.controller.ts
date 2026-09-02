@@ -17,8 +17,18 @@ export class PurchaseOrdersController {
   constructor(private service: PurchaseOrdersService) {}
 
   @Get()
-  findAll(@Query('status') status?: string, @Query('supplierId') supplierId?: string) {
-    return this.service.findAll({ status, supplierId });
+  findAll(
+    @Query('status') status?: string,
+    @Query('supplierId') supplierId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.findAll({
+      status,
+      supplierId,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get(':id')

@@ -2,17 +2,28 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
 import { UpdateDispatchDto } from './dto/update-dispatch.dto';
+import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class DispatchService {
   constructor(private prisma: PrismaService) {}
 
-  findAll(jobNumber?: string) {
-    return this.prisma.dispatchRecord.findMany({
-      where: jobNumber ? { jobNumber } : undefined,
-      include: { finishedStock: true, dispatchedBy: { select: { id: true, name: true } } },
-      orderBy: { dispatchDate: 'desc' },
-    });
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { jobNumber?: string; page?: number; limit?: number } = {}) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = params.jobNumber ? { jobNumber: params.jobNumber } : {};
+    const [records, total] = await Promise.all([
+      this.prisma.dispatchRecord.findMany({
+        where,
+        include: { finishedStock: true, dispatchedBy: { select: { id: true, name: true } } },
+        orderBy: { dispatchDate: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.dispatchRecord.count({ where }) : Promise.resolve(0),
+    ]);
+    return paginated ? paginate(records, total, page, limit) : records;
   }
 
   async findOne(id: string) {

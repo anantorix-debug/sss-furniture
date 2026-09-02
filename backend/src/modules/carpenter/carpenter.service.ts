@@ -8,6 +8,7 @@ import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
 import { Role } from '../../common/enums/role.enum';
+import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
 const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
 
@@ -33,14 +34,23 @@ export class CarpenterService {
 
   // --- Carpenters ------------------------------------------------------
 
-  async findAllCarpenters(params: { workerType?: string; viewerRole?: Role } = {}) {
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAllCarpenters(params: { workerType?: string; viewerRole?: Role; page?: number; limit?: number } = {}) {
     const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
-    const carpenters = await this.prisma.carpenter.findMany({
-      where: { workerType: params.workerType as any },
-      include: { workItems: true, payments: true },
-      orderBy: { name: 'asc' },
-    });
-    return carpenters.map((c) => {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = { workerType: params.workerType as any };
+    const [carpenters, total] = await Promise.all([
+      this.prisma.carpenter.findMany({
+        where,
+        include: { workItems: true, payments: true },
+        orderBy: { name: 'asc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.carpenter.count({ where }) : Promise.resolve(0),
+    ]);
+    const mapped = carpenters.map((c) => {
       const totalWorkValue = c.workItems.reduce((sum, w) => sum + Number(w.total), 0);
       const totalPaid = c.payments.reduce((sum, p) => sum + Number(p.amount), 0);
       return {
@@ -52,6 +62,7 @@ export class CarpenterService {
         ...(hide ? {} : { totalWorkValue, totalPaid, balance: totalWorkValue - totalPaid }),
       };
     });
+    return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 
   async findOneCarpenter(id: string, viewerRole?: Role) {
@@ -94,21 +105,35 @@ export class CarpenterService {
 
   // --- Work items --------------------------------------------------------
 
-  async findAllWorkItems(params: { carpenterId?: string; workerType?: string; viewerRole?: Role }) {
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  // `status` was previously accepted by no one - the frontend Production
+  // page was already filtering by it in the query string with no effect
+  // server-side, silently returning every status. Fixed here.
+  async findAllWorkItems(params: { carpenterId?: string; workerType?: string; status?: string; viewerRole?: Role; page?: number; limit?: number }) {
     const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
-    const items = await this.prisma.carpenterWorkItem.findMany({
-      where: {
-        carpenterId: params.carpenterId,
-        carpenter: params.workerType ? { workerType: params.workerType as any } : undefined,
-      },
-      include: {
-        carpenter: { select: { id: true, name: true, phone: true, workerType: true } },
-        createdBy: { select: { name: true } },
-        stockMovements: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } },
-      },
-      orderBy: { workDate: 'desc' },
-    });
-    return items.map((w) => stripWorkItemMoney(w, hide));
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = {
+      carpenterId: params.carpenterId,
+      status: params.status as any,
+      carpenter: params.workerType ? { workerType: params.workerType as any } : undefined,
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.carpenterWorkItem.findMany({
+        where,
+        include: {
+          carpenter: { select: { id: true, name: true, phone: true, workerType: true } },
+          createdBy: { select: { name: true } },
+          stockMovements: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } },
+        },
+        orderBy: { workDate: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.carpenterWorkItem.count({ where }) : Promise.resolve(0),
+    ]);
+    const mapped = items.map((w) => stripWorkItemMoney(w, hide));
+    return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 
   async createWorkItem(dto: CreateWorkItemDto, userId: string, viewerRole?: Role) {

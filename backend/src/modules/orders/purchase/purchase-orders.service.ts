@@ -5,6 +5,7 @@ import { PdfService } from '../../pdf/pdf.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { RejectPurchaseOrderDto } from './dto/reject-purchase-order.dto';
+import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 
 function generatePoNumber(): string {
   return `PO-${Date.now().toString(36).toUpperCase()}`;
@@ -27,13 +28,23 @@ export class PurchaseOrdersService {
     return { ...po, totalValue };
   }
 
-  async findAll(params: { status?: string; supplierId?: string }) {
-    const orders = await this.prisma.purchaseOrder.findMany({
-      where: { status: params.status as any, supplierId: params.supplierId },
-      include: { items: true, supplier: { select: { id: true, name: true } }, createdBy: { select: { name: true } } },
-      orderBy: { orderDate: 'desc' },
-    });
-    return orders.map((o) => this.withTotal(o));
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { status?: string; supplierId?: string; page?: number; limit?: number }) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = { status: params.status as any, supplierId: params.supplierId };
+    const [orders, total] = await Promise.all([
+      this.prisma.purchaseOrder.findMany({
+        where,
+        include: { items: true, supplier: { select: { id: true, name: true } }, createdBy: { select: { name: true } } },
+        orderBy: { orderDate: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.purchaseOrder.count({ where }) : Promise.resolve(0),
+    ]);
+    const mapped = orders.map((o) => this.withTotal(o));
+    return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 
   async findOne(id: string) {

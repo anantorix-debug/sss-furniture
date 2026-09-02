@@ -2,17 +2,28 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFinishedStockDto } from './dto/create-finished-stock.dto';
 import { UpdateFinishedStockDto } from './dto/update-finished-stock.dto';
+import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class FinishedStockService {
   constructor(private prisma: PrismaService) {}
 
-  findAll(status?: string) {
-    return this.prisma.finishedStockItem.findMany({
-      where: status ? { status: status as any } : undefined,
-      include: { dispatchRecords: true },
-      orderBy: { completionDate: 'desc' },
-    });
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { status?: string; page?: number; limit?: number } = {}) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = params.status ? { status: params.status as any } : {};
+    const [items, total] = await Promise.all([
+      this.prisma.finishedStockItem.findMany({
+        where,
+        include: { dispatchRecords: true },
+        orderBy: { completionDate: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.finishedStockItem.count({ where }) : Promise.resolve(0),
+    ]);
+    return paginated ? paginate(items, total, page, limit) : items;
   }
 
   async findOne(id: string) {

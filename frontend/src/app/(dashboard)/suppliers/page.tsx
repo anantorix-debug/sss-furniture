@@ -11,11 +11,22 @@ import { Modal } from '@/components/Modal';
 import { BalanceBadge } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
 import { downloadCsv } from '@/lib/csv';
+import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import type { SupplierSummary } from '@/types';
 
 function SuppliersContent() {
   const { hasRole } = useAuth();
-  const { data, isLoading, mutate } = useSWR<SupplierSummary[]>('/suppliers', fetcher);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<SupplierSummary>>(
+    `/suppliers?${new URLSearchParams({ ...(search ? { search } : {}), page: String(page), limit: '20' })}`,
+    fetcher,
+  );
+  const data = result?.data;
+  function updateSearch(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -75,6 +86,13 @@ function SuppliersContent() {
         </div>
       </div>
 
+      <input
+        className="input max-w-xs"
+        placeholder="Search supplier name..."
+        value={search}
+        onChange={(e) => updateSearch(e.target.value)}
+      />
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {isLoading && <p className="text-brand-400 text-sm">Loading suppliers...</p>}
         {data?.map((s) => (
@@ -103,6 +121,9 @@ function SuppliersContent() {
           </Link>
         ))}
       </div>
+      {result && (
+        <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+      )}
 
       {formOpen && (
         <Modal title="New Supplier" onClose={() => setFormOpen(false)}>

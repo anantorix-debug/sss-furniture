@@ -20,8 +20,18 @@ export class CarpenterController {
   // Carpenters
 
   @Get('carpenters')
-  findAllCarpenters(@Query('workerType') workerType?: string, @CurrentUser() user?: AuthUser) {
-    return this.service.findAllCarpenters({ workerType, viewerRole: user?.role as Role });
+  findAllCarpenters(
+    @Query('workerType') workerType?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.service.findAllCarpenters({
+      workerType,
+      viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get('carpenters/:id')
@@ -65,9 +75,19 @@ export class CarpenterController {
   findAllWorkItems(
     @Query('carpenterId') carpenterId?: string,
     @Query('workerType') workerType?: string,
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
   ) {
-    return this.service.findAllWorkItems({ carpenterId, workerType, viewerRole: user?.role as Role });
+    return this.service.findAllWorkItems({
+      carpenterId,
+      workerType,
+      status,
+      viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get('carpenter-work-items/:id')

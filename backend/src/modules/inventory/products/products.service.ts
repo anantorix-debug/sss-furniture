@@ -7,6 +7,7 @@ import { AuditService } from '../../audit/audit.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Role } from '../../../common/enums/role.enum';
+import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 
 const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
 
@@ -43,24 +44,34 @@ export class ProductsService {
 
   private readonly imagesInclude = { images: { orderBy: { isPrimary: 'desc' as const } } };
 
-  async findAll(params: { search?: string; category?: string; modelNo?: string; viewerRole?: Role }) {
-    const products = await this.prisma.product.findMany({
-      where: {
-        category: params.category || undefined,
-        modelNo: params.modelNo || undefined,
-        OR: params.search
-          ? [
-              { name: { contains: params.search } },
-              { sku: { contains: params.search } },
-              { modelNo: { contains: params.search } },
-              { category: { contains: params.search } },
-            ]
-          : undefined,
-      },
-      include: this.imagesInclude,
-      orderBy: { name: 'asc' },
-    });
-    return products.map((p) => withNumericPrices(p, params.viewerRole));
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { search?: string; category?: string; modelNo?: string; viewerRole?: Role; page?: number; limit?: number }) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = {
+      category: params.category || undefined,
+      modelNo: params.modelNo || undefined,
+      OR: params.search
+        ? [
+            { name: { contains: params.search } },
+            { sku: { contains: params.search } },
+            { modelNo: { contains: params.search } },
+            { category: { contains: params.search } },
+          ]
+        : undefined,
+    };
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where,
+        include: this.imagesInclude,
+        orderBy: { name: 'asc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.product.count({ where }) : Promise.resolve(0),
+    ]);
+    const mapped = products.map((p) => withNumericPrices(p, params.viewerRole));
+    return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 
   async findOne(id: string, viewerRole?: Role) {

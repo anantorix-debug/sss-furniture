@@ -2,17 +2,28 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateQualityCheckDto } from './dto/create-quality-check.dto';
 import { UpdateQualityCheckDto } from './dto/update-quality-check.dto';
+import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class QualityCheckService {
   constructor(private prisma: PrismaService) {}
 
-  findAll(jobNumber?: string) {
-    return this.prisma.qualityCheck.findMany({
-      where: jobNumber ? { jobNumber } : undefined,
-      include: { workItem: true, inspectedBy: { select: { id: true, name: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: { jobNumber?: string; page?: number; limit?: number } = {}) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = params.jobNumber ? { jobNumber: params.jobNumber } : {};
+    const [checks, total] = await Promise.all([
+      this.prisma.qualityCheck.findMany({
+        where,
+        include: { workItem: true, inspectedBy: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'desc' },
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.qualityCheck.count({ where }) : Promise.resolve(0),
+    ]);
+    return paginated ? paginate(checks, total, page, limit) : checks;
   }
 
   async findOne(id: string) {
