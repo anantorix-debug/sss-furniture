@@ -105,14 +105,20 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
 
     const authPath = this.config.get<string>('WWEBJS_AUTH_PATH') ?? '.wwebjs_auth';
     const chromePath = this.config.get<string>('PUPPETEER_EXECUTABLE_PATH');
-    const persistentProfileDir = '/app/data/whatsapp-session';
 
     this.logger.log(`[WhatsApp] Initializing client`);
     this.logger.log(`[WhatsApp] Auth path: ${authPath}`);
-    this.logger.log(`[WhatsApp] Chromium profile: ${persistentProfileDir}`);
     this.logger.log(`[WhatsApp] Chrome path: ${chromePath || '(default/bundled Chromium)'}`);
 
     this.client = new Client({
+      // LocalAuth owns the Chrome profile directory (under authPath) - it
+      // must be the only thing setting --user-data-dir. A previous
+      // hardcoded `--user-data-dir=/app/data/whatsapp-session` here (a
+      // leftover Docker WORKDIR path that doesn't exist outside that
+      // container) silently won as Chromium's last-flag-wins, splitting
+      // session data across two directories and leaving init stuck forever
+      // outside Docker, since the profile LocalAuth thought it managed was
+      // never the one Chromium actually used.
       authStrategy: new LocalAuth({ dataPath: authPath }),
       puppeteer: {
         headless: 'new',
@@ -132,7 +138,6 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
           '--disable-component-extensions-with-background-pages',
           '--disable-component-update',
           '--disable-default-apps-backup',
-          `--user-data-dir=${persistentProfileDir}`,
         ],
         executablePath: chromePath || undefined,
       },
