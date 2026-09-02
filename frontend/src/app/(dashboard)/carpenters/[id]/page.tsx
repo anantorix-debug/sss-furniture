@@ -237,11 +237,13 @@ Please confirm receipt.`,
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard label="Total Work Value" value={formatCurrency(carpenter.totalWorkValue ?? 0)} />
-        <StatCard label="Total Paid" value={formatCurrency(carpenter.totalPaid ?? 0)} accent="success" />
-        <StatCard label="Balance Payable" value={formatCurrency(carpenter.balance ?? 0)} accent="warning" />
-      </div>
+      {canEdit && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatCard label="Total Work Value" value={formatCurrency(carpenter.totalWorkValue ?? 0)} />
+          <StatCard label="Total Paid" value={formatCurrency(carpenter.totalPaid ?? 0)} accent="success" />
+          <StatCard label="Balance Payable" value={formatCurrency(carpenter.balance ?? 0)} accent="warning" />
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">{notice}</p>}
@@ -258,7 +260,7 @@ Please confirm receipt.`,
                 <th>Product</th>
                 <th>Size</th>
                 <th>Qty</th>
-                <th>Total</th>
+                {canEdit && <th>Total</th>}
                 <th>Materials Used</th>
                 <th>Status</th>
                 <th></th>
@@ -267,7 +269,7 @@ Please confirm receipt.`,
             <tbody>
               {carpenter.workItems.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="text-center text-brand-400 py-4">
+                  <td colSpan={canEdit ? 10 : 9} className="text-center text-brand-400 py-4">
                     No work items yet
                   </td>
                 </tr>
@@ -285,7 +287,7 @@ Please confirm receipt.`,
                   </td>
                   <td>{w.size ?? '-'}</td>
                   <td>{w.quantity}</td>
-                  <td className="font-medium">{formatCurrency(w.total ?? 0)}</td>
+                  {canEdit && <td className="font-medium">{formatCurrency(w.total ?? 0)}</td>}
                   <td className="max-w-[220px]">
                     {!w.stockMovements || w.stockMovements.length === 0 ? (
                       <span className="text-brand-300 text-xs">None issued</span>
@@ -505,7 +507,7 @@ Please confirm receipt.`,
 
 export default function CarpenterDetailPage() {
   return (
-    <RoleGate minRole="ADMIN">
+    <RoleGate minRole={['ADMIN', 'CARPENTER', 'POLISHER']}>
       <CarpenterDetailContent />
     </RoleGate>
   );

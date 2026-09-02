@@ -133,11 +133,8 @@ export default function CarpentersPage() {
         {data?.map((c) => (
           <Link
             key={c.id}
-            href={hasRole('ADMIN') ? `/carpenters/${c.id}` : '#'}
-            className={`card p-5 block ${hasRole('ADMIN') ? 'hover:shadow-md transition-shadow' : 'cursor-default'}`}
-            onClick={(e) => {
-              if (!hasRole('ADMIN')) e.preventDefault();
-            }}
+            href={`/carpenters/${c.id}`}
+            className="card p-5 block hover:shadow-md transition-shadow"
           >
             <div className="flex items-start justify-between">
               <div>
