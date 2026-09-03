@@ -14,7 +14,7 @@ import { RoleGate } from '@/components/RoleGate';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
-import type { CarpenterDetail, ProductionStage, RawMaterial, WorkStatus } from '@/types';
+import type { CarpenterDetail, ProductionStage, RawMaterial, StockMovement, WorkStatus } from '@/types';
 
 const emptyWork = {
   stage: 'CARPENTER' as ProductionStage,
@@ -59,6 +59,7 @@ function CarpenterDetailContent() {
   const { hasRole } = useAuth();
   const { data: carpenter, isLoading, mutate } = useSWR<CarpenterDetail>(`/carpenters/${id}`, fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
+  const { data: materialsUsed } = useSWR<StockMovement[]>(`/stock-movements?type=OUT&carpenterId=${id}`, fetcher);
   const {
     showModal,
     whatsappOptions,
@@ -354,6 +355,44 @@ Please confirm receipt.`,
             Assign Work
           </button>
         </form>
+      </div>
+
+      <div className="card p-5">
+        <h2 className="font-semibold text-brand-900 mb-3">Materials Used</h2>
+        <p className="text-xs text-brand-400 mb-3">Every material issued against this employee&apos;s work items, most recent first.</p>
+        <div className="max-h-64 overflow-y-auto rounded-lg border border-brand-100">
+          <table className="table-shell">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Material</th>
+                <th>Qty</th>
+                <th>Work Item</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(!materialsUsed || materialsUsed.length === 0) && (
+                <tr>
+                  <td colSpan={5} className="text-center text-brand-400 py-4">
+                    No materials issued yet
+                  </td>
+                </tr>
+              )}
+              {materialsUsed?.map((m) => (
+                <tr key={m.id}>
+                  <td>{formatDate(m.date)}</td>
+                  <td className="font-medium">{m.rawMaterial?.name ?? '-'}</td>
+                  <td className="text-red-600">
+                    {m.quantity} {m.rawMaterial?.unit}
+                  </td>
+                  <td className="text-brand-500">{m.workItem?.productName ?? '-'}</td>
+                  <td className="text-brand-500">{m.reason ?? '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card p-5">

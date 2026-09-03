@@ -202,6 +202,7 @@ export class RawMaterialsService {
     type?: string;
     workItemId?: string;
     workerType?: string;
+    carpenterId?: string;
     viewerRole?: Role;
     page?: number;
     limit?: number;
@@ -214,7 +215,13 @@ export class RawMaterialsService {
       rawMaterialId: params.rawMaterialId,
       type: params.type as any,
       workItemId: params.workItemId,
-      workItem: params.workerType ? { carpenter: { workerType: params.workerType as any } } : undefined,
+      workItem:
+        params.workerType || params.carpenterId
+          ? {
+              carpenterId: params.carpenterId,
+              carpenter: params.workerType ? { workerType: params.workerType as any } : undefined,
+            }
+          : undefined,
       rawMaterial: group ? { materialGroup: group } : undefined,
     };
 
