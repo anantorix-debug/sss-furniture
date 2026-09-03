@@ -124,6 +124,14 @@ export function WhatsAppModal({
       chat.id.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
+  // Not everyone the app needs to message is already a WhatsApp contact -
+  // the backend accepts a raw phone number directly (it normalizes/resolves
+  // it the same way it would an existing chat), so once the search box
+  // holds something phone-shaped, offer sending to it directly instead of
+  // dead-ending on "no chats match".
+  const manualDigits = searchQuery.replace(/\D/g, '');
+  const canSendManually = manualDigits.length >= 10;
+
   async function handleSend() {
     if (!selectedChat || (!message.trim() && !mediaFile)) {
       setError('Please select a chat and enter a message or attach a file');
@@ -218,10 +226,30 @@ export function WhatsAppModal({
                   ))}
                 </div>
               ) : (
-                <div className="p-4 bg-brand-50 rounded-lg text-center text-sm text-brand-500">
-                  {chats?.length === 0
-                    ? 'No chats available'
-                    : 'No chats match your search'}
+                <div className="p-4 bg-brand-50 rounded-lg text-center text-sm text-brand-500 space-y-2">
+                  <p>{chats?.length === 0 ? 'No chats available' : 'No chats match your search'}</p>
+                  {canSendManually && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedChat({ id: manualDigits, name: searchQuery, isGroup: false, unread: 0, timestamp: null, phoneNumber: manualDigits })
+                      }
+                      className="btn-secondary text-xs"
+                    >
+                      Send to {searchQuery} directly (not in contacts)
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Manually-entered number, not one of the fetched chats - still
+                  shown as a selectable option so it isn't lost once chosen. */}
+              {selectedChat && !chats?.some((c) => c.id === selectedChat.id) && (
+                <div className="mt-2 p-3 rounded-lg border border-blue-200 bg-blue-50 text-sm text-blue-900 flex items-center justify-between">
+                  <span>Manually entered: {selectedChat.name}</span>
+                  <button type="button" className="text-xs text-blue-700 hover:underline" onClick={() => setSelectedChat(null)}>
+                    Change
+                  </button>
                 </div>
               )}
             </div>

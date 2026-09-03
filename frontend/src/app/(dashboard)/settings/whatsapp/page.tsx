@@ -94,6 +94,13 @@ function WhatsappSettingsContent() {
     return chats.filter((chat) => chat.name.toLowerCase().includes(query));
   }, [chats, searchQuery]);
 
+  // Not everyone the app needs to message is already a WhatsApp contact -
+  // the backend accepts a raw phone number directly, so once the search box
+  // holds something phone-shaped, offer sending to it directly instead of
+  // dead-ending on "no chats match".
+  const manualDigits = searchQuery.replace(/\D/g, '');
+  const canSendManually = manualDigits.length >= 10;
+
   async function handleLogout() {
     if (!confirm('Are you sure you want to disconnect WhatsApp?')) return;
     setDisconnecting(true);
@@ -260,7 +267,29 @@ function WhatsappSettingsContent() {
             )}
 
             {!chatsLoading && filteredChats.length === 0 && chats && chats.length > 0 && (
-              <p className="text-sm text-brand-500 text-center py-4">No chats match your search</p>
+              <div className="text-center py-4 space-y-2">
+                <p className="text-sm text-brand-500">No chats match your search</p>
+                {canSendManually && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedChat({ id: manualDigits, name: searchQuery, isGroup: false, unread: 0, timestamp: null, phoneNumber: manualDigits })
+                    }
+                    className="btn-secondary text-xs"
+                  >
+                    Send to {searchQuery} directly (not in contacts)
+                  </button>
+                )}
+              </div>
+            )}
+
+            {selectedChat && !chats?.some((c) => c.id === selectedChat.id) && (
+              <div className="mt-2 p-3 rounded-lg border border-blue-200 bg-blue-50 text-sm text-blue-900 flex items-center justify-between">
+                <span>Manually entered: {selectedChat.name}</span>
+                <button type="button" className="text-xs text-blue-700 hover:underline" onClick={() => setSelectedChat(null)}>
+                  Change
+                </button>
+              </div>
             )}
           </div>
 
