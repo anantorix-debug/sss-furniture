@@ -330,14 +330,17 @@ export class CarpenterService {
       data: { status: dto.status as any, qcNote: dto.qcNote },
     });
 
-    // Notify Super Admin exactly once per genuine transition into
-    // COMPLETED - not on every re-save while it's already completed. The
-    // hand-off to the next stage (e.g. Carpenter -> Carving) stays manual;
-    // this just makes sure Super Admin knows a stage finished.
-    if (dto.status === 'COMPLETED' && existing.status !== 'COMPLETED') {
+    // Notify Super Admin/Admin of every genuine status transition (not a
+    // re-save while already at that status) - same event for every worker
+    // type (Carpenter/Polisher/Carver), since they all share this one
+    // work-item status flow. COMPLETED keeps its own richer, dedicated
+    // action/label; every other transition (ASSIGNED -> IN_PROGRESS,
+    // -> QUALITY_CHECK, -> REWORK, ...) gets a generic one so none of them
+    // go unnoticed.
+    if (dto.status !== existing.status) {
       await this.audit.log({
         userId,
-        action: 'WORK_ITEM_COMPLETED',
+        action: dto.status === 'COMPLETED' ? 'WORK_ITEM_COMPLETED' : 'WORK_ITEM_STATUS_CHANGED',
         targetType: 'CarpenterWorkItem',
         targetId: id,
         metadata: {
@@ -345,6 +348,8 @@ export class CarpenterService {
           modelNo: existing.modelNo,
           productName: existing.productName,
           carpenterName: existing.carpenter?.name,
+          fromStatus: existing.status,
+          toStatus: dto.status,
         },
       });
     }

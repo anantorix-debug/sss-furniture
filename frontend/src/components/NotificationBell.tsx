@@ -13,6 +13,13 @@ function meta(a: AuditLogEntry, key: string): string {
 }
 
 const STAGE_LABEL: Record<string, string> = { CARPENTER: 'Carpenter', CARVING: 'Carving', POLISH: 'Polish' };
+const STATUS_LABEL: Record<string, string> = {
+  ASSIGNED: 'Assigned',
+  IN_PROGRESS: 'In Progress',
+  QUALITY_CHECK: 'Quality Check',
+  REWORK: 'Rework',
+  COMPLETED: 'Completed',
+};
 
 const ACTIVITY_LABEL: Record<string, (a: AuditLogEntry) => string> = {
   CUSTOMER_ORDER_CREATED: (a) => `${a.user?.name} created customer order ${meta(a, 'orderId')} for ${meta(a, 'customerName')}`,
@@ -27,6 +34,16 @@ const ACTIVITY_LABEL: Record<string, (a: AuditLogEntry) => string> = {
     const stage = STAGE_LABEL[meta(a, 'stage')] ?? meta(a, 'stage');
     const modelNo = meta(a, 'modelNo');
     return `${meta(a, 'carpenterName') || a.user?.name} completed ${stage} stage for ${meta(a, 'productName')}${modelNo ? ` (Model No: ${modelNo})` : ''}`;
+  },
+  // Any other status transition (Assigned -> In Progress, -> Quality
+  // Check, -> Rework, ...) - same event for every worker type
+  // (Carpenter/Polisher/Carver), so none of them go unnoticed.
+  WORK_ITEM_STATUS_CHANGED: (a) => {
+    const stage = STAGE_LABEL[meta(a, 'stage')] ?? meta(a, 'stage');
+    const from = STATUS_LABEL[meta(a, 'fromStatus')] ?? meta(a, 'fromStatus');
+    const to = STATUS_LABEL[meta(a, 'toStatus')] ?? meta(a, 'toStatus');
+    const modelNo = meta(a, 'modelNo');
+    return `${meta(a, 'carpenterName') || a.user?.name} moved ${stage} work "${meta(a, 'productName')}"${modelNo ? ` (Model No: ${modelNo})` : ''} from ${from} to ${to}`;
   },
 };
 

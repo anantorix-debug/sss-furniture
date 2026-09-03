@@ -64,7 +64,15 @@ export class AuditService {
       where: {
         createdAt: { gte: since },
         action: {
-          in: ['CUSTOMER_ORDER_CREATED', 'PARTY_ORDER_CREATED', 'WORK_ITEM_CREATED', 'MATERIAL_ISSUED', 'MODEL_NO_UPDATED', 'WORK_ITEM_COMPLETED'],
+          in: [
+            'CUSTOMER_ORDER_CREATED',
+            'PARTY_ORDER_CREATED',
+            'WORK_ITEM_CREATED',
+            'MATERIAL_ISSUED',
+            'MODEL_NO_UPDATED',
+            'WORK_ITEM_COMPLETED',
+            'WORK_ITEM_STATUS_CHANGED',
+          ],
         },
         user: { role: { not: 'SUPERADMIN' } },
       },

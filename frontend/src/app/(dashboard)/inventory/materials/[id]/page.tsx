@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip } from '@/components/StatusBadge';
-import type { RawMaterialDetail } from '@/types';
+import type { RawMaterialDetail, CarpenterWorkItem } from '@/types';
 
 export default function MaterialDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -24,9 +24,15 @@ export default function MaterialDetailPage() {
   const canAdjust = hasRole('ADMIN');
   const canSeeCost = hasRole('ADMIN');
   const { data: material, isLoading, mutate } = useSWR<RawMaterialDetail>(`/raw-materials/${id}`, fetcher);
+  // Open work items to issue material against - lets Super Admin see
+  // exactly which employee (via the work item's assigned carpenter) took
+  // how much of this material, instead of issues going unattributed.
+  const { data: workItems } = useSWR<CarpenterWorkItem[]>(canStockIn ? '/carpenter-work-items' : null, fetcher);
+  const openWorkItems = (workItems ?? []).filter((w) => w.status !== 'COMPLETED');
 
   const [stockInForm, setStockInForm] = useState({ date: new Date().toISOString().slice(0, 10), quantity: '', unitCost: '', reason: '' });
   const [adjustForm, setAdjustForm] = useState({ date: new Date().toISOString().slice(0, 10), quantity: '', reason: '' });
+  const [issueForm, setIssueForm] = useState({ date: new Date().toISOString().slice(0, 10), workItemId: '', quantity: '', reason: '' });
   const [error, setError] = useState<string | null>(null);
 
   async function submitStockIn(e: React.FormEvent) {
@@ -44,6 +50,23 @@ export default function MaterialDetailPage() {
       mutate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to record stock in');
+    }
+  }
+
+  async function submitIssue(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.post('/raw-materials/issue', {
+        workItemId: issueForm.workItemId,
+        date: issueForm.date,
+        reason: issueForm.reason || undefined,
+        items: [{ rawMaterialId: id, quantity: parseFloat(issueForm.quantity) }],
+      });
+      setIssueForm({ date: new Date().toISOString().slice(0, 10), workItemId: '', quantity: '', reason: '' });
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to record issue');
     }
   }
 
@@ -152,6 +175,48 @@ export default function MaterialDetailPage() {
                 <input className="input" placeholder="Reason / reference (optional)" value={stockInForm.reason} onChange={(e) => setStockInForm((f) => ({ ...f, reason: e.target.value }))} />
                 <button type="submit" className="btn-primary w-full">
                   Record Stock In
+                </button>
+              </form>
+            </div>
+          )}
+
+          {canStockIn && (
+            <div className="card p-5">
+              <h2 className="font-semibold text-brand-900 mb-3">Issue Material (to a Work Item)</h2>
+              <p className="text-xs text-brand-400 mb-2">
+                Attributes this material to whichever employee is assigned to the work item, so Super Admin can see how much each
+                employee has used.
+              </p>
+              <form onSubmit={submitIssue} className="space-y-2">
+                <select
+                  className="input"
+                  required
+                  value={issueForm.workItemId}
+                  onChange={(e) => setIssueForm((f) => ({ ...f, workItemId: e.target.value }))}
+                >
+                  <option value="">Select work item...</option>
+                  {openWorkItems.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.productName}
+                      {w.modelNo ? ` (${w.modelNo})` : ''} - {w.carpenter?.name ?? 'Unassigned'} - {w.status}
+                    </option>
+                  ))}
+                </select>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input type="date" className="input" required value={issueForm.date} onChange={(e) => setIssueForm((f) => ({ ...f, date: e.target.value }))} />
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input"
+                    placeholder={`Quantity (${material.unit})`}
+                    required
+                    value={issueForm.quantity}
+                    onChange={(e) => setIssueForm((f) => ({ ...f, quantity: e.target.value }))}
+                  />
+                </div>
+                <input className="input" placeholder="Reason / reference (optional)" value={issueForm.reason} onChange={(e) => setIssueForm((f) => ({ ...f, reason: e.target.value }))} />
+                <button type="submit" className="btn-primary w-full">
+                  Record Issue
                 </button>
               </form>
             </div>
