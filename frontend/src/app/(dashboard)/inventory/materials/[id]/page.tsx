@@ -15,19 +15,21 @@ export default function MaterialDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { hasRole } = useAuth();
-  // Stock In (physical receipt) is open to the team that handles this
-  // material group, same as the backend @Roles(ADMIN, CARPENTER, POLISHER)
-  // on POST /raw-materials/stock-in - so Super Admin can see exactly how
-  // much material each employee brought in. Stock Adjustment (damage/
-  // wastage correction) stays Admin-only, matching the backend.
-  const canStockIn = hasRole('ADMIN', 'CARPENTER', 'POLISHER');
+  // Stock In (recording a new purchase/receipt) is Admin+ only, matching
+  // the backend @Roles(ADMIN) on POST /raw-materials/stock-in. Issuing
+  // material against a work item stays open to Carpenter/Polisher - that's
+  // the flow that lets Super Admin see how much material each employee
+  // actually used. Stock Adjustment (damage/wastage correction) is also
+  // Admin-only.
+  const canStockIn = hasRole('ADMIN');
+  const canIssue = hasRole('ADMIN', 'CARPENTER', 'POLISHER');
   const canAdjust = hasRole('ADMIN');
   const canSeeCost = hasRole('ADMIN');
   const { data: material, isLoading, mutate } = useSWR<RawMaterialDetail>(`/raw-materials/${id}`, fetcher);
   // Open work items to issue material against - lets Super Admin see
   // exactly which employee (via the work item's assigned carpenter) took
   // how much of this material, instead of issues going unattributed.
-  const { data: workItems } = useSWR<CarpenterWorkItem[]>(canStockIn ? '/carpenter-work-items' : null, fetcher);
+  const { data: workItems } = useSWR<CarpenterWorkItem[]>(canIssue ? '/carpenter-work-items' : null, fetcher);
   const openWorkItems = (workItems ?? []).filter((w) => w.status !== 'COMPLETED');
 
   const [stockInForm, setStockInForm] = useState({ date: new Date().toISOString().slice(0, 10), quantity: '', unitCost: '', reason: '' });
@@ -159,7 +161,7 @@ export default function MaterialDetailPage() {
         </div>
       </div>
 
-      {(canStockIn || canAdjust) && (
+      {(canStockIn || canIssue || canAdjust) && (
         <div className="grid lg:grid-cols-2 gap-6">
           {canStockIn && (
             <div className="card p-5">
@@ -180,7 +182,7 @@ export default function MaterialDetailPage() {
             </div>
           )}
 
-          {canStockIn && (
+          {canIssue && (
             <div className="card p-5">
               <h2 className="font-semibold text-brand-900 mb-3">Issue Material (to a Work Item)</h2>
               <p className="text-xs text-brand-400 mb-2">

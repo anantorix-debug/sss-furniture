@@ -56,12 +56,11 @@ export class RawMaterialsController {
     return this.service.remove(id);
   }
 
-  // Physical stock receipt is recorded by the team that handles that
-  // material group (Carpenter -> wood, Polisher -> polish supplies) per the
-  // "Carpenter verifies quantity, stock entry saved" workflow - not just
-  // Admin+. Financial fields (unit cost) are stripped from what they see,
-  // and any cost they submit is ignored server-side.
-  @Roles(Role.ADMIN, Role.CARPENTER, Role.POLISHER)
+  // Stock In (recording a new purchase/receipt) is Admin+ only - employee
+  // logins record material usage via /raw-materials/issue instead (that's
+  // the flow that attributes consumption to a specific work item/employee
+  // for Super Admin to monitor).
+  @Roles(Role.ADMIN)
   @Post('raw-materials/stock-in')
   stockIn(@Body() dto: StockInDto, @CurrentUser() user: AuthUser) {
     return this.service.stockIn(dto, user.userId, user.role as Role);
