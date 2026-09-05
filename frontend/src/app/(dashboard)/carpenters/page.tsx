@@ -11,10 +11,10 @@ import { Modal } from '@/components/Modal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { UpdateModelNoModal } from '@/components/UpdateModelNoModal';
 import { BalanceBadge, Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
-import type { CarpenterSummary, WorkerType, CustomerOrder, PartyOrder } from '@/types';
+import type { CarpenterSummary, WorkerType, CustomerOrder, PartyOrder, User } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
-const emptyWorkerForm = { name: '', phone: '', workerType: 'CARPENTER' as WorkerType };
+const emptyWorkerForm = { name: '', phone: '', workerType: 'CARPENTER' as WorkerType, userId: '' };
 
 const WORKER_TYPE_LABEL: Record<WorkerType, string> = {
   CARPENTER: 'Carpenter',
@@ -36,11 +36,15 @@ const TABS: { value: WorkerType | ''; label: string }[] = [
 ];
 
 export default function CarpentersPage() {
-  const { hasRole } = useAuth();
+  const { user, hasRole } = useAuth();
   const [tab, setTab] = useState<WorkerType | ''>('');
-  const [showMine, setShowMine] = useState(false);
   const [page, setPage] = useState(1);
-  const isProductionEmployee = hasRole('CARPENTER') || hasRole('POLISHER');
+  // Checked literally against the login's own role - Super Admin's usual
+  // "bypasses every check" doesn't apply here. "My Assigned Orders" is
+  // meaningless for Super Admin/Admin (they have no assignedEmployeeId
+  // orders of their own), so it must not show for them just because
+  // hasRole() always returns true for Super Admin.
+  const isProductionEmployee = user?.role === 'CARPENTER' || user?.role === 'CARVER' || user?.role === 'POLISHER';
   const { data: result, isLoading, mutate } = useSWR<PaginatedResult<CarpenterSummary>>(
     `/carpenters?${new URLSearchParams({ ...(tab ? { workerType: tab } : {}), page: String(page), limit: '20' })}`,
     fetcher,
@@ -56,6 +60,8 @@ export default function CarpentersPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CarpenterSummary | null>(null);
+  const { data: loginUsers } = useSWR<User[]>(formOpen && hasRole('SUPERADMIN') ? '/users' : null, fetcher);
+  const productionLogins = (loginUsers ?? []).filter((u) => u.role === 'CARPENTER' || u.role === 'CARVER' || u.role === 'POLISHER');
 
   function openCreate() {
     setEditing(null);
@@ -66,7 +72,7 @@ export default function CarpentersPage() {
 
   function openEditWorker(w: CarpenterSummary) {
     setEditing(w);
-    setForm({ name: w.name, phone: w.phone ?? '', workerType: w.workerType });
+    setForm({ name: w.name, phone: w.phone ?? '', workerType: w.workerType, userId: w.user?.id ?? '' });
     setError(null);
     setFormOpen(true);
   }
@@ -76,11 +82,12 @@ export default function CarpentersPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const payload = { name: form.name, phone: form.phone || undefined, workerType: form.workerType };
       if (editing) {
-        await api.patch(`/carpenters/${editing.id}`, payload);
+        // Always send userId explicitly (even when clearing it back to
+        // "no login") so unlinking actually works, not just linking.
+        await api.patch(`/carpenters/${editing.id}`, { name: form.name, phone: form.phone || undefined, workerType: form.workerType, userId: form.userId || null });
       } else {
-        await api.post('/carpenters', payload);
+        await api.post('/carpenters', { name: form.name, phone: form.phone || undefined, workerType: form.workerType, userId: form.userId || undefined });
       }
       setFormOpen(false);
       mutate();
@@ -108,9 +115,11 @@ export default function CarpentersPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-brand-900">Production Workers</h1>
+          <h1 className="text-2xl font-bold text-brand-900">{isProductionEmployee ? 'My Assigned Orders' : 'Production Workers'}</h1>
           <p className="text-sm text-brand-500 mt-1">
-            Carpenters, Polishers and Carving Men. Assign work, track output value and payments. Work assignments notify by WhatsApp.
+            {isProductionEmployee
+              ? 'Orders assigned to you for Model No entry.'
+              : 'Carpenters, Polishers and Carving Men. Assign work, track output value and payments. Work assignments notify by WhatsApp.'}
           </p>
         </div>
         {hasRole('ADMIN') && (
@@ -122,28 +131,7 @@ export default function CarpentersPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {isProductionEmployee && (
-        <div className="flex gap-1 border-b border-brand-200">
-          <button
-            onClick={() => setShowMine(false)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              !showMine ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
-            }`}
-          >
-            Workers
-          </button>
-          <button
-            onClick={() => setShowMine(true)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              showMine ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
-            }`}
-          >
-            My Assigned Orders
-          </button>
-        </div>
-      )}
-
-      {isProductionEmployee && showMine ? (
+      {isProductionEmployee ? (
         <MyAssignedOrders />
       ) : (
         <>
@@ -250,6 +238,18 @@ export default function CarpentersPage() {
               <label className="label">WhatsApp Phone</label>
               <input className="input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="9876543210" />
               <p className="text-xs text-brand-400 mt-1">Used to send work-assignment notifications via WhatsApp.</p>
+            </div>
+            <div>
+              <label className="label">Linked Login (optional)</label>
+              <select className="input" value={form.userId} onChange={(e) => setForm((f) => ({ ...f, userId: e.target.value }))}>
+                <option value="">No app login</option>
+                {productionLogins.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.role === 'CARPENTER' ? 'Carpenter Team' : u.role === 'CARVER' ? 'Carving Team' : 'Polish Team'})
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-brand-400 mt-1">Links this payee to their own login so their jobs show up on their My Work page.</p>
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <div className="flex justify-end gap-2 pt-2">

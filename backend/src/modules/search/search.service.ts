@@ -3,22 +3,23 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '../../common/enums/role.enum';
 import { computeBalance } from '../../common/utils/balance.util';
 
-const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
+const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.CARVER, Role.POLISHER];
 
 @Injectable()
 export class SearchService {
   constructor(private prisma: PrismaService) {}
 
   // Global Search is Model No-only: it matches CustomerOrder.cotTrack,
-  // PartyOrder.cotNo, Product.modelNo, and CarpenterWorkItem.modelNo - the
-  // four places "Model No" is stored - and nothing else (no Order ID, phone,
-  // or customer name matching). Model No is the single key that ties order,
-  // production, employee, and delivery/payment history together.
+  // PartyOrder.cotNo (legacy single-product rows) / PartyOrderItem.modelNo
+  // (current multi-line rows), Product.modelNo, and CarpenterWorkItem.modelNo
+  // - the places "Model No" is stored - and nothing else (no Order ID,
+  // phone, or customer name matching). Model No is the single key that ties
+  // order, production, employee, and delivery/payment history together.
   async track(modelNo: string, viewerRole?: Role) {
     const hideFinancials = viewerRole ? HIDE_FINANCIALS_FOR.includes(viewerRole) : false;
     const trimmed = modelNo.trim();
 
-    const [product, customerOrders, partyOrders, workItems] = await Promise.all([
+    const [product, customerOrders, partyOrders, partyOrderItems, workItems] = await Promise.all([
       this.prisma.product.findFirst({ where: { modelNo: trimmed } }),
       this.prisma.customerOrder.findMany({
         where: { cotTrack: trimmed },
@@ -39,6 +40,14 @@ export class SearchService {
           modelNoUpdatedBy: { select: { name: true } },
         },
         orderBy: { orderDate: 'desc' },
+      }),
+      this.prisma.partyOrderItem.findMany({
+        where: { modelNo: trimmed },
+        include: {
+          order: { include: { payments: true, createdBy: { select: { name: true } } } },
+          modelNoUpdatedBy: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
       }),
       this.prisma.carpenterWorkItem.findMany({
         where: { modelNo: trimmed },
@@ -75,7 +84,7 @@ export class SearchService {
 
     return {
       query: trimmed,
-      found: Boolean(product || customerOrders.length || partyOrders.length || workItems.length),
+      found: Boolean(product || customerOrders.length || partyOrders.length || partyOrderItems.length || workItems.length),
       product: product
         ? {
             id: product.id,
@@ -141,6 +150,33 @@ export class SearchService {
           modelNoUpdatedAt: order.modelNoUpdatedAt,
           paymentStatus: balanceAmount <= 0 ? ('SETTLED' as const) : ('DUE' as const),
           ...(hideFinancials ? {} : { price: Number(order.price), totalAmount: Number(order.totalAmount), totalReceived, balanceAmount }),
+        };
+      }),
+      // Multi-line Party Order matches (current flow) - one entry per
+      // matching product line, each carrying its own order/shop context
+      // since a single order can now hold many different Model Nos.
+      partyOrderItems: partyOrderItems.map((item) => {
+        const { totalReceived, balanceAmount } = computeBalance(Number(item.order.totalAmount), item.order.payments);
+        return {
+          id: item.id,
+          orderId: item.orderId,
+          modelNo: item.modelNo,
+          productName: item.productName,
+          finish: item.finish,
+          size: item.size,
+          qty: item.qty,
+          stockReservedQty: item.stockReservedQty,
+          productionQty: item.productionQty,
+          shopName: item.order.shopName,
+          phone: item.order.phone,
+          deliveryStatus: item.order.deliveryStatus,
+          orderDate: item.order.orderDate,
+          actualDeliveryDate: item.order.actualDeliveryDate,
+          createdBy: item.order.createdBy?.name,
+          modelNoUpdatedBy: item.modelNoUpdatedBy?.name ?? null,
+          modelNoUpdatedAt: item.modelNoUpdatedAt,
+          paymentStatus: balanceAmount <= 0 ? ('SETTLED' as const) : ('DUE' as const),
+          ...(hideFinancials ? {} : { unitPrice: Number(item.unitPrice), totalValue: Number(item.totalValue), totalReceived, balanceAmount }),
         };
       }),
       workItems: workItems.map((w) => ({

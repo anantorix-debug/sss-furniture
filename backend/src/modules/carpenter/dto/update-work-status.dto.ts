@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export enum WorkStatusDto {
   ASSIGNED = 'ASSIGNED',
@@ -15,4 +15,11 @@ export class UpdateWorkStatusDto {
   @IsString()
   @IsOptional()
   qcNote?: string;
+
+  // Admin/Super Admin override to skip the stage-order guard (e.g. finish
+  // Carving straight to COMPLETED without a Polish stage). Ignored for any
+  // other role - see CarpenterService.updateWorkStatus.
+  @IsBoolean()
+  @IsOptional()
+  force?: boolean;
 }

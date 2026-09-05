@@ -24,6 +24,9 @@ import { FinishedStockModule } from './modules/finished-stock/finished-stock.mod
 import { DispatchModule } from './modules/dispatch/dispatch.module';
 import { WeeklyLabourModule } from './modules/weekly-labour/weekly-labour.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
+import { ShopsModule } from './modules/shops/shops.module';
+import { GalleryModule } from './modules/gallery/gallery.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -51,6 +54,9 @@ import { ExpensesModule } from './modules/expenses/expenses.module';
     DispatchModule,
     WeeklyLabourModule,
     ExpensesModule,
+    ShopsModule,
+    GalleryModule,
+    NotificationsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

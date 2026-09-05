@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { Role } from '../../../common/enums/role.enum';
 import { sumAmounts } from '../../../common/utils/balance.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
@@ -10,20 +11,24 @@ import { StockInDto } from './dto/stock-in.dto';
 import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
 import { IssueMaterialDto } from './dto/issue-material.dto';
 
-// Carpenter team only ever touches WOOD materials, Polish team only POLISH.
-// Admin/Superadmin see everything, including uncategorized OTHER materials.
-const GROUP_FOR_ROLE: Partial<Record<Role, 'WOOD' | 'POLISH'>> = {
+// Carpenter team only ever touches WOOD materials, Carving team CARVING,
+// Polish team POLISH. Admin/Superadmin see everything, including
+// uncategorized OTHER materials.
+const GROUP_FOR_ROLE: Partial<Record<Role, 'WOOD' | 'CARVING' | 'POLISH'>> = {
   [Role.CARPENTER]: 'WOOD',
+  [Role.CARVER]: 'CARVING',
   [Role.POLISHER]: 'POLISH',
 };
 
-// Fields a Carpenter/Polisher must never see - supplier cost, purchase
-// price, bill amount, etc. They record physical stock only.
+const ROLE_LABEL_FOR_GROUP: Record<string, string> = { WOOD: 'Carpenter', CARVING: 'Carving', POLISH: 'Polish' };
+
+// Fields a Carpenter/Carver/Polisher must never see - supplier cost,
+// purchase price, bill amount, etc. They record physical stock only.
 function stripFinancials<T extends { purchaseRate?: unknown; stockValue?: unknown; unitCost?: unknown }>(
   obj: T,
   viewerRole?: Role,
 ): T {
-  if (viewerRole !== Role.CARPENTER && viewerRole !== Role.POLISHER) return obj;
+  if (viewerRole !== Role.CARPENTER && viewerRole !== Role.CARVER && viewerRole !== Role.POLISHER) return obj;
   const { purchaseRate, stockValue, unitCost, ...rest } = obj as any;
   return rest;
 }
@@ -33,6 +38,7 @@ export class RawMaterialsService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private notifications: NotificationsService,
   ) {}
 
   private summarize(material: { stockMovements: { quantity: any; unitCost: any; type: string; date: Date }[] }) {
@@ -121,11 +127,11 @@ export class RawMaterialsService {
 
     const requiredGroup = actingRole ? GROUP_FOR_ROLE[actingRole] : undefined;
     if (requiredGroup && material.materialGroup !== requiredGroup) {
-      throw new ForbiddenException(`${actingRole === Role.CARPENTER ? 'Carpenter' : 'Polish'} team can only record stock for their own material group`);
+      throw new ForbiddenException(`${ROLE_LABEL_FOR_GROUP[requiredGroup]} team can only record stock for their own material group`);
     }
 
-    // Carpenter/Polisher record physical quantity only - any cost they send is ignored.
-    const isTeamRole = actingRole === Role.CARPENTER || actingRole === Role.POLISHER;
+    // Carpenter/Carver/Polisher record physical quantity only - any cost they send is ignored.
+    const isTeamRole = actingRole === Role.CARPENTER || actingRole === Role.CARVER || actingRole === Role.POLISHER;
 
     await this.prisma.stockMovement.create({
       data: {
@@ -157,14 +163,27 @@ export class RawMaterialsService {
     return this.findOne(dto.rawMaterialId);
   }
 
-  async issueToWorkItem(dto: IssueMaterialDto, userId: string) {
-    const workItem = await this.prisma.carpenterWorkItem.findUnique({ where: { id: dto.workItemId } });
+  async issueToWorkItem(dto: IssueMaterialDto, userId: string, actingRole?: Role) {
+    const workItem = await this.prisma.carpenterWorkItem.findUnique({
+      where: { id: dto.workItemId },
+      include: { carpenter: { select: { name: true } } },
+    });
     if (!workItem) throw new NotFoundException('Work item not found');
 
-    for (const item of dto.items) {
-      const material = await this.prisma.rawMaterial.findUnique({ where: { id: item.rawMaterialId } });
-      if (!material) throw new NotFoundException(`Raw material ${item.rawMaterialId} not found`);
-    }
+    const materials = await Promise.all(
+      dto.items.map(async (item) => {
+        const material = await this.prisma.rawMaterial.findUnique({
+          where: { id: item.rawMaterialId },
+          include: { stockMovements: { select: { quantity: true } } },
+        });
+        if (!material) throw new NotFoundException(`Raw material ${item.rawMaterialId} not found`);
+        const inStock = sumAmounts(material.stockMovements.map((m) => ({ amount: m.quantity })));
+        if (inStock < item.quantity) {
+          throw new ConflictException(`Not enough ${material.name} in stock - available ${inStock} ${material.unit}, requested ${item.quantity}.`);
+        }
+        return { material, requested: item.quantity };
+      }),
+    );
 
     await this.prisma.stockMovement.createMany({
       data: dto.items.map((item) => ({
@@ -186,12 +205,39 @@ export class RawMaterialsService {
       metadata: { productName: workItem.productName, itemCount: dto.items.length },
     });
 
+    const who = workItem.carpenter?.name ?? 'A worker';
+    const when = new Date(dto.date).toLocaleString('en-IN');
+    for (const { material, requested } of materials) {
+      const remaining = (await this.summarizeById(material.id)) - requested;
+      await this.notifications.notifyRoles([Role.SUPERADMIN, Role.ADMIN], {
+        type: 'MATERIAL_USED',
+        title: 'Raw material used',
+        message: `${who} (${actingRole ?? workItem.stage}) used ${requested} ${material.unit} of ${material.name} for ${workItem.productName}${workItem.modelNo ? ` (${workItem.modelNo})` : ''} - ${workItem.stage} stage, ${when}.`,
+        targetType: 'CarpenterWorkItem',
+        targetId: dto.workItemId,
+      });
+      if (material.reorderLevel != null && remaining <= Number(material.reorderLevel)) {
+        await this.notifications.notifyRoles([Role.SUPERADMIN, Role.ADMIN], {
+          type: 'LOW_STOCK',
+          title: 'Low raw material stock',
+          message: `${material.name} stock is low - ${remaining} ${material.unit} remaining (reorder level ${material.reorderLevel} ${material.unit}).`,
+          targetType: 'RawMaterial',
+          targetId: material.id,
+        });
+      }
+    }
+
     return this.prisma.stockMovement.findMany({
       where: { workItemId: dto.workItemId },
       include: { rawMaterial: true },
       orderBy: { createdAt: 'desc' },
       take: dto.items.length,
     });
+  }
+
+  private async summarizeById(rawMaterialId: string) {
+    const movements = await this.prisma.stockMovement.findMany({ where: { rawMaterialId }, select: { quantity: true } });
+    return sumAmounts(movements.map((m) => ({ amount: m.quantity })));
   }
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.

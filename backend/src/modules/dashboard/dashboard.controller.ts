@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -17,5 +17,10 @@ export class DashboardController {
   @Get('summary')
   getSummary() {
     return this.service.getSummary();
+  }
+
+  @Get('trends')
+  getTrends(@Query('days') days?: string) {
+    return this.service.getTrends(days ? parseInt(days, 10) : 14);
   }
 }

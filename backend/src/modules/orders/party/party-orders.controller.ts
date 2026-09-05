@@ -3,8 +3,8 @@ import { PartyOrdersService } from './party-orders.service';
 import { CreatePartyOrderDto } from './dto/create-party-order.dto';
 import { UpdatePartyOrderDto } from './dto/update-party-order.dto';
 import { CreatePaymentDto } from '../customer/dto/create-payment.dto';
-import { AssignProductionDto } from '../customer/dto/assign-production.dto';
 import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
+import { AssignProductionDto } from '../customer/dto/assign-production.dto';
 import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -50,14 +50,14 @@ export class PartyOrdersController {
 
   @Roles(Role.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdatePartyOrderDto) {
-    return this.service.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdatePartyOrderDto, @CurrentUser() user: AuthUser) {
+    return this.service.update(id, dto, user.userId);
   }
 
   @Roles(Role.ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.userId);
   }
 
   @Roles(Role.ADMIN)
@@ -72,10 +72,29 @@ export class PartyOrdersController {
     return this.service.removePayment(id, paymentId);
   }
 
+  // Per-line Model No entry for the new multi-line flow (ADMIN - see the
+  // note on PartyOrdersService.updateItemModelNo for why this differs from
+  // the employee-self-service pattern below).
   @Roles(Role.ADMIN)
-  @Post(':id/assign-production')
-  assignProduction(@Param('id') id: string, @Body() dto: AssignProductionDto, @CurrentUser() user: AuthUser) {
-    return this.service.assignProduction(id, dto, user.userId);
+  @Post(':id/items/:itemId/model-no')
+  updateItemModelNo(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: UpdateModelNoDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.updateItemModelNo(id, itemId, dto.modelNo, user.userId);
+  }
+
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Post(':id/items/:itemId/assign-production')
+  assignItemProduction(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: AssignProductionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.assignItemProduction(id, itemId, dto, user.userId, user.role as Role);
   }
 
   @Roles(Role.SUPERADMIN)
@@ -84,7 +103,7 @@ export class PartyOrdersController {
     return this.service.assignEmployee(id, dto, user.userId);
   }
 
-  @Roles(Role.CARPENTER, Role.POLISHER)
+  @Roles(Role.CARPENTER, Role.CARVER, Role.POLISHER)
   @Post(':id/model-no')
   updateModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
     return this.service.updateModelNo(id, dto, user);

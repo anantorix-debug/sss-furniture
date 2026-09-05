@@ -2,10 +2,11 @@ export enum Role {
   SUPERADMIN = 'SUPERADMIN',
   ADMIN = 'ADMIN',
   CARPENTER = 'CARPENTER',
+  CARVER = 'CARVER',
   POLISHER = 'POLISHER',
 }
 
-// These are FUNCTIONAL roles, not a strict ladder - a Carpenter and a
+// These are FUNCTIONAL roles, not a strict ladder - a Carpenter, Carver and
 // Polisher are peers with different permissions, not one above the other.
 // SUPERADMIN has full system access and implicitly passes every @Roles()
 // check regardless of the list (see RolesGuard). ADMIN is "elevated but not
@@ -14,5 +15,6 @@ export const ROLE_LABEL: Record<Role, string> = {
   [Role.SUPERADMIN]: 'Super Admin',
   [Role.ADMIN]: 'Admin',
   [Role.CARPENTER]: 'Carpenter Team',
+  [Role.CARVER]: 'Carving Team',
   [Role.POLISHER]: 'Polish Team',
 };

@@ -16,9 +16,9 @@ export function AssignEmployeeModal({
   onSubmit: (employeeId: string) => Promise<void>;
 }) {
   // Reuses the existing (Superadmin-only) Users & Roles list rather than a
-  // new endpoint - filtered here to the two production-side roles.
+  // new endpoint - filtered here to the three production-side roles.
   const { data: users } = useSWR<User[]>('/users', fetcher);
-  const employees = (users ?? []).filter((u) => u.role === 'CARPENTER' || u.role === 'POLISHER');
+  const employees = (users ?? []).filter((u) => u.role === 'CARPENTER' || u.role === 'CARVER' || u.role === 'POLISHER');
 
   const [employeeId, setEmployeeId] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -46,7 +46,7 @@ export function AssignEmployeeModal({
             <option value="">Select employee</option>
             {employees.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.name} ({u.role === 'CARPENTER' ? 'Carpenter Team' : 'Polish Team'})
+                {u.name} ({u.role === 'CARPENTER' ? 'Carpenter Team' : u.role === 'CARVER' ? 'Carving Team' : 'Polish Team'})
               </option>
             ))}
           </select>

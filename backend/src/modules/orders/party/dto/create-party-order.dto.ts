@@ -1,25 +1,24 @@
-import { IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
 import { DeliveryStatus } from '../../../../common/enums/delivery-status.enum';
 
-export class CreatePartyOrderDto {
-  // Model No (cotNo) is intentionally NOT settable here - only the
-  // production employee assigned to this order can set it, via the
-  // dedicated /model-no endpoint.
-
-  @IsDateString()
-  orderDate: string;
+// One line of a Party Order - no fixed limit on how many of these an order
+// can carry (spec explicitly rejects a 5/10-line cap).
+export class PartyOrderItemDto {
+  // Set when this line is an existing Godown Stock product - triggers the
+  // stock-first check/split, same as CustomerOrderItemDto.productId. Omit
+  // for a brand-new custom product (full qty to production).
+  @IsString()
+  @IsOptional()
+  productId?: string;
 
   @IsString()
   @MinLength(1)
-  shopName: string;
+  productName: string;
 
   @IsString()
   @IsOptional()
-  phone?: string;
-
-  @IsString()
-  @MinLength(1)
-  model: string;
+  finish?: string;
 
   @IsString()
   @IsOptional()
@@ -31,7 +30,7 @@ export class CreatePartyOrderDto {
 
   @IsString()
   @IsOptional()
-  finish?: string;
+  pattern?: string;
 
   @IsString()
   @IsOptional()
@@ -44,15 +43,42 @@ export class CreatePartyOrderDto {
 
   @IsNumber()
   @Min(0)
-  price: number;
+  unitPrice: number;
 
-  // Not accepted from the client - always server-computed as qty * price
-  // (see PartyOrdersService.create/update) so it can never drift out of
-  // sync with what was actually typed for qty/price.
+  // Round-tripped on edit so replacing this line's row (see
+  // PartyOrdersService.update) doesn't wipe out a Model No the Production
+  // Employee already entered. Ignored on create.
+  @IsString()
+  @IsOptional()
+  modelNo?: string;
+}
+
+export class CreatePartyOrderDto {
+  // Model No is per-line (PartyOrderItem.modelNo) - not settable here.
+
+  @IsDateString()
+  orderDate: string;
+
+  // Sourced from the Shop directory (see ShopsModule) rather than typed by
+  // hand - shopName is copied from the resolved Shop for display without a
+  // join, matching the identical customerName-style snapshot pattern used
+  // elsewhere in this schema.
+  @IsString()
+  @MinLength(1)
+  shopId: string;
 
   @IsString()
   @IsOptional()
-  cashTrack?: string;
+  phone?: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => PartyOrderItemDto)
+  items: PartyOrderItemDto[];
+
+  // cashTrack removed - retired from create/update entirely (column stays
+  // on old rows only).
 
   @IsString()
   @IsOptional()

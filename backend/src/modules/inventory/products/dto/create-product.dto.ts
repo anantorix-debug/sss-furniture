@@ -6,7 +6,8 @@ export class CreateProductDto {
   sku?: string;
 
   // Shared numbering with CustomerOrder.cotTrack / PartyOrder.cotNo - the
-  // single reference number retail and wholesale orders both key off.
+  // single reference number retail and wholesale orders both key off. Left
+  // unset until a Production Employee assigns it after manufacturing.
   @IsString()
   @IsOptional()
   modelNo?: string;
@@ -26,6 +27,18 @@ export class CreateProductDto {
   @IsString()
   @IsOptional()
   materialFinish?: string;
+
+  @IsString()
+  @IsOptional()
+  sizeUnit?: string;
+
+  @IsString()
+  @IsOptional()
+  pattern?: string;
+
+  @IsString()
+  @IsOptional()
+  details?: string;
 
   @IsString()
   @IsOptional()

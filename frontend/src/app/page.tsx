@@ -14,7 +14,7 @@ export default function RootPage() {
       router.replace('/login');
       return;
     }
-    const isProductionEmployee = user.role === 'CARPENTER' || user.role === 'POLISHER';
+    const isProductionEmployee = user.role === 'CARPENTER' || user.role === 'CARVER' || user.role === 'POLISHER';
     router.replace(isProductionEmployee ? '/carpenters' : '/dashboard');
   }, [loading, user, router]);
 

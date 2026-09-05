@@ -6,6 +6,7 @@ import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { UpdateWorkStatusDto } from './dto/update-work-status.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
+import { UpdateModelNoDto } from '../orders/customer/dto/update-model-no.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -32,6 +33,12 @@ export class CarpenterController {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  // Static route - must come before the dynamic :id route below.
+  @Get('carpenters/me')
+  findMyCarpenter(@CurrentUser() user: AuthUser) {
+    return this.service.findMyCarpenter(user.userId);
   }
 
   @Get('carpenters/:id')
@@ -76,6 +83,11 @@ export class CarpenterController {
     @Query('carpenterId') carpenterId?: string,
     @Query('workerType') workerType?: string,
     @Query('status') status?: string,
+    @Query('stage') stage?: string,
+    @Query('source') source?: string,
+    @Query('batchId') batchId?: string,
+    @Query('sourceCustomerOrderId') sourceCustomerOrderId?: string,
+    @Query('sourcePartyOrderItemId') sourcePartyOrderItemId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
@@ -84,10 +96,23 @@ export class CarpenterController {
       carpenterId,
       workerType,
       status,
+      stage,
+      source,
+      batchId,
+      sourceCustomerOrderId,
+      sourcePartyOrderItemId,
       viewerRole: user?.role as Role,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  // Production Control Center - static route, must come before the
+  // dynamic :id route below or NestJS would match "dashboard" as an id.
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Get('carpenter-work-items/dashboard')
+  getDashboard() {
+    return this.service.getDashboard();
   }
 
   @Get('carpenter-work-items/:id')
@@ -100,11 +125,20 @@ export class CarpenterController {
     return this.service.updateWorkStatus(id, dto, user.role as Role, user.userId);
   }
 
+  // "Verify & Add to Stock" - the only action that creates real Product /
+  // FinishedStockItem rows from a finished production run. Admin-only, and
+  // idempotent (see CarpenterService.verifyAndAddToStock).
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Post('carpenter-work-items/:id/verify')
+  verifyAndAddToStock(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.verifyAndAddToStock(id, user.userId);
+  }
+
   // Carpenter/Polisher may add their own cot entry ("Direct Cot Entry" in
   // the reference workflow); the service forces price/total to 0 for them
   // regardless of what's submitted - only Admin sets a price at creation,
   // and normally that happens later via Weekly Labour, not here.
-  @Roles(Role.ADMIN, Role.CARPENTER, Role.POLISHER)
+  @Roles(Role.ADMIN, Role.SUPERADMIN, Role.CARPENTER, Role.CARVER, Role.POLISHER)
   @Post('carpenter-work-items')
   createWorkItem(@Body() dto: CreateWorkItemDto, @CurrentUser() user: AuthUser) {
     return this.service.createWorkItem(dto, user.userId, user.role as Role);
@@ -125,5 +159,14 @@ export class CarpenterController {
   @Post('carpenter-work-items/:id/notify')
   notifyWorkItem(@Param('id') id: string) {
     return this.service.notifyWorkItem(id);
+  }
+
+  // Model No is only ever known/entered while the piece is being made -
+  // Carpenter or Carving stage - never Polish (see the service-level stage
+  // guard too, which blocks it regardless of role once past Carving).
+  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.CARPENTER, Role.CARVER)
+  @Patch('carpenter-work-items/:id/model-no')
+  updateWorkItemModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateWorkItemModelNo(id, dto.modelNo, user.userId);
   }
 }

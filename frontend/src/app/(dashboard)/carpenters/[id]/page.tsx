@@ -546,7 +546,7 @@ Please confirm receipt.`,
 
 export default function CarpenterDetailPage() {
   return (
-    <RoleGate minRole={['ADMIN', 'CARPENTER', 'POLISHER']}>
+    <RoleGate minRole={['ADMIN', 'CARPENTER', 'CARVER', 'POLISHER']}>
       <CarpenterDetailContent />
     </RoleGate>
   );

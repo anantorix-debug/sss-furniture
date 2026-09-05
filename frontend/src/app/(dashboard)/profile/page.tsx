@@ -4,18 +4,21 @@ import { useState } from 'react';
 import { useAuth, ApiError } from '@/context/AuthContext';
 import { api } from '@/lib/api';
 import { Chip } from '@/components/StatusBadge';
+import { PasswordInput } from '@/components/PasswordInput';
 import type { Role } from '@/types';
 
 const ROLE_LABEL: Record<Role, string> = {
   SUPERADMIN: 'Super Admin',
   ADMIN: 'Admin',
   CARPENTER: 'Carpenter Team',
+  CARVER: 'Carving Team',
   POLISHER: 'Polish Team',
 };
 const ROLE_COLOR: Record<Role, 'darkGreen' | 'blue' | 'gray'> = {
   SUPERADMIN: 'darkGreen',
   ADMIN: 'blue',
   CARPENTER: 'gray',
+  CARVER: 'gray',
   POLISHER: 'gray',
 };
 
@@ -90,8 +93,7 @@ export default function ProfilePage() {
 
         <div>
           <label className="label">Current Password</label>
-          <input
-            type="password"
+          <PasswordInput
             className="input"
             required
             value={currentPassword}
@@ -100,12 +102,11 @@ export default function ProfilePage() {
         </div>
         <div>
           <label className="label">New Password</label>
-          <input type="password" className="input" required minLength={6} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          <PasswordInput className="input" required minLength={6} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
         </div>
         <div>
           <label className="label">Confirm New Password</label>
-          <input
-            type="password"
+          <PasswordInput
             className="input"
             required
             minLength={6}

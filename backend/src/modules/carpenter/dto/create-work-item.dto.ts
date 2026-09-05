@@ -65,4 +65,16 @@ export class CreateWorkItemDto {
 
   @IsOptional()
   notifyWhatsapp?: boolean;
+
+  // Optional link to an existing Godown Stock product this item's output
+  // should feed once completed - "manufacture without any order" (source
+  // stays the default STOCK either way). Omit to have completion create a
+  // brand-new Product automatically from productName/size/modelNo.
+  @IsString()
+  @IsOptional()
+  productId?: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
 }

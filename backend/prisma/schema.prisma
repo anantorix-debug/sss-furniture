@@ -15,6 +15,7 @@ enum Role {
   SUPERADMIN
   ADMIN
   CARPENTER
+  CARVER
   POLISHER
 }
 
@@ -90,6 +91,7 @@ enum ProductionStageType {
 // stock-in (Carpenter team handles WOOD, Polish team handles POLISH).
 enum MaterialGroup {
   WOOD
+  CARVING
   POLISH
   OTHER
 }
@@ -113,6 +115,29 @@ enum LabourStatus {
   REJECTED
 }
 
+// Which trigger created a CarpenterWorkItem - drives the completion-time
+// bridge into stock (STOCK -> Product.availableQuantity) vs. an order
+// (CUSTOMER_ORDER/PARTY_ORDER -> FinishedStockItem for that job, never
+// double-counted as free stock). See CarpenterService.updateWorkStatus.
+enum ProductionSource {
+  CUSTOMER_ORDER
+  PARTY_ORDER
+  STOCK
+}
+
+enum StockOrderType {
+  CUSTOMER
+  PARTY
+}
+
+enum ProductStockMovementType {
+  IN
+  RESERVED
+  RELEASED
+  DISPATCHED
+  ADJUSTMENT
+}
+
 model User {
   id               String   @id @default(cuid())
   name             String
@@ -124,34 +149,40 @@ model User {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  customerOrders        CustomerOrder[]
-  customerOrdersDelivered CustomerOrder[]      @relation("CustomerOrderDeliveredBy")
-  customerOrderPayments CustomerOrderPayment[]
-  partyOrders           PartyOrder[]
-  partyOrderPayments    PartyOrderPayment[]
-  supplierPurchases     SupplierPurchase[]
-  supplierPayments      SupplierPayment[]
-  carpenterWorkItems    CarpenterWorkItem[]
-  carpenterPayments     CarpenterPayment[]
-  stockMovements        StockMovement[]
-  purchaseOrdersCreated PurchaseOrder[]        @relation("PurchaseOrderCreatedBy")
-  purchaseOrdersApproved PurchaseOrder[]       @relation("PurchaseOrderApprovedBy")
-  auditLogs             AuditLog[]
-  qualityChecks         QualityCheck[]
-  dispatchRecords       DispatchRecord[]
-  weeklyLaboursSubmitted WeeklyLabour[]        @relation("WeeklyLabourSubmittedBy")
-  weeklyLaboursReviewed  WeeklyLabour[]        @relation("WeeklyLabourReviewedBy")
-  expensesCreated        Expense[]             @relation("ExpenseCreatedBy")
-  expensesUpdated        Expense[]             @relation("ExpenseUpdatedBy")
-  expenseAuditLogs       ExpenseAuditLog[]
+  customerOrders               CustomerOrder[]
+  customerOrdersDelivered      CustomerOrder[]        @relation("CustomerOrderDeliveredBy")
+  customerOrderPayments        CustomerOrderPayment[]
+  partyOrders                  PartyOrder[]
+  partyOrderPayments           PartyOrderPayment[]
+  supplierPurchases            SupplierPurchase[]
+  supplierPayments             SupplierPayment[]
+  carpenterWorkItems           CarpenterWorkItem[]
+  workItemsAssigned            CarpenterWorkItem[]    @relation("WorkItemAssignedBy")
+  notifications                Notification[]
+  carpenterProfile              Carpenter?
+  carpenterPayments            CarpenterPayment[]
+  stockMovements               StockMovement[]
+  purchaseOrdersCreated        PurchaseOrder[]        @relation("PurchaseOrderCreatedBy")
+  purchaseOrdersApproved       PurchaseOrder[]        @relation("PurchaseOrderApprovedBy")
+  auditLogs                    AuditLog[]
+  qualityChecks                QualityCheck[]
+  dispatchRecords              DispatchRecord[]
+  weeklyLaboursSubmitted       WeeklyLabour[]         @relation("WeeklyLabourSubmittedBy")
+  weeklyLaboursReviewed        WeeklyLabour[]         @relation("WeeklyLabourReviewedBy")
+  expensesCreated              Expense[]              @relation("ExpenseCreatedBy")
+  expensesUpdated              Expense[]              @relation("ExpenseUpdatedBy")
+  expenseAuditLogs             ExpenseAuditLog[]
   whatsappGroupSettingsUpdated WhatsappGroupSetting[]
 
-  customerOrdersAssigned          CustomerOrder[] @relation("CustomerOrderAssignedEmployee")
-  customerOrdersAssignedBy        CustomerOrder[] @relation("CustomerOrderAssignedBy")
-  customerOrdersModelNoUpdated    CustomerOrder[] @relation("CustomerOrderModelNoUpdatedBy")
-  partyOrdersAssigned             PartyOrder[]    @relation("PartyOrderAssignedEmployee")
-  partyOrdersAssignedBy           PartyOrder[]    @relation("PartyOrderAssignedBy")
-  partyOrdersModelNoUpdated       PartyOrder[]    @relation("PartyOrderModelNoUpdatedBy")
+  customerOrdersAssigned        CustomerOrder[]        @relation("CustomerOrderAssignedEmployee")
+  customerOrdersAssignedBy      CustomerOrder[]        @relation("CustomerOrderAssignedBy")
+  customerOrdersModelNoUpdated  CustomerOrder[]        @relation("CustomerOrderModelNoUpdatedBy")
+  partyOrdersAssigned           PartyOrder[]           @relation("PartyOrderAssignedEmployee")
+  partyOrdersAssignedBy         PartyOrder[]           @relation("PartyOrderAssignedBy")
+  partyOrdersModelNoUpdated     PartyOrder[]           @relation("PartyOrderModelNoUpdatedBy")
+  partyOrderItemsModelNoUpdated PartyOrderItem[]       @relation("PartyOrderItemModelNoUpdatedBy")
+  productStockMovements         ProductStockMovement[]
+  galleryImages                 GalleryImage[]
 
   @@map("users")
 }
@@ -178,34 +209,38 @@ model WhatsappGroupSetting {
 // ---------------------------------------------------------------------------
 
 model CustomerOrder {
-  id                 String         @id @default(cuid())
-  orderId            String         @unique // e.g. SSS-074
-  jobNumber          String?        @unique // e.g. JOB-2026-00001 - the single ID tying order -> production -> dispatch -> delivery
-  orderDate          DateTime
-  customerName       String
-  phone              String?
-  whatsapp           String?
-  address            String?
-  deliveryLocation   String?
-  product            String
+  id                   String         @id @default(cuid())
+  orderId              String         @unique // e.g. SSS-074
+  jobNumber            String?        @unique // e.g. JOB-2026-00001 - the single ID tying order -> production -> dispatch -> delivery
+  orderDate            DateTime
+  customerName         String
+  phone                String?
+  whatsapp             String?
+  address              String?
+  deliveryLocation     String?
+  product              String
   // Dimensions kept separate from the free-text product name/description
   // (e.g. size "78x72", sizeUnit "Inch") so they can be shown, filtered, and
   // put into WhatsApp templates as their own field rather than parsed out
   // of a string like "Z-Model 78*72 -BC -COT".
-  size               String?
-  sizeUnit           String?
-  colour             String?
-  carvingRequired    Boolean        @default(false)
-  specialInstructions String?
-  orderValue         Decimal        @db.Decimal(12, 2)
-  cotTrack           String?
+  size                 String?
+  sizeUnit             String?
+  colour               String?
+  carvingRequired      Boolean        @default(false)
+  specialInstructions  String?
+  orderValue           Decimal        @db.Decimal(12, 2)
+  cotTrack             String?
   expectedDeliveryDate DateTime?
-  actualDeliveryDate DateTime?
-  deliveryStatus     DeliveryStatus @default(PENDING)
-  deliveredById      String?
-  deliveredBy        User?          @relation("CustomerOrderDeliveredBy", fields: [deliveredById], references: [id])
-  proofOfDeliveryUrl String?
-  deliveryRemarks    String?
+  actualDeliveryDate   DateTime?
+  deliveryStatus       DeliveryStatus @default(PENDING)
+  deliveredById        String?
+  deliveredBy          User?          @relation("CustomerOrderDeliveredBy", fields: [deliveredById], references: [id])
+  proofOfDeliveryUrl   String?
+  deliveryRemarks      String?
+
+  // Reference-only links to existing Gallery images selected for this
+  // order (spec: never re-uploaded/duplicated - just a reference).
+  galleryImages CustomerOrderGalleryImage[]
 
   // Model No workflow: Super Admin assigns a production employee, who is
   // then solely responsible for entering cotTrack (the Model No) - Super
@@ -229,6 +264,8 @@ model CustomerOrder {
   updatedAt   DateTime               @updatedAt
   payments    CustomerOrderPayment[]
   items       CustomerOrderItem[]
+  workItems   CarpenterWorkItem[]
+  finishedStockItems FinishedStockItem[]
 
   @@map("customer_orders")
 }
@@ -251,6 +288,11 @@ model CustomerOrderItem {
   productName String
   quantity    Int           @default(1)
   unitPrice   Decimal       @db.Decimal(12, 2)
+
+  // Stock-first allocation split, computed once at create/edit time by
+  // StockAllocationService.allocate() - see CustomerOrdersService.
+  stockReservedQty Int @default(0)
+  productionQty    Int @default(0)
 
   @@map("customer_order_items")
 }
@@ -282,17 +324,27 @@ model PartyOrder {
   jobNumber          String?        @unique // e.g. JOB-2026-00001 - shares one sequence with CustomerOrder.jobNumber
   orderDate          DateTime
   shopName           String
+  // Preferred going forward - the create form now sources shops from the
+  // Shop directory and sends both this and a shopName snapshot together.
+  // shopName alone stays valid for legacy rows, matching the same
+  // "snapshot + optional FK" pattern already used for productId below.
+  shopId             String?
+  shop               Shop?          @relation(fields: [shopId], references: [id], onDelete: SetNull)
   phone              String?
-  model              String
+  // Legacy single-product fields - required on old rows, left unset (null)
+  // on new multi-line orders where `items` is the source of truth. Same
+  // "kept for backward compatibility, never migrated" rule as
+  // CustomerOrder.product/orderValue vs. CustomerOrderItem.
+  model              String?
   // See the identical note on CustomerOrder.size/sizeUnit.
   size               String?
   sizeUnit           String?
   finish             String?
   details            String?
-  qty                Int            @default(1)
-  price              Decimal        @db.Decimal(12, 2)
+  qty                Int?
+  price              Decimal?       @db.Decimal(12, 2)
   totalAmount        Decimal        @db.Decimal(12, 2)
-  cashTrack          String? // internal cash-handler note, e.g. "CASH" / "SSS"
+  cashTrack          String? // internal cash-handler note, e.g. "CASH" / "SSS" - retired from create/update DTOs and the UI; column kept for old rows
   courierTrack       String? // delivery agent, e.g. Sitaram / Sunil
   actualDeliveryDate DateTime?
   deliveryStatus     DeliveryStatus @default(PENDING)
@@ -324,16 +376,58 @@ model PartyOrder {
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
   payments    PartyOrderPayment[]
+  items       PartyOrderItem[]
 
   @@map("party_orders")
 }
 
+// Multi-line Party Order support (spec: "no fixed limit such as 5 or 10
+// products"). New orders always create these; legacy single-product fields
+// on PartyOrder above stay untouched for old rows - identical coexistence
+// pattern to CustomerOrder/CustomerOrderItem.
+model PartyOrderItem {
+  id          String     @id @default(cuid())
+  orderId     String
+  order       PartyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String?
+  product     Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName String
+  finish      String?
+  size        String?
+  sizeUnit    String?
+  pattern     String?
+  details     String?
+  qty         Int        @default(1)
+  unitPrice   Decimal    @db.Decimal(12, 2)
+  totalValue  Decimal    @db.Decimal(12, 2) // server-computed qty * unitPrice, never taken from the client
+
+  // This line's own Model No - independent of the order header's cotNo,
+  // since one order can now span many products each with their own.
+  modelNo            String?
+  modelNoUpdatedById String?
+  modelNoUpdatedBy   User?     @relation("PartyOrderItemModelNoUpdatedBy", fields: [modelNoUpdatedById], references: [id], onDelete: SetNull)
+  modelNoUpdatedAt   DateTime?
+
+  // Stock-first allocation split, computed once at create/edit time by
+  // StockAllocationService.allocate().
+  stockReservedQty Int @default(0)
+  productionQty    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workItems          CarpenterWorkItem[]
+  finishedStockItems FinishedStockItem[]
+
+  @@map("party_order_items")
+}
+
 model PartyOrderPayment {
-  id      String     @id @default(cuid())
+  id      String      @id @default(cuid())
   orderId String
-  order   PartyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order   PartyOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
   date    DateTime
-  amount  Decimal    @db.Decimal(12, 2)
+  amount  Decimal     @db.Decimal(12, 2)
   type    PaymentType @default(PARTIAL)
   mode    String?
   note    String?
@@ -418,6 +512,13 @@ model Carpenter {
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
+  // Optional link to this worker's own login (Carpenter/Carver/Polisher
+  // role User) - lets "My Work" resolve which CarpenterWorkItem rows
+  // belong to whoever is signed in. Nullable: a payee can exist purely for
+  // payment tracking with no app login at all.
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   workItems     CarpenterWorkItem[]
   payments      CarpenterPayment[]
   weeklyLabours WeeklyLabour[]
@@ -427,23 +528,54 @@ model Carpenter {
 }
 
 model CarpenterWorkItem {
-  id          String    @id @default(cuid())
-  carpenterId String?
-  carpenter   Carpenter? @relation(fields: [carpenterId], references: [id], onDelete: SetNull)
-  workDate    DateTime
-  modelNo     String? // shared Job/Model Number - links Carpenter -> Carving -> Polish stages and back to CustomerOrder.jobNumber
-  stage       ProductionStageType @default(CARPENTER)
-  productName String // e.g. "HEARTEN"
-  category    String? // e.g. "BOTTOM COT", "FULL BOX"
-  size        String? // e.g. "5FT"
-  price       Decimal   @db.Decimal(12, 2)
-  extra       Decimal   @default(0) @db.Decimal(12, 2)
-  quantity    Int       @default(1)
-  total       Decimal   @db.Decimal(12, 2)
-  status      WorkStatus @default(ASSIGNED)
-  qcNote      String? // note left when moved to QUALITY_CHECK or REWORK
-  photoUrl    String? // uploaded cot / finished-work photo
-  labourClaimed Boolean @default(false) // true once included in a Weekly Labour batch, to prevent double payment
+  id            String              @id @default(cuid())
+  carpenterId   String?
+  carpenter     Carpenter?          @relation(fields: [carpenterId], references: [id], onDelete: SetNull)
+  workDate      DateTime
+  modelNo       String? // shared Job/Model Number - links Carpenter -> Carving -> Polish stages and back to CustomerOrder.jobNumber
+  stage         ProductionStageType @default(CARPENTER)
+  productName   String // e.g. "HEARTEN"
+  category      String? // e.g. "BOTTOM COT", "FULL BOX"
+  size          String? // e.g. "5FT"
+  price         Decimal             @db.Decimal(12, 2)
+  extra         Decimal             @default(0) @db.Decimal(12, 2)
+  quantity      Int                 @default(1)
+  total         Decimal             @db.Decimal(12, 2)
+  status        WorkStatus          @default(ASSIGNED)
+  qcNote        String? // note left when moved to QUALITY_CHECK or REWORK
+  photoUrl      String? // uploaded cot / finished-work photo
+  labourClaimed Boolean             @default(false) // true once included in a Weekly Labour batch, to prevent double payment
+
+  // Shared across the Carpenter/Carving/Polish rows of one production run -
+  // generated once when the first stage is created, copied forward by the
+  // automatic stage handoff (see CarpenterService.updateWorkStatus). Null on
+  // legacy ad-hoc entries that predate the sequential pipeline.
+  batchId    String?
+  startedAt  DateTime? // set when status first moves to IN_PROGRESS
+  finishedAt DateTime? // set when status moves to COMPLETED (verification, not this stage's own finish)
+  notes      String?
+
+  // Who assigned this stage (distinct from createdById, which also covers a
+  // worker's own self-entry) - null for a self-entry or an auto-created
+  // handoff stage with no assignee chosen yet.
+  assignedById String?
+  assignedBy   User?   @relation("WorkItemAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  // Which trigger created this item, and the completion-time bridge target.
+  // STOCK (default) -> completing feeds Product.availableQuantity directly
+  // (manufacture with no order). CUSTOMER_ORDER/PARTY_ORDER -> completing
+  // creates a FinishedStockItem for that job instead, so order-bound
+  // production is never double-counted as free stock. See
+  // CarpenterService.updateWorkStatus.
+  source                 ProductionSource @default(STOCK)
+  sourceCustomerOrderId  String?
+  sourceCustomerOrder    CustomerOrder?   @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
+  sourcePartyOrderItemId String?
+  sourcePartyOrderItem   PartyOrderItem?  @relation(fields: [sourcePartyOrderItemId], references: [id], onDelete: SetNull)
+  // Which Godown SKU this item's completed output feeds (STOCK source) or
+  // gets matched/created against once a Model No is entered.
+  productId              String?
+  product                Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   createdById String
   createdBy   User     @relation(fields: [createdById], references: [id])
@@ -473,30 +605,137 @@ model CarpenterPayment {
 }
 
 // ---------------------------------------------------------------------------
-// Product catalogue (optional reference list - orders keep free-text fields)
+// Godown Stock (finished furniture physically on hand). `Product` doubles as
+// the Stock Management record - it already carried modelNo/name/category/
+// finish/pricing/images, so real stock quantities were added here rather
+// than standing up a parallel table. Not a reference-only catalogue: every
+// row represents real, physically-produced units.
 // ---------------------------------------------------------------------------
 
 model Product {
   id             String   @id @default(cuid())
   sku            String?  @unique
-  modelNo        String?  @unique // shared numbering with CustomerOrder.cotTrack / PartyOrder.cotNo
+  modelNo        String?  @unique // shared numbering with CustomerOrder.cotTrack / PartyOrder.cotNo - null until Production Employee assigns it
   name           String
   category       String?
   modelSize      String? // e.g. "6x5 ft" (size only - modelNo carries the identifier)
   materialFinish String? // e.g. "Teak - Teak finish"
+  sizeUnit       String?
+  pattern        String?
+  details        String?
   unit           String? // e.g. "Nos", "Set"
-  retailPrice    Decimal  @db.Decimal(12, 2)
+  retailPrice    Decimal  @db.Decimal(12, 2) // Unit Price
   wholesalePrice Decimal? @db.Decimal(12, 2)
   costPrice      Decimal? @db.Decimal(12, 2)
   isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
 
-  images           ProductImage[]
+  // Godown stock quantities. quantity = lifetime received; availableQuantity
+  // = quantity - reservedQuantity - dispatched, kept as its own counter
+  // (not derived) so the concurrency-safe conditional UPDATE in
+  // StockAllocationService/ProductsService can check-and-decrement it
+  // atomically. reservedQuantity is bookkeeping only - a reservation is
+  // immediately materialized as a FinishedStockItem for the owning order,
+  // it does not sit "pending" here.
+  quantity          Int @default(0)
+  availableQuantity Int @default(0)
+  reservedQuantity  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  images             ProductImage[]
   customerOrderItems CustomerOrderItem[]
   partyOrders        PartyOrder[]
+  partyOrderItems    PartyOrderItem[]
+  workItems          CarpenterWorkItem[]
+  stockMovements     ProductStockMovement[]
+  finishedStockItems FinishedStockItem[]
 
   @@map("products")
+}
+
+// Godown stock movement history - IN (production/manual receive), RESERVED
+// (allocated to an order at create time), RELEASED (order cancelled/edited
+// before dispatch), DISPATCHED, ADJUSTMENT (manual correction). Separate
+// from the raw-material StockMovement model - different domain/unit
+// semantics and a different FK target.
+model ProductStockMovement {
+  id                String                   @id @default(cuid())
+  productId         String
+  product           Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type              ProductStockMovementType
+  quantity          Int
+  previousAvailable Int
+  newAvailable      Int
+  orderType         StockOrderType?
+  orderId           String?
+  reason            String?
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([productId])
+  @@map("product_stock_movements")
+}
+
+// Party Order shop/dealer directory - replaces free-text shop names with a
+// managed list. Same disable-instead-of-delete-when-in-use pattern as
+// ExpenseCategoryService.removeCategory/SuppliersService.remove.
+model Shop {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  contactPhone String?
+  address      String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  partyOrders PartyOrder[]
+
+  @@map("shops")
+}
+
+// Standalone visual gallery of manufactured furniture photos - images only,
+// deliberately NOT a second product catalogue (see GalleryService). Kept
+// separate from ProductImage (which is mandatorily tied to one Product/
+// stock row): a gallery photo may exist for furniture with no Stock entry
+// yet, and modelNo below is an optional free-text label, not a FK, so
+// uploading a photo never requires a Stock record to exist first.
+model GalleryImage {
+  id        String   @id @default(cuid())
+  url       String
+  fileName  String
+  fileSize  Int
+  modelNo   String? // optional label only - not a Product FK, see note above
+  caption   String?
+
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  customerOrders CustomerOrderGalleryImage[]
+
+  @@map("gallery_images")
+}
+
+// Explicit join table (not Prisma's implicit m2m) - the implicit join
+// table's composite key over two cuid columns exceeds MySQL's index
+// key-length limit on this database's charset/row format.
+model CustomerOrderGalleryImage {
+  id             String        @id @default(cuid())
+  orderId        String
+  order          CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  galleryImageId String
+  galleryImage   GalleryImage  @relation(fields: [galleryImageId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+
+  // No composite unique here - two full cuid columns together exceed this
+  // database's index key-length limit. Duplicate prevention is handled in
+  // CustomerOrdersService (replace-all-on-save), not the DB layer.
+  @@index([orderId])
+  @@index([galleryImageId])
+  @@map("customer_order_gallery_images")
 }
 
 // Multiple images per product; the first one created (or the one flagged
@@ -529,8 +768,8 @@ model RawMaterial {
   unit          String // e.g. "sheet", "cft", "kg", "nos"
   reorderLevel  Decimal?      @db.Decimal(12, 2)
   photoUrl      String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   stockMovements     StockMovement[]
   purchaseOrderItems PurchaseOrderItem[]
@@ -570,16 +809,16 @@ model StockMovement {
 // ---------------------------------------------------------------------------
 
 model PurchaseOrder {
-  id           String              @id @default(cuid())
-  poNumber     String              @unique
-  supplierId   String
-  supplier     Supplier            @relation(fields: [supplierId], references: [id])
-  status         PurchaseOrderStatus @default(DRAFT)
-  orderDate      DateTime
-  expectedDate   DateTime?
-  notes          String?
+  id              String              @id @default(cuid())
+  poNumber        String              @unique
+  supplierId      String
+  supplier        Supplier            @relation(fields: [supplierId], references: [id])
+  status          PurchaseOrderStatus @default(DRAFT)
+  orderDate       DateTime
+  expectedDate    DateTime?
+  notes           String?
   rejectionReason String?
-  sentToShopAt   DateTime?
+  sentToShopAt    DateTime?
 
   createdById  String
   createdBy    User      @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
@@ -628,6 +867,27 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+// Persisted, per-user notifications for Super Admin/Admin (production
+// stage events, raw material usage, low stock, verification). One row per
+// recipient - a "notify Admin+SuperAdmin" event fans out to one row per
+// matching active user, so unread counts and read/unread state are real
+// (not the localStorage-only tracking NotificationBell used before this).
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       String // e.g. "STAGE_COMPLETED", "MATERIAL_USED", "LOW_STOCK", "READY_FOR_VERIFICATION"
+  title      String
+  message    String
+  targetType String? // e.g. "CarpenterWorkItem", "RawMaterial"
+  targetId   String?
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
 // ---------------------------------------------------------------------------
 // Production pipeline: Quality Check -> Finished Stock -> Dispatch -> Delivery
 // All keyed off the Job/Model Number (CustomerOrder.jobNumber /
@@ -635,17 +895,17 @@ model AuditLog {
 // ---------------------------------------------------------------------------
 
 model QualityCheck {
-  id           String   @id @default(cuid())
-  jobNumber    String
-  workItemId   String?
-  workItem     CarpenterWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
-  result       QcResult
-  checklist    Json?
-  remarks      String?
-  photoUrl     String?
+  id            String             @id @default(cuid())
+  jobNumber     String
+  workItemId    String?
+  workItem      CarpenterWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  result        QcResult
+  checklist     Json?
+  remarks       String?
+  photoUrl      String?
   inspectedById String
-  inspectedBy  User     @relation(fields: [inspectedById], references: [id])
-  createdAt    DateTime @default(now())
+  inspectedBy   User               @relation(fields: [inspectedById], references: [id])
+  createdAt     DateTime           @default(now())
 
   @@index([jobNumber])
   @@map("quality_checks")
@@ -653,7 +913,10 @@ model QualityCheck {
 
 model FinishedStockItem {
   id             String              @id @default(cuid())
-  jobNumber      String              @unique
+  // Was @unique - dropped so a multi-line Party Order (or a Customer Order
+  // whose stock+production split spans two rows) can have more than one
+  // finished-stock entry sharing the same job number, one per product line.
+  jobNumber      String
   productName    String
   quantity       Int                 @default(1)
   completionDate DateTime
@@ -661,6 +924,20 @@ model FinishedStockItem {
   status         FinishedStockStatus @default(AVAILABLE)
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
+
+  // Traceability for stock-first order fulfillment (StockAllocationService)
+  // - which Godown SKU a reservation was drawn from, and which order/line it
+  // is earmarked for, so cancel/edit can release exactly this row rather
+  // than guessing from jobNumber alone (one job number can now span many
+  // Party Order lines). All optional - manual FinishedStock entries and
+  // pre-existing rows simply leave these null; Dispatch itself never reads
+  // them.
+  productId              String?
+  product                Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  sourceCustomerOrderId  String?
+  sourceCustomerOrder    CustomerOrder?  @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
+  sourcePartyOrderItemId String?
+  sourcePartyOrderItem   PartyOrderItem? @relation(fields: [sourcePartyOrderItemId], references: [id], onDelete: SetNull)
 
   dispatchRecords DispatchRecord[]
 
@@ -707,9 +984,9 @@ model WeeklyLabour {
   workItemIds        Json? // snapshot of CarpenterWorkItem ids included in this batch
 
   submittedById String?
-  submittedBy   User?    @relation("WeeklyLabourSubmittedBy", fields: [submittedById], references: [id])
+  submittedBy   User?   @relation("WeeklyLabourSubmittedBy", fields: [submittedById], references: [id])
   reviewedById  String?
-  reviewedBy    User?    @relation("WeeklyLabourReviewedBy", fields: [reviewedById], references: [id])
+  reviewedBy    User?   @relation("WeeklyLabourReviewedBy", fields: [reviewedById], references: [id])
   reviewNote    String?
 
   createdAt DateTime @default(now())
@@ -763,12 +1040,12 @@ model ExpenseCategory {
 // Reference codes shown in the "REF" column of the paper ledger (PUR, SAL,
 // TRA, EXP, CMY, EMI, ...). Configurable, not hardcoded.
 model ExpenseReferenceType {
-  id         String   @id @default(cuid())
-  code       String   @unique // short code, e.g. "PUR"
-  label      String // e.g. "Purchase"
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  code      String   @unique // short code, e.g. "PUR"
+  label     String // e.g. "Purchase"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   expenses   Expense[]
   categories ExpenseCategory[]
@@ -793,27 +1070,27 @@ model ExpensePaymentMode {
 }
 
 model Expense {
-  id             String        @id @default(cuid())
-  date           DateTime
-  voucherNumber  Int           @unique // sequential, auto-assigned; see ExpensesService.nextVoucherNumber
+  id              String                @id @default(cuid())
+  date            DateTime
+  voucherNumber   Int                   @unique // sequential, auto-assigned; see ExpensesService.nextVoucherNumber
   referenceTypeId String?
-  referenceType  ExpenseReferenceType? @relation(fields: [referenceTypeId], references: [id], onDelete: SetNull)
-  categoryId     String
-  category       ExpenseCategory @relation(fields: [categoryId], references: [id])
-  particulars    String // what the money was for, e.g. "LOCAL MATTRESS"
-  amount         Decimal       @db.Decimal(12, 2)
-  paymentModeId  String
-  paymentMode    ExpensePaymentMode @relation(fields: [paymentModeId], references: [id])
-  scope          ExpenseScope  @default(COMPANY) // COMPANY vs PERSONAL - see module note above
-  paidBy         String? // free text - who physically paid/handled it
-  employeeId     String? // optional link to an existing Carpenter (this app's worker/employee registry) for salary-type entries
-  employee       Carpenter?    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  vendorName     String? // free text vendor/payee, e.g. "HARI TIMBER" - no separate Vendor entity exists in this schema
-  description    String?
-  notes          String?
-  attachmentUrl  String? // receipt/bill upload, reuses the app's existing local-uploads pattern
-  tags           String? // comma-separated free tags
-  status         ExpenseStatus @default(ACTIVE)
+  referenceType   ExpenseReferenceType? @relation(fields: [referenceTypeId], references: [id], onDelete: SetNull)
+  categoryId      String
+  category        ExpenseCategory       @relation(fields: [categoryId], references: [id])
+  particulars     String // what the money was for, e.g. "LOCAL MATTRESS"
+  amount          Decimal               @db.Decimal(12, 2)
+  paymentModeId   String
+  paymentMode     ExpensePaymentMode    @relation(fields: [paymentModeId], references: [id])
+  scope           ExpenseScope          @default(COMPANY) // COMPANY vs PERSONAL - see module note above
+  paidBy          String? // free text - who physically paid/handled it
+  employeeId      String? // optional link to an existing Carpenter (this app's worker/employee registry) for salary-type entries
+  employee        Carpenter?            @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  vendorName      String? // free text vendor/payee, e.g. "HARI TIMBER" - no separate Vendor entity exists in this schema
+  description     String?
+  notes           String?
+  attachmentUrl   String? // receipt/bill upload, reuses the app's existing local-uploads pattern
+  tags            String? // comma-separated free tags
+  status          ExpenseStatus         @default(ACTIVE)
 
   createdById String
   createdBy   User     @relation("ExpenseCreatedBy", fields: [createdById], references: [id])

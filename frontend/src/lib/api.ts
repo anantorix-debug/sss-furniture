@@ -34,6 +34,22 @@ export async function uploadProductImage(productId: string, file: File): Promise
   }
 }
 
+export async function uploadGalleryImage(file: File): Promise<unknown> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE_URL}/gallery`, {
+    method: 'POST',
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    credentials: 'include',
+    body: formData,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new ApiError(res.status, data?.message || 'Failed to upload image', data);
+  }
+  return data;
+}
+
 export const WHATSAPP_MEDIA_MAX_BYTES = 64 * 1024 * 1024;
 
 export interface WhatsappSendResult {

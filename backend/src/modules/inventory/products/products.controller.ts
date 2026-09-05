@@ -21,6 +21,8 @@ export class ProductsController {
     @Query('search') search?: string,
     @Query('category') category?: string,
     @Query('modelNo') modelNo?: string,
+    @Query('finish') finish?: string,
+    @Query('stockStatus') stockStatus?: 'IN_STOCK' | 'OUT_OF_STOCK',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
@@ -29,7 +31,26 @@ export class ProductsController {
       search,
       category,
       modelNo,
+      finish,
+      stockStatus,
       viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  // Godown stock movement history - kept above the :id route so "movements"
+  // never gets swallowed by the :id param.
+  @Get('stock-movements')
+  findMovements(
+    @Query('productId') productId?: string,
+    @Query('type') type?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.findMovements({
+      productId,
+      type,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
@@ -42,8 +63,8 @@ export class ProductsController {
 
   @Roles(Role.ADMIN)
   @Post()
-  create(@Body() dto: CreateProductDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreateProductDto, @CurrentUser() user: AuthUser) {
+    return this.service.create(dto, user.userId);
   }
 
   @Roles(Role.ADMIN)

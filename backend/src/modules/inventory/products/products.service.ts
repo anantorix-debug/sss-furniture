@@ -9,7 +9,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { Role } from '../../../common/enums/role.enum';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 
-const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
+const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.CARVER, Role.POLISHER];
 
 // Decimal fields serialize to strings by default (e.g. "9200"), which
 // silently turns numeric use on the client into string concatenation
@@ -45,13 +45,24 @@ export class ProductsService {
   private readonly imagesInclude = { images: { orderBy: { isPrimary: 'desc' as const } } };
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
-  async findAll(params: { search?: string; category?: string; modelNo?: string; viewerRole?: Role; page?: number; limit?: number }) {
+  async findAll(params: {
+    search?: string;
+    category?: string;
+    modelNo?: string;
+    finish?: string;
+    stockStatus?: 'IN_STOCK' | 'OUT_OF_STOCK';
+    viewerRole?: Role;
+    page?: number;
+    limit?: number;
+  }) {
     const paginated = params.page != null;
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
     const where = {
       category: params.category || undefined,
       modelNo: params.modelNo || undefined,
+      materialFinish: params.finish ? { contains: params.finish } : undefined,
+      availableQuantity: params.stockStatus === 'IN_STOCK' ? { gt: 0 } : params.stockStatus === 'OUT_OF_STOCK' ? { lte: 0 } : undefined,
       OR: params.search
         ? [
             { name: { contains: params.search } },
@@ -91,9 +102,30 @@ export class ProductsService {
     }
   }
 
-  async create(dto: CreateProductDto) {
+  // Every Model No is exactly one physical piece - quantity is always 1,
+  // never accepted from the client. There is no "Add Stock"/top-up: once a
+  // piece is sold it's sold, and a new physical piece is a new row (either
+  // Add Product again, or via Production completing - see
+  // CarpenterService.applyCompletionToStock).
+  async create(dto: CreateProductDto, userId?: string) {
     await this.assertUnique(dto);
-    const product = await this.prisma.product.create({ data: dto, include: this.imagesInclude });
+    const product = await this.prisma.product.create({
+      data: { ...dto, quantity: 1, availableQuantity: 1 },
+      include: this.imagesInclude,
+    });
+    if (userId) {
+      await this.prisma.productStockMovement.create({
+        data: {
+          productId: product.id,
+          type: 'IN',
+          quantity: 1,
+          previousAvailable: 0,
+          newAvailable: 1,
+          reason: 'Added to stock',
+          createdById: userId,
+        },
+      });
+    }
     return withNumericPrices(product);
   }
 
@@ -103,6 +135,24 @@ export class ProductsService {
     const product = await this.prisma.product.update({ where: { id }, data: dto, include: this.imagesInclude });
     await this.audit.log({ userId, action: 'PRODUCT_UPDATED', targetType: 'Product', targetId: id, metadata: { fields: Object.keys(dto) } });
     return withNumericPrices(product);
+  }
+
+  async findMovements(params: { productId?: string; type?: string; page?: number; limit?: number }) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const where = { productId: params.productId || undefined, type: params.type as any };
+    const [movements, total] = await Promise.all([
+      this.prisma.productStockMovement.findMany({
+        where,
+        include: { product: { select: { id: true, name: true, modelNo: true } }, createdBy: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: paginated ? limit : 200,
+        ...(paginated ? toSkipTake(page, limit) : {}),
+      }),
+      paginated ? this.prisma.productStockMovement.count({ where }) : Promise.resolve(0),
+    ]);
+    return paginated ? paginate(movements, total, page, limit) : movements;
   }
 
   async remove(id: string) {

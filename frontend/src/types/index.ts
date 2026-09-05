@@ -1,4 +1,4 @@
-export type Role = 'SUPERADMIN' | 'ADMIN' | 'CARPENTER' | 'POLISHER';
+export type Role = 'SUPERADMIN' | 'ADMIN' | 'CARPENTER' | 'CARVER' | 'POLISHER';
 export type DeliveryStatus = 'PENDING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'DELIVERY_FAILED' | 'CANCELLED';
 export type WorkStatus = 'ASSIGNED' | 'IN_PROGRESS' | 'QUALITY_CHECK' | 'REWORK' | 'COMPLETED';
 export type PurchaseOrderStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'REJECTED' | 'APPROVED' | 'SENT_TO_SHOP' | 'RECEIVED' | 'CANCELLED';
@@ -37,9 +37,13 @@ export interface Payment {
 
 export interface CustomerOrderItem {
   id: string;
+  productId?: string | null;
   productName: string;
   quantity: number;
   unitPrice: number;
+  // Stock-first split, computed at create/edit time.
+  stockReservedQty?: number;
+  productionQty?: number;
 }
 
 export interface CustomerOrder {
@@ -73,6 +77,27 @@ export interface CustomerOrder {
   totalReceived?: number;
   balanceAmount?: number;
   paymentStatus?: 'SETTLED' | 'DUE';
+  // Reference-only Gallery images selected for this order (never re-uploaded).
+  galleryImages?: GalleryImage[];
+}
+
+export interface PartyOrderItem {
+  id: string;
+  productId?: string | null;
+  productName: string;
+  finish?: string | null;
+  size?: string | null;
+  sizeUnit?: string | null;
+  pattern?: string | null;
+  details?: string | null;
+  qty: number;
+  modelNo?: string | null;
+  // Stock-first split, computed at create/edit time.
+  stockReservedQty?: number;
+  productionQty?: number;
+  // Omitted entirely for Carpenter/Polisher viewers.
+  unitPrice?: number;
+  totalValue?: number;
 }
 
 export interface PartyOrder {
@@ -81,14 +106,17 @@ export interface PartyOrder {
   jobNumber?: string | null;
   orderDate: string;
   shopName: string;
+  shopId?: string | null;
   phone?: string | null;
-  model: string;
+  // Legacy single-product fields - present only on rows created before the
+  // multi-line redesign. New orders use `items` instead.
+  model?: string | null;
   size?: string | null;
   sizeUnit?: string | null;
   finish?: string | null;
   details?: string | null;
-  qty: number;
-  cashTrack?: string | null;
+  qty?: number | null;
+  items: PartyOrderItem[];
   courierTrack?: string | null;
   actualDeliveryDate?: string | null;
   deliveryStatus: DeliveryStatus;
@@ -107,6 +135,25 @@ export interface PartyOrder {
   receivedAmount?: number;
   balanceAmount?: number;
   paymentStatus?: 'SETTLED' | 'DUE';
+}
+
+export interface GalleryImage {
+  id: string;
+  url: string;
+  fileName: string;
+  fileSize: number;
+  modelNo?: string | null;
+  caption?: string | null;
+  uploadedBy?: { id: string; name: string };
+  createdAt: string;
+}
+
+export interface Shop {
+  id: string;
+  name: string;
+  contactPhone?: string | null;
+  address?: string | null;
+  isActive: boolean;
 }
 
 export interface SupplierSummary {
@@ -177,6 +224,9 @@ export interface CarpenterSummary {
   name: string;
   phone?: string | null;
   workerType: WorkerType;
+  // The login (Carpenter/Carver/Polisher role User) this payee profile is
+  // linked to, if any - lets that user's "My Work" page find their own jobs.
+  user?: { id: string; name: string; role: Role } | null;
   // Omitted entirely for Carpenter/Polisher viewers - they never see
   // wages/balances, including their own or anyone else's.
   totalWorkValue?: number;
@@ -186,6 +236,7 @@ export interface CarpenterSummary {
 }
 
 export type ProductionStage = 'CARPENTER' | 'CARVING' | 'POLISH';
+export type ProductionSource = 'CUSTOMER_ORDER' | 'PARTY_ORDER' | 'STOCK';
 
 export interface CarpenterWorkItem {
   id: string;
@@ -207,6 +258,44 @@ export interface CarpenterWorkItem {
   createdBy?: { name: string };
   whatsapp?: { sent: boolean; reason?: string };
   stockMovements?: StockMovement[];
+  // Which trigger created this item (default STOCK) - drives the
+  // completion-time bridge into Godown Stock vs. an order's
+  // FinishedStockItem. See CarpenterService.updateWorkStatus.
+  source?: ProductionSource;
+  sourceCustomerOrderId?: string | null;
+  sourcePartyOrderItemId?: string | null;
+  productId?: string | null;
+  // Sequential Carpenter -> Carving -> Polish engine fields. batchId ties
+  // together the stage-rows of one production run - null on legacy rows
+  // that predate the sequential pipeline (still shown on the old
+  // QC/Finished Stock flow instead of the new Verification tab).
+  batchId?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  notes?: string | null;
+  assignedById?: string | null;
+  assignedBy?: { name: string } | null;
+}
+
+// Production Control Center - GET /carpenter-work-items/dashboard
+export interface ProductionDashboard {
+  kpis: {
+    activeWorkers: number;
+    jobsInProgress: number;
+    pendingByStage: Record<ProductionStage, number>;
+    readyForVerification: number;
+    stockProductionToday: number;
+    orderProductionToday: number;
+    materialsUsedToday: number;
+    completedToday: number;
+  };
+  groups: {
+    todaysWork: CarpenterWorkItem[];
+    waiting: CarpenterWorkItem[];
+    stockProduction: CarpenterWorkItem[];
+    orderProduction: CarpenterWorkItem[];
+    completedToday: CarpenterWorkItem[];
+  };
 }
 
 export type QcResult = 'PASSED' | 'FAILED' | 'REWORK_REQUIRED';
@@ -266,6 +355,14 @@ export interface DashboardSummary {
   carpenters: { count: number };
 }
 
+export interface DashboardTrendPoint {
+  date: string; // YYYY-MM-DD
+  customerOrders: number;
+  partyOrders: number;
+  paymentsReceived: number;
+  productionCompleted: number;
+}
+
 // --- Products & Inventory --------------------------------------------------
 
 export interface ProductImage {
@@ -279,25 +376,52 @@ export interface ProductImage {
 export interface Product {
   id: string;
   sku?: string | null;
-  modelNo?: string | null;
+  modelNo?: string | null; // "Not Updated" in the UI until Production Employee assigns one
   name: string;
   category?: string | null;
   modelSize?: string | null;
   materialFinish?: string | null;
+  sizeUnit?: string | null;
+  pattern?: string | null;
+  details?: string | null;
   unit?: string | null;
-  retailPrice: number;
+  retailPrice: number; // Unit Price
   wholesalePrice?: number | null;
   costPrice?: number | null;
   isActive: boolean;
   createdAt: string;
   images: ProductImage[];
+  // Godown stock - omitted for Carpenter/Polisher viewers (financial strip).
+  quantity?: number;
+  availableQuantity?: number;
+  reservedQuantity?: number;
 }
+
+export type ProductStockMovementType = 'IN' | 'RESERVED' | 'RELEASED' | 'DISPATCHED' | 'ADJUSTMENT';
+
+export interface ProductStockMovement {
+  id: string;
+  productId: string;
+  product?: { id: string; name: string; modelNo?: string | null };
+  type: ProductStockMovementType;
+  quantity: number;
+  previousAvailable: number;
+  newAvailable: number;
+  orderType?: 'CUSTOMER' | 'PARTY' | null;
+  orderId?: string | null;
+  reason?: string | null;
+  createdBy?: { id: string; name: string };
+  createdAt: string;
+}
+
+export type MaterialGroup = 'WOOD' | 'CARVING' | 'POLISH' | 'OTHER';
 
 export interface RawMaterial {
   id: string;
   name: string;
   type?: string | null;
   unit: string;
+  materialGroup: MaterialGroup;
   reorderLevel?: number | null;
   inStock: number;
   purchaseRate: number;
@@ -508,6 +632,32 @@ export interface TrackResult {
     totalReceived?: number;
     balanceAmount?: number;
   }[];
+  // Multi-line Party Order matches (current flow) - one per matching
+  // product line, since an order can now hold many different Model Nos.
+  partyOrderItems: {
+    id: string;
+    orderId: string;
+    modelNo?: string | null;
+    productName: string;
+    finish?: string | null;
+    size?: string | null;
+    qty: number;
+    stockReservedQty: number;
+    productionQty: number;
+    shopName: string;
+    phone?: string | null;
+    deliveryStatus: DeliveryStatus;
+    orderDate: string;
+    actualDeliveryDate?: string | null;
+    createdBy?: string;
+    modelNoUpdatedBy?: string | null;
+    modelNoUpdatedAt?: string | null;
+    paymentStatus: 'SETTLED' | 'DUE';
+    unitPrice?: number;
+    totalValue?: number;
+    totalReceived?: number;
+    balanceAmount?: number;
+  }[];
   workItems: TrackWorkItem[];
 }
 
@@ -521,6 +671,21 @@ export interface AuditLogEntry {
   metadata?: Record<string, unknown> | null;
   createdAt: string;
   user?: { name: string; role: Role } | null;
+}
+
+// Persisted, server-tracked notifications (production stage/material
+// events) - distinct from NotificationBell's other, locally-computed
+// sources (low stock, QC-pending work items, pending POs).
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  message: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  isRead: boolean;
+  createdAt: string;
 }
 
 // ---------------------------------------------------------------------------

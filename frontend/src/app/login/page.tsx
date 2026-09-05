@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useAuth, ApiError } from '@/context/AuthContext';
+import { PasswordInput } from '@/components/PasswordInput';
 
 const FEATURES = [
   { icon: '₹', text: 'Customer & party orders as separate channels' },
@@ -102,9 +103,8 @@ export default function LoginPage() {
               <label className="label" htmlFor="password">
                 Password
               </label>
-              <input
+              <PasswordInput
                 id="password"
-                type="password"
                 required
                 autoComplete="current-password"
                 className="input"

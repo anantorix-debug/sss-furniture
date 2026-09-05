@@ -22,7 +22,7 @@ export default function MaterialDetailPage() {
   // actually used. Stock Adjustment (damage/wastage correction) is also
   // Admin-only.
   const canStockIn = hasRole('ADMIN');
-  const canIssue = hasRole('ADMIN', 'CARPENTER', 'POLISHER');
+  const canIssue = hasRole('ADMIN', 'CARPENTER', 'CARVER', 'POLISHER');
   const canAdjust = hasRole('ADMIN');
   const canSeeCost = hasRole('ADMIN');
   const { data: material, isLoading, mutate } = useSWR<RawMaterialDetail>(`/raw-materials/${id}`, fetcher);

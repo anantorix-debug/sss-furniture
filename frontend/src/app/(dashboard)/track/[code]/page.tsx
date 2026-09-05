@@ -151,6 +151,41 @@ export default function TrackPage() {
         </div>
       )}
 
+      {data && data.partyOrderItems.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="font-semibold text-brand-900">
+            Party Order Line{data.partyOrderItems.length > 1 ? `s (${data.partyOrderItems.length})` : ''}
+          </h2>
+          {data.partyOrderItems.map((item) => (
+            <div key={item.id} className="card p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={item.deliveryStatus} />
+                  <Chip color={item.paymentStatus === 'SETTLED' ? 'green' : 'red'} label={item.paymentStatus === 'SETTLED' ? 'Paid' : 'Payment Due'} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard label="Shop" value={item.shopName} />
+                <StatCard label="Phone" value={item.phone ?? '-'} />
+                <StatCard label="Product" value={item.productName} />
+                <StatCard label="Finish" value={item.finish ?? '-'} />
+                <StatCard label="Qty" value={String(item.qty)} />
+                <StatCard label="From Stock" value={String(item.stockReservedQty)} />
+                <StatCard label="From Production" value={String(item.productionQty)} />
+                <StatCard label="Order Date" value={formatDate(item.orderDate)} />
+                {item.totalValue !== undefined && <StatCard label="Line Total" value={formatCurrency(item.totalValue)} />}
+                {item.balanceAmount !== undefined && <StatCard label="Order Balance" value={formatCurrency(item.balanceAmount)} />}
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-brand-100">
+                <StatCard label="Model No Updated By" value={item.modelNoUpdatedBy ?? '-'} />
+                <StatCard label="Model No Updated At" value={item.modelNoUpdatedAt ? formatDate(item.modelNoUpdatedAt) : '-'} />
+                <StatCard label="Created By" value={item.createdBy ?? '-'} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {stages.length > 0 && (
         <div className="space-y-4">
           <h2 className="font-semibold text-brand-900">Production Details &amp; Employee History</h2>

@@ -77,7 +77,7 @@ export class RawMaterialsController {
   // the work item itself) - not just Admin+.
   @Post('raw-materials/issue')
   issue(@Body() dto: IssueMaterialDto, @CurrentUser() user: AuthUser) {
-    return this.service.issueToWorkItem(dto, user.userId);
+    return this.service.issueToWorkItem(dto, user.userId, user.role as Role);
   }
 
   @Get('stock-movements')

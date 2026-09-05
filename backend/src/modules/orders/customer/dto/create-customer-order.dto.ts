@@ -3,6 +3,14 @@ import { Type } from 'class-transformer';
 import { DeliveryStatus } from '../../../../common/enums/delivery-status.enum';
 
 export class CustomerOrderItemDto {
+  // Set when this line is an existing Godown Stock product - triggers the
+  // stock-first check/split. Omitted for a brand-new custom product (full
+  // quantity goes to production, Model No stays "Not Updated" until
+  // Production Employee assigns it).
+  @IsString()
+  @IsOptional()
+  productId?: string;
+
   @IsString()
   @MinLength(1)
   productName: string;
@@ -64,6 +72,13 @@ export class CreateCustomerOrderDto {
   @Type(() => CustomerOrderItemDto)
   @IsOptional()
   items?: CustomerOrderItemDto[];
+
+  // Existing Gallery image ids selected for this order (spec: reference
+  // only - never re-uploaded). Omitted/empty means no images attached.
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  galleryImageIds?: string[];
 
   // Model No (cotTrack) is intentionally NOT settable here - only the
   // production employee assigned to this order can set it, via the

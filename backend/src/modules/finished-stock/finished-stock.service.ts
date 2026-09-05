@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFinishedStockDto } from './dto/create-finished-stock.dto';
 import { UpdateFinishedStockDto } from './dto/update-finished-stock.dto';
@@ -36,8 +36,9 @@ export class FinishedStockService {
   }
 
   async create(dto: CreateFinishedStockDto) {
-    const existing = await this.prisma.finishedStockItem.findUnique({ where: { jobNumber: dto.jobNumber } });
-    if (existing) throw new ConflictException('A finished stock entry already exists for this Job Number');
+    // jobNumber is no longer unique - a multi-line Party Order (or a
+    // Customer Order split across stock + production) can have more than
+    // one finished-stock entry sharing the same job number, one per line.
     return this.prisma.finishedStockItem.create({
       data: {
         jobNumber: dto.jobNumber,

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { CarpenterService } from '../../carpenter/carpenter.service';
+import { StockAllocationService } from '../../inventory/products/stock-allocation.service';
 import { PdfService } from '../../pdf/pdf.service';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { CreateCustomerOrderDto, CustomerOrderItemDto } from './dto/create-customer-order.dto';
@@ -22,9 +23,34 @@ function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
+// Order-insensitive comparison of the saved lines against a submitted
+// items[] payload - the Edit form always sends the full array (even lines
+// nobody touched), so "items present" alone can't tell us whether anything
+// actually changed. Only a genuine difference should trigger the release/
+// reallocate cycle.
+function itemsDiffer(
+  current: { productId?: string | null; productName: string; quantity: number; unitPrice: number | string }[],
+  incoming: CustomerOrderItemDto[],
+): boolean {
+  const serialize = (items: { productId?: string | null; productName: string; quantity?: number; unitPrice: number | string }[]) =>
+    items
+      .map((i) => `${i.productId ?? ''}|${i.productName}|${i.quantity ?? 1}|${Number(i.unitPrice)}`)
+      .sort()
+      .join(';');
+  return serialize(current) !== serialize(incoming);
+}
+
 function withBalance<T extends { orderValue: any; payments: { amount: any }[] }>(order: T) {
   const { totalReceived, balanceAmount } = computeBalance(order.orderValue, order.payments);
   return { ...order, totalReceived, balanceAmount };
+}
+
+// Collapses the join-table rows (CustomerOrderGalleryImage[]) into a plain
+// GalleryImage[] for the API response - callers shouldn't need to know the
+// join table exists.
+function flattenGalleryImages<T extends { galleryImages?: { galleryImage: unknown }[] }>(order: T) {
+  if (!order.galleryImages) return order;
+  return { ...order, galleryImages: order.galleryImages.map((g) => g.galleryImage) };
 }
 
 // Carpenter/Polisher never see order financials - only a non-monetary
@@ -48,6 +74,7 @@ export class CustomerOrdersService {
     private prisma: PrismaService,
     private audit: AuditService,
     private carpenter: CarpenterService,
+    private stockAllocation: StockAllocationService,
     private pdf: PdfService,
     private whatsapp: WhatsappService,
   ) {}
@@ -94,6 +121,7 @@ export class CustomerOrdersService {
         include: {
           payments: true,
           items: true,
+          galleryImages: { include: { galleryImage: true } },
           createdBy: { select: { id: true, name: true } },
           assignedEmployee: { select: { id: true, name: true } },
           assignedBy: { select: { id: true, name: true } },
@@ -104,7 +132,7 @@ export class CustomerOrdersService {
       }),
       paginated ? this.prisma.customerOrder.count({ where }) : Promise.resolve(0),
     ]);
-    const mapped = orders.map((o) => stripOrderMoney(withBalance(o), hide));
+    const mapped = orders.map((o) => stripOrderMoney(withBalance(flattenGalleryImages(o)), hide));
     return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 
@@ -115,6 +143,7 @@ export class CustomerOrdersService {
       include: {
         payments: { orderBy: { date: 'asc' } },
         items: true,
+        galleryImages: { include: { galleryImage: true } },
         createdBy: { select: { id: true, name: true } },
         assignedEmployee: { select: { id: true, name: true } },
         assignedBy: { select: { id: true, name: true } },
@@ -122,7 +151,7 @@ export class CustomerOrdersService {
       },
     });
     if (!order) throw new NotFoundException('Customer order not found');
-    return stripOrderMoney(withBalance(order), hide);
+    return stripOrderMoney(withBalance(flattenGalleryImages(order)), hide);
   }
 
   async create(dto: CreateCustomerOrderDto, userId: string) {
@@ -148,11 +177,23 @@ export class CustomerOrdersService {
         deliveryStatus: dto.deliveryStatus,
         createdById: userId,
         items: dto.items?.length
-          ? { create: dto.items.map((i) => ({ productName: i.productName, quantity: i.quantity ?? 1, unitPrice: i.unitPrice })) }
+          ? {
+              create: dto.items.map((i) => ({
+                productId: i.productId,
+                productName: i.productName,
+                quantity: i.quantity ?? 1,
+                unitPrice: i.unitPrice,
+              })),
+            }
+          : undefined,
+        galleryImages: dto.galleryImageIds?.length
+          ? { create: dto.galleryImageIds.map((galleryImageId) => ({ galleryImageId })) }
           : undefined,
       },
       include: { payments: true, items: true },
     });
+
+    await this.allocateItems(order.id, order.jobNumber ?? order.orderId, order.items, userId);
 
     await this.audit.log({
       userId,
@@ -162,20 +203,66 @@ export class CustomerOrdersService {
       metadata: { orderId: order.orderId, jobNumber: order.jobNumber, customerName: order.customerName },
     });
 
-    return withBalance(order);
+    return this.findOne(order.id);
   }
 
-  async update(id: string, dto: UpdateCustomerOrderDto) {
-    await this.findOne(id);
+  // Stock-first split (spec: check Godown Stock before creating
+  // production) - runs once per line, after the order/items exist so the
+  // resulting FinishedStockItem/CarpenterWorkItem rows can point back at
+  // real ids. Only lines carrying a productId are stock-checked; a
+  // brand-new custom product (no productId) always goes fully to
+  // production.
+  private async allocateItems(
+    orderId: string,
+    jobNumberForStock: string,
+    items: { id: string; productId: string | null; productName: string; quantity: number }[],
+    userId: string,
+  ) {
+    for (const item of items) {
+      const result = await this.stockAllocation.allocate({
+        productId: item.productId ?? undefined,
+        productName: item.productName,
+        quantity: item.quantity,
+        source: 'CUSTOMER_ORDER',
+        sourceCustomerOrderId: orderId,
+        jobNumberForStock,
+        userId,
+      });
+      await this.prisma.customerOrderItem.update({
+        where: { id: item.id },
+        data: { stockReservedQty: result.stockReservedQty, productionQty: result.productionQty },
+      });
+    }
+  }
+
+  async update(id: string, dto: UpdateCustomerOrderDto, userId: string) {
+    const current = await this.findOne(id);
 
     if (dto.orderId) {
       const existing = await this.prisma.customerOrder.findUnique({ where: { orderId: dto.orderId } });
       if (existing && existing.id !== id) throw new ConflictException('An order with this Order ID already exists');
     }
 
-    const usingItems = Boolean(dto.items?.length);
+    // The Edit form always submits the full items[] array, even when the
+    // user only changed something unrelated like Delivery Status - so
+    // "items present in the payload" alone isn't a safe signal to release/
+    // reallocate stock. Only do that expensive (and sometimes blocked-by-
+    // dispatch) dance when the line contents actually changed.
+    const usingItems = Boolean(dto.items?.length) && itemsDiffer(current.items ?? [], dto.items!);
     if (usingItems) {
+      // Release whatever stock/production this order previously held
+      // before replacing its lines - refuses (ConflictException) if any of
+      // it is already dispatched or in progress, rather than silently
+      // reallocating on top of work that's already started.
+      await this.stockAllocation.release({ sourceCustomerOrderId: id, userId });
       await this.prisma.customerOrderItem.deleteMany({ where: { orderId: id } });
+    }
+    // Full replace, not merge - matches how items[] behaves. Explicitly
+    // sending [] clears every attached image; omitting the field entirely
+    // leaves the existing selection untouched.
+    const replacingGallery = dto.galleryImageIds !== undefined;
+    if (replacingGallery) {
+      await this.prisma.customerOrderGalleryImage.deleteMany({ where: { orderId: id } });
     }
     const derived = this.deriveFromItemsOrPassthrough(dto);
 
@@ -194,11 +281,27 @@ export class CustomerOrdersService {
         actualDeliveryDate: dto.actualDeliveryDate ? new Date(dto.actualDeliveryDate) : undefined,
         deliveryStatus: dto.deliveryStatus,
         items: usingItems
-          ? { create: dto.items!.map((i) => ({ productName: i.productName, quantity: i.quantity ?? 1, unitPrice: i.unitPrice })) }
+          ? {
+              create: dto.items!.map((i) => ({
+                productId: i.productId,
+                productName: i.productName,
+                quantity: i.quantity ?? 1,
+                unitPrice: i.unitPrice,
+              })),
+            }
+          : undefined,
+        galleryImages: replacingGallery
+          ? { create: dto.galleryImageIds!.map((galleryImageId) => ({ galleryImageId })) }
           : undefined,
       },
       include: { payments: true, items: true },
     });
+
+    if (usingItems) {
+      await this.allocateItems(order.id, order.jobNumber ?? order.orderId, order.items, userId);
+      return this.findOne(order.id);
+    }
+    if (replacingGallery) return this.findOne(order.id);
     return withBalance(order);
   }
 
@@ -214,8 +317,12 @@ export class CustomerOrdersService {
     return { product: dto.product, orderValue: dto.orderValue };
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId: string) {
     await this.findOne(id);
+    // Release any reserved stock / undone production before deleting -
+    // throws if any of it is already dispatched or in progress, blocking
+    // the cancel rather than silently orphaning it.
+    await this.stockAllocation.release({ sourceCustomerOrderId: id, userId });
     await this.prisma.customerOrder.delete({ where: { id } });
     return { success: true };
   }
@@ -244,18 +351,34 @@ export class CustomerOrdersService {
     return this.findOne(orderId);
   }
 
-  // Puts this order into production in one step: creates the carpenter
-  // work item tagged with the order's Job Number (so it's traceable via
-  // /search/track) and fires the WhatsApp work-assignment notification.
-  async assignProduction(orderId: string, dto: AssignProductionDto, userId: string) {
+  // Unified "Assign to Production": puts this order into production in one
+  // step - creates the carpenter work item tagged with the order's Job
+  // Number (so it's traceable via /search/track) and fires the WhatsApp
+  // work-assignment notification, and (when employeeUserId is given) also
+  // sets the order's assignedEmployeeId for Model No permission - what used
+  // to be two separate calls (assignProduction + assignEmployee).
+  async assignProduction(orderId: string, dto: AssignProductionDto, userId: string, viewerRole?: Role) {
     const order = await this.findOne(orderId);
     const quantity = dto.quantity ?? 1;
     const extra = dto.extra ?? 0;
     const total = dto.price * quantity + extra;
 
-    return this.carpenter.createWorkItem(
+    if (dto.employeeUserId) {
+      const employee = await this.prisma.user.findUnique({ where: { id: dto.employeeUserId } });
+      if (!employee || (employee.role !== Role.CARPENTER && employee.role !== Role.CARVER && employee.role !== Role.POLISHER)) {
+        throw new BadRequestException('Employee must be an active Carpenter, Carving or Polish team user');
+      }
+      await this.prisma.customerOrder.update({
+        where: { id: orderId },
+        data: { assignedEmployeeId: employee.id, assignedAt: new Date(), assignedById: userId },
+      });
+    }
+
+    return this.carpenter.assignSourceProduction(
+      { source: 'CUSTOMER_ORDER', sourceCustomerOrderId: orderId, assignedById: userId },
       {
         carpenterId: dto.carpenterId,
+        stage: dto.stage as any,
         workDate: dto.workDate,
         modelNo: order.jobNumber ?? order.orderId,
         productName: order.product,
@@ -265,9 +388,11 @@ export class CustomerOrdersService {
         extra,
         quantity,
         total,
+        notes: dto.notes,
         notifyWhatsapp: dto.notifyWhatsapp,
       },
       userId,
+      viewerRole,
     );
   }
 
@@ -279,8 +404,8 @@ export class CustomerOrdersService {
   async assignEmployee(id: string, dto: AssignEmployeeDto, assignedById: string) {
     await this.findOne(id);
     const employee = await this.prisma.user.findUnique({ where: { id: dto.employeeId } });
-    if (!employee || (employee.role !== Role.CARPENTER && employee.role !== Role.POLISHER)) {
-      throw new BadRequestException('Employee must be an active Carpenter or Polisher team user');
+    if (!employee || (employee.role !== Role.CARPENTER && employee.role !== Role.CARVER && employee.role !== Role.POLISHER)) {
+      throw new BadRequestException('Employee must be an active Carpenter, Carving or Polish team user');
     }
 
     await this.prisma.customerOrder.update({

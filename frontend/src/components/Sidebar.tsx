@@ -10,18 +10,24 @@ interface NavItem {
   href: string;
   label: string;
   icon: string;
-  minRole?: Role;
+  minRole?: Role | Role[];
+  // When true, membership is checked literally against the roles list -
+  // Super Admin's usual "bypasses every check" behavior does not apply.
+  // Used for employee-only items like My Work, which are meaningless for
+  // Super Admin/Admin (no linked worker profile to show jobs for).
+  exact?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: '▦', minRole: 'ADMIN' },
+  { href: '/my-work', label: 'My Work', icon: '⚒', minRole: ['CARPENTER', 'CARVER', 'POLISHER'], exact: true },
   { href: '/customer-orders', label: 'Customer Orders', icon: '₹', minRole: 'ADMIN' },
   { href: '/party-orders', label: 'Party Orders', icon: '◉', minRole: 'ADMIN' },
   { href: '/inventory', label: 'Inventory', icon: '▤' },
   { href: '/suppliers', label: 'Suppliers', icon: '⇩', minRole: 'ADMIN' },
   { href: '/purchase-orders', label: 'Purchase Orders', icon: '⇩', minRole: 'ADMIN' },
   { href: '/carpenters', label: 'Production', icon: '✦' },
-  { href: '/production', label: 'Dispatch Pipeline', icon: '⇒', minRole: 'ADMIN' },
+  { href: '/production-control', label: 'Production Control', icon: '⏻', minRole: 'ADMIN' },
   { href: '/payments', label: 'Payments', icon: '▣', minRole: 'ADMIN' },
   { href: '/expenses', label: 'Expenses', icon: '⛁', minRole: 'SUPERADMIN' },
   { href: '/reports', label: 'Reports', icon: '▥', minRole: 'ADMIN' },
@@ -34,6 +40,7 @@ const ROLE_LABEL: Record<Role, string> = {
   SUPERADMIN: 'Super Admin',
   ADMIN: 'Admin',
   CARPENTER: 'Carpenter Team',
+  CARVER: 'Carving Team',
   POLISHER: 'Polish Team',
 };
 
@@ -61,7 +68,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       <nav className="flex-1 px-2.5 py-3.5 space-y-0.5 overflow-y-auto">
         <p className="text-[9px] font-medium text-white/40 tracking-[1.2px] px-2 pb-1">MENU</p>
-        {NAV_ITEMS.filter((item) => !item.minRole || hasRole(item.minRole)).map((item) => {
+        {NAV_ITEMS.filter((item) => {
+          if (!item.minRole) return true;
+          const roles = Array.isArray(item.minRole) ? item.minRole : [item.minRole];
+          return item.exact ? roles.includes(user.role) : hasRole(...roles);
+        }).map((item) => {
           const active = pathname === item.href || pathname?.startsWith(item.href + '/');
           return (
             <Link

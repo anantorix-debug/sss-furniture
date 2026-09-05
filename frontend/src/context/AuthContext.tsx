@@ -45,8 +45,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(res.user);
       // The Dashboard is a financial overview (order values, balances,
       // supplier totals) with nothing relevant to a production employee -
-      // Carpenter/Polisher land on their own workspace instead.
-      const isProductionEmployee = res.user.role === 'CARPENTER' || res.user.role === 'POLISHER';
+      // Carpenter/Carver/Polisher land on their own workspace instead.
+      const isProductionEmployee = res.user.role === 'CARPENTER' || res.user.role === 'CARVER' || res.user.role === 'POLISHER';
       router.push(isProductionEmployee ? '/carpenters' : '/dashboard');
     },
     [router],

@@ -32,6 +32,13 @@ interface WhatsAppModalProps {
   // update) that always go out with the same branded header image. Still
   // removable/replaceable via the file picker like any other attachment.
   defaultImageUrl?: string;
+  // Multiple pre-selected images (e.g. Gallery images chosen inside the
+  // Customer Order form) - sent as one message with the first image as the
+  // caption-bearing attachment, followed by the rest as separate media
+  // messages to the same chat. Takes precedence over defaultImageUrl when
+  // given. Each URL is fetched client-side and sent directly - never
+  // re-uploaded/stored again server-side.
+  defaultImageUrls?: string[];
 }
 
 export function WhatsAppModal({
@@ -40,6 +47,7 @@ export function WhatsAppModal({
   onSuccess,
   defaultMessage = '',
   defaultImageUrl,
+  defaultImageUrls,
 }: WhatsAppModalProps) {
   const router = useRouter();
   const [selectedChat, setSelectedChat] = useState<WhatsappChat | null>(null);
@@ -49,6 +57,7 @@ export function WhatsAppModal({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [extraMediaFiles, setExtraMediaFiles] = useState<File[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -101,14 +110,20 @@ export function WhatsAppModal({
   }, [recipientInfo.phone]);
 
   useEffect(() => {
-    if (!defaultImageUrl) return;
+    const urls = defaultImageUrls && defaultImageUrls.length > 0 ? defaultImageUrls : defaultImageUrl ? [defaultImageUrl] : [];
+    if (urls.length === 0) return;
     let cancelled = false;
-    fetch(defaultImageUrl)
-      .then((res) => res.blob())
-      .then((blob) => {
+    Promise.all(
+      urls.map((url) =>
+        fetch(url)
+          .then((res) => res.blob())
+          .then((blob) => new File([blob], url.split('/').pop() || 'image.jpg', { type: blob.type || 'image/jpeg' })),
+      ),
+    )
+      .then((files) => {
         if (cancelled) return;
-        const filename = defaultImageUrl.split('/').pop() || 'image.jpg';
-        setMediaFile(new File([blob], filename, { type: blob.type || 'image/jpeg' }));
+        setMediaFile(files[0] ?? null);
+        setExtraMediaFiles(files.slice(1));
       })
       .catch(() => {
         // Non-fatal - sender can still attach a file manually.
@@ -116,7 +131,7 @@ export function WhatsAppModal({
     return () => {
       cancelled = true;
     };
-  }, [defaultImageUrl]);
+  }, [defaultImageUrl, defaultImageUrls]);
 
   const filteredChats = chats?.filter(
     (chat) =>
@@ -145,6 +160,13 @@ export function WhatsAppModal({
       if (mediaFile) {
         const result = await sendWhatsappMedia(selectedChat.id, mediaFile, message.trim() || undefined);
         if (!result.sent) throw new ApiError(502, result.error || result.reason || 'Failed to send media', result);
+        // Any additional selected images go out as their own media
+        // messages, in order, to the same chat - WhatsApp has no single
+        // "multi-attachment" message, so this is one message per image.
+        for (const extra of extraMediaFiles) {
+          const extraResult = await sendWhatsappMedia(selectedChat.id, extra);
+          if (!extraResult.sent) throw new ApiError(502, extraResult.error || extraResult.reason || 'Failed to send an image', extraResult);
+        }
       } else {
         await api.post(`/whatsapp/send/${encodeURIComponent(selectedChat.id)}`, {
           message,
@@ -308,17 +330,20 @@ export function WhatsAppModal({
                     type="button"
                     onClick={() => {
                       setMediaFile(null);
+                      setExtraMediaFiles([]);
                       if (fileInputRef.current) fileInputRef.current.value = '';
                     }}
                     className="text-xs text-red-500 hover:underline whitespace-nowrap"
                   >
-                    Remove file
+                    Remove file{extraMediaFiles.length > 0 ? 's' : ''}
                   </button>
                 )}
               </div>
               {mediaFile && (
                 <p className="text-xs text-brand-500 mt-1">
-                  📎 {mediaFile.name} ({(mediaFile.size / 1024).toFixed(0)} KB) — sent directly, never stored on this server.
+                  📎 {mediaFile.name} ({(mediaFile.size / 1024).toFixed(0)} KB)
+                  {extraMediaFiles.length > 0 && ` + ${extraMediaFiles.length} more image${extraMediaFiles.length > 1 ? 's' : ''}`}
+                  {' '}— sent directly, never stored on this server.
                 </p>
               )}
             </div>

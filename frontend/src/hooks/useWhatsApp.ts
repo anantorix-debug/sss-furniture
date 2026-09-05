@@ -6,6 +6,7 @@ interface UseWhatsAppOptions {
   recipientPhone?: string;
   defaultMessage?: string;
   defaultImageUrl?: string;
+  defaultImageUrls?: string[];
 }
 
 export function useWhatsApp() {

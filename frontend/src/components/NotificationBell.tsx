@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
+import { api } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import type { AuditLogEntry, CarpenterWorkItem, PurchaseOrder, RawMaterial } from '@/types';
+import type { AppNotification, AuditLogEntry, CarpenterWorkItem, PurchaseOrder, RawMaterial } from '@/types';
 
 function meta(a: AuditLogEntry, key: string): string {
   const value = a.metadata?.[key];
@@ -52,6 +53,13 @@ interface NotificationItem {
   label: string;
   href: string;
   tone: 'warning' | 'danger' | 'info';
+  serverId?: string; // present for persisted notifications - read-state is tracked server-side, not in localStorage
+}
+
+function hrefForServerNotification(n: AppNotification): string {
+  if (n.targetType === 'RawMaterial') return `/inventory/materials/${n.targetId}`;
+  if (n.targetType === 'CarpenterWorkItem') return '/production';
+  return '/production';
 }
 
 function readStorageKey(userId: string) {
@@ -75,6 +83,89 @@ function saveReadIds(userId: string, ids: Set<string>) {
   }
 }
 
+// Chrome/desktop browser notifications for the new persisted, server-
+// tracked events (production stage/material). Only ever pops a real OS
+// notification for items created after this browser last checked in - a
+// fresh login never dumps the whole backlog as a burst of popups, and a
+// notification is never shown twice for the same event.
+const lastSeenKey = (userId: string) => `sss.notifications.lastSeen.${userId}`;
+const initializedKey = (userId: string) => `sss.notifications.initialized.${userId}`;
+
+function useChromeNotifications(userId: string | undefined, notifications: AppNotification[] | undefined) {
+  const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('default');
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setPermission('unsupported');
+      return;
+    }
+    setPermission(Notification.permission);
+  }, []);
+
+  function requestPermission() {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    Notification.requestPermission().then(setPermission);
+  }
+
+  useEffect(() => {
+    if (!userId || !notifications || typeof window === 'undefined' || !('Notification' in window)) return;
+
+    let lastSeen = 0;
+    let initialized = false;
+    try {
+      lastSeen = Number(window.localStorage.getItem(lastSeenKey(userId)) ?? 0);
+      initialized = window.localStorage.getItem(initializedKey(userId)) === '1';
+    } catch {
+      // ignore
+    }
+
+    const newest = notifications.reduce((max, n) => Math.max(max, new Date(n.createdAt).getTime()), lastSeen);
+
+    // First time this browser has ever seen this user's notifications -
+    // skip whatever backlog already exists (a fresh login shouldn't dump
+    // months of history as a burst of popups) and just record the
+    // baseline, regardless of whether permission happens to be granted
+    // yet.
+    if (!initialized) {
+      try {
+        window.localStorage.setItem(lastSeenKey(userId), String(newest));
+        window.localStorage.setItem(initializedKey(userId), '1');
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    // Once initialized, the baseline only advances when permission is
+    // actually granted and notifications were actually shown - otherwise a
+    // user who hasn't granted permission yet would have everything quietly
+    // marked "seen" every 30s poll, so the moment they finally click Allow
+    // there'd be nothing left to show them.
+    if (Notification.permission === 'granted') {
+      const fresh = notifications
+        .filter((n) => new Date(n.createdAt).getTime() > lastSeen)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .slice(0, 5); // cap a burst (e.g. after being offline) to avoid flooding the OS notification tray
+      for (const n of fresh) {
+        try {
+          new Notification(n.title, { body: n.message, tag: n.id });
+        } catch {
+          // ignore (e.g. notifications blocked mid-session)
+        }
+      }
+      if (newest > lastSeen) {
+        try {
+          window.localStorage.setItem(lastSeenKey(userId), String(newest));
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, [userId, notifications]);
+
+  return { permission, requestPermission };
+}
+
 export function NotificationBell() {
   const { user, hasRole } = useAuth();
   const [open, setOpen] = useState(false);
@@ -89,6 +180,11 @@ export function NotificationBell() {
   const { data: employeeActivity } = useSWR<AuditLogEntry[]>(hasRole('ADMIN') ? '/audit-logs/employee-activity' : null, fetcher, {
     refreshInterval: 60000,
   });
+  const { data: serverNotifications, mutate: refreshServerNotifications } = useSWR<AppNotification[]>('/notifications', fetcher, {
+    refreshInterval: 30000,
+  });
+
+  const { permission: chromePermission, requestPermission: requestChromePermission } = useChromeNotifications(user?.id, serverNotifications);
 
   useEffect(() => {
     if (user) setReadIds(loadReadIds(user.id));
@@ -147,9 +243,20 @@ export function NotificationBell() {
           tone: 'info',
         }),
       ),
+      ...(serverNotifications ?? []).map(
+        (n): NotificationItem => ({
+          id: `server-${n.id}`,
+          serverId: n.id,
+          label: n.message,
+          href: hrefForServerNotification(n),
+          tone: n.type === 'LOW_STOCK' ? 'warning' : 'info',
+        }),
+      ),
     ],
-    [lowStock, workItems, purchaseOrders, employeeActivity],
+    [lowStock, workItems, purchaseOrders, employeeActivity, serverNotifications],
   );
+
+  const serverUnreadIds = useMemo(() => new Set((serverNotifications ?? []).filter((n) => !n.isRead).map((n) => n.id)), [serverNotifications]);
 
   // Keep the stored read-set bounded to notifications that still exist.
   useEffect(() => {
@@ -162,22 +269,34 @@ export function NotificationBell() {
     });
   }, [items, user]);
 
-  const unreadCount = items.filter((i) => !readIds.has(i.id)).length;
+  function isItemUnread(item: NotificationItem) {
+    return item.serverId ? serverUnreadIds.has(item.serverId) : !readIds.has(item.id);
+  }
 
-  function markRead(id: string) {
+  const unreadCount = items.filter(isItemUnread).length;
+
+  function markRead(item: NotificationItem) {
+    if (item.serverId) {
+      api.patch(`/notifications/${item.serverId}/read`).then(() => refreshServerNotifications());
+      return;
+    }
     if (!user) return;
     setReadIds((prev) => {
-      const next = new Set(prev).add(id);
+      const next = new Set(prev).add(item.id);
       saveReadIds(user.id, next);
       return next;
     });
   }
 
   function markAllRead() {
-    if (!user) return;
-    const all = new Set(items.map((i) => i.id));
-    setReadIds(all);
-    saveReadIds(user.id, all);
+    if (user) {
+      const all = new Set(items.map((i) => i.id));
+      setReadIds(all);
+      saveReadIds(user.id, all);
+    }
+    if (serverUnreadIds.size > 0) {
+      api.patch('/notifications/read-all').then(() => refreshServerNotifications());
+    }
   }
 
   const toneDot: Record<NotificationItem['tone'], string> = {
@@ -211,15 +330,23 @@ export function NotificationBell() {
               </button>
             )}
           </div>
+          {chromePermission === 'default' && (
+            <button
+              onClick={requestChromePermission}
+              className="w-full text-left px-3 py-2 text-[11px] text-brand-600 hover:bg-brand-50 border-b border-brand-100"
+            >
+              Enable Chrome desktop alerts for new production updates
+            </button>
+          )}
           {items.length === 0 && <p className="px-3 py-4 text-sm text-ink-muted">Nothing needs your attention right now.</p>}
           {items.map((item) => {
-            const isUnread = !readIds.has(item.id);
+            const isUnread = isItemUnread(item);
             return (
               <Link
                 key={item.id}
                 href={item.href}
                 onClick={() => {
-                  markRead(item.id);
+                  markRead(item);
                   setOpen(false);
                 }}
                 className={`flex items-start gap-2.5 px-3 py-2 hover:bg-brand-50 text-sm ${isUnread ? 'bg-brand-50/60' : ''}`}

@@ -51,14 +51,14 @@ export class CustomerOrdersController {
 
   @Roles(Role.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateCustomerOrderDto) {
-    return this.service.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateCustomerOrderDto, @CurrentUser() user: AuthUser) {
+    return this.service.update(id, dto, user.userId);
   }
 
   @Roles(Role.ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.userId);
   }
 
   @Roles(Role.ADMIN)
@@ -73,10 +73,10 @@ export class CustomerOrdersController {
     return this.service.removePayment(id, paymentId);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
   @Post(':id/assign-production')
   assignProduction(@Param('id') id: string, @Body() dto: AssignProductionDto, @CurrentUser() user: AuthUser) {
-    return this.service.assignProduction(id, dto, user.userId);
+    return this.service.assignProduction(id, dto, user.userId, user.role as Role);
   }
 
   @Roles(Role.SUPERADMIN)
@@ -85,7 +85,7 @@ export class CustomerOrdersController {
     return this.service.assignEmployee(id, dto, user.userId);
   }
 
-  @Roles(Role.CARPENTER, Role.POLISHER)
+  @Roles(Role.CARPENTER, Role.CARVER, Role.POLISHER)
   @Post(':id/model-no')
   updateModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
     return this.service.updateModelNo(id, dto, user);

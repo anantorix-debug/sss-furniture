@@ -8,27 +8,34 @@ import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate, toDateInputValue } from '@/lib/format';
 import { Modal } from '@/components/Modal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { StatusBadge, BalanceBadge } from '@/components/StatusBadge';
+import { StatusBadge, BalanceBadge, Chip, type ChipColor } from '@/components/StatusBadge';
+import { ViewField } from '@/components/ViewField';
 import { PaymentsPanel } from '@/components/PaymentsPanel';
 import { FormRow, FormField } from '@/components/orders/OrderFormFields';
 import { AssignProductionModal, type AssignProductionPayload } from '@/components/AssignProductionModal';
-import { AssignEmployeeModal } from '@/components/AssignEmployeeModal';
 import { ActionsMenu } from '@/components/ActionsMenu';
 import { RoleGate } from '@/components/RoleGate';
+import { ModelNoPicker } from '@/components/ModelNoPicker';
+import { GalleryGrid } from '@/components/GalleryGrid';
+import type { GalleryImage } from '@/types';
+import { assetUrl } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { UnitSelect } from '@/components/UnitSelect';
-import type { CustomerOrder, DeliveryStatus } from '@/types';
+import type { CustomerOrder, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 interface ItemRow {
+  productId?: string;
+  modelNo?: string;
   productName: string;
   quantity: string;
   unitPrice: string;
+  availableQuantity?: number;
 }
 
 const emptyRow: ItemRow = { productName: '', quantity: '1', unitPrice: '' };
@@ -94,19 +101,41 @@ function CustomerOrdersContent() {
   function updateItemRow(idx: number, patch: Partial<ItemRow>) {
     setItems((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
+  function selectItemProduct(idx: number, product: Product | null) {
+    if (!product) {
+      updateItemRow(idx, { productId: undefined, availableQuantity: undefined });
+      return;
+    }
+    updateItemRow(idx, {
+      productId: product.id,
+      modelNo: product.modelNo ?? '',
+      productName: product.name,
+      unitPrice: String(product.retailPrice ?? 0),
+      availableQuantity: product.availableQuantity,
+    });
+  }
   const lineTotal = (row: ItemRow) => (parseFloat(row.quantity) || 0) * (parseFloat(row.unitPrice) || 0);
   const formTotal = items.reduce((s, r) => s + lineTotal(r), 0);
 
   const [paymentsOrder, setPaymentsOrder] = useState<CustomerOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomerOrder | null>(null);
   const [assignTarget, setAssignTarget] = useState<CustomerOrder | null>(null);
-  const [assignEmployeeTarget, setAssignEmployeeTarget] = useState<CustomerOrder | null>(null);
+  const [viewTarget, setViewTarget] = useState<CustomerOrder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectedGalleryImages, setSelectedGalleryImages] = useState<GalleryImage[]>([]);
+  const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
+
+  function toggleGalleryImage(image: GalleryImage) {
+    setSelectedGalleryImages((prev) =>
+      prev.some((i) => i.id === image.id) ? prev.filter((i) => i.id !== image.id) : [...prev, image],
+    );
+  }
 
   function openCreate() {
     setEditing(null);
     setForm(emptyForm);
     setItems([{ ...emptyRow }]);
+    setSelectedGalleryImages([]);
     setFormError(null);
     setFormOpen(true);
   }
@@ -126,9 +155,15 @@ function CustomerOrdersContent() {
     });
     setItems(
       order.items?.length
-        ? order.items.map((i) => ({ productName: i.productName, quantity: String(i.quantity), unitPrice: String(i.unitPrice) }))
+        ? order.items.map((i) => ({
+            productId: i.productId ?? undefined,
+            productName: i.productName,
+            quantity: String(i.quantity),
+            unitPrice: String(i.unitPrice),
+          }))
         : [{ productName: order.product, quantity: '1', unitPrice: String(order.orderValue ?? 0) }],
     );
+    setSelectedGalleryImages(order.galleryImages ?? []);
     setFormError(null);
     setFormOpen(true);
   }
@@ -150,7 +185,13 @@ function CustomerOrdersContent() {
         deliveryStatus: form.deliveryStatus,
         items: items
           .filter((i) => i.productName && i.unitPrice)
-          .map((i) => ({ productName: i.productName, quantity: parseInt(i.quantity, 10) || 1, unitPrice: parseFloat(i.unitPrice) })),
+          .map((i) => ({
+            productId: i.productId,
+            productName: i.productName,
+            quantity: parseInt(i.quantity, 10) || 1,
+            unitPrice: parseFloat(i.unitPrice),
+          })),
+        galleryImageIds: selectedGalleryImages.map((i) => i.id),
       };
       if (editing) {
         await api.patch(`/customer-orders/${editing.id}`, payload);
@@ -231,11 +272,14 @@ function CustomerOrdersContent() {
   }
 
   function handleSendWhatsApp(order: CustomerOrder) {
+    const galleryUrls = (order.galleryImages ?? []).map((i) => assetUrl(i.url)).filter((u): u is string => Boolean(u));
     openWhatsApp({
       recipientName: (order.customerName ?? '') || 'Customer',
       recipientPhone: order.phone ?? undefined,
       defaultMessage: buildOrderConfirmationMessage(order),
-      defaultImageUrl: '/wa-template.jpeg',
+      // Selected Gallery images (if any) go out instead of the generic
+      // template image - multiple images send as one message per image.
+      ...(galleryUrls.length > 0 ? { defaultImageUrls: galleryUrls } : { defaultImageUrl: '/wa-template.jpeg' }),
     });
   }
 
@@ -300,7 +344,6 @@ function CustomerOrdersContent() {
               <th>Order ID</th>
               <th>Job No.</th>
               <th>Model No</th>
-              <th>Assigned Employee</th>
               <th>Date</th>
               <th>Customer</th>
               <th>Product</th>
@@ -314,14 +357,14 @@ function CustomerOrdersContent() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={12} className="text-center py-8 text-brand-400">
+                <td colSpan={11} className="text-center py-8 text-brand-400">
                   Loading orders...
                 </td>
               </tr>
             )}
             {!isLoading && data?.length === 0 && (
               <tr>
-                <td colSpan={12} className="text-center py-8 text-brand-400">
+                <td colSpan={11} className="text-center py-8 text-brand-400">
                   No orders found
                 </td>
               </tr>
@@ -344,7 +387,6 @@ function CustomerOrdersContent() {
                     <span className="text-brand-400 italic">Not Updated</span>
                   )}
                 </td>
-                <td className="text-xs whitespace-nowrap">{order.assignedEmployee?.name ?? <span className="text-brand-400">Unassigned</span>}</td>
                 <td>{formatDate(order.orderDate)}</td>
                 <td>
                   {order.customerName}
@@ -369,18 +411,14 @@ function CustomerOrdersContent() {
                     />
                     <ActionsMenu
                       items={[
+                        { label: 'View Details', onClick: () => setViewTarget(order) },
                         { label: 'Payments', onClick: () => setPaymentsOrder(order) },
                         { label: 'Edit', onClick: () => openEdit(order) },
                         { label: 'Download PDF', onClick: () => downloadOrderPdf(order) },
                         {
-                          label: order.assignedEmployee ? 'Reassign Employee' : 'Assign Employee',
-                          onClick: () => setAssignEmployeeTarget(order),
-                          hidden: !hasRole('SUPERADMIN'),
-                        },
-                        {
                           label: 'Assign to Production',
                           onClick: () => setAssignTarget(order),
-                          hidden: !hasRole('ADMIN'),
+                          hidden: !hasRole('ADMIN') || order.deliveryStatus === 'DELIVERED',
                         },
                         {
                           label: 'Delete',
@@ -455,48 +493,63 @@ function CustomerOrdersContent() {
             </FormRow>
 
             <div>
-              <div className="grid grid-cols-2 sm:grid-cols-[1fr_70px_110px_100px_auto] gap-2 text-[11px] font-medium text-ink-muted px-0.5 hidden sm:grid">
-                <span>Product</span>
-                <span>Qty</span>
-                <span>Unit Price</span>
-                <span>Line Total</span>
-                <span></span>
-              </div>
-              <label className="label sm:hidden">Products</label>
+              <label className="label">Products</label>
               <div className="space-y-2">
-                {items.map((row, idx) => (
-                  <div key={idx} className="grid grid-cols-2 sm:grid-cols-[1fr_70px_110px_100px_auto] gap-2 sm:items-center">
-                    <input
-                      className="input col-span-2 sm:col-span-1"
-                      required
-                      placeholder="Z-Model 78*72 -BC -COT"
-                      value={row.productName}
-                      onChange={(e) => updateItemRow(idx, { productName: e.target.value })}
-                    />
-                    <input
-                      type="number"
-                      min="1"
-                      className="input"
-                      placeholder="Qty"
-                      value={row.quantity}
-                      onChange={(e) => updateItemRow(idx, { quantity: e.target.value })}
-                    />
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="input"
-                      placeholder="Unit Price"
-                      required
-                      value={row.unitPrice}
-                      onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })}
-                    />
-                    <div className="input flex items-center justify-end font-medium text-ink bg-brand-50">{formatCurrency(lineTotal(row))}</div>
-                    <button type="button" className="text-red-500 text-xs" onClick={() => removeItemRow(idx)} disabled={items.length === 1}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
+                {items.map((row, idx) => {
+                  const qty = parseInt(row.quantity, 10) || 1;
+                  const available = row.availableQuantity ?? 0;
+                  const stockPortion = row.productId ? Math.min(qty, available) : 0;
+                  const productionPortion = qty - stockPortion;
+                  return (
+                    <div key={idx} className="space-y-1 border border-brand-100 rounded-lg p-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-2">
+                        <ModelNoPicker
+                          modelNo={row.modelNo ?? ''}
+                          onChangeModelNo={(v) => updateItemRow(idx, { modelNo: v })}
+                          onSelect={(p) => selectItemProduct(idx, p)}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Product Name"
+                          value={row.productName}
+                          onChange={(e) => updateItemRow(idx, { productName: e.target.value, productId: undefined })}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-[70px_110px_100px_auto] gap-2 sm:items-center">
+                        <input
+                          type="number"
+                          min="1"
+                          className="input"
+                          placeholder="Qty"
+                          value={row.quantity}
+                          onChange={(e) => updateItemRow(idx, { quantity: e.target.value })}
+                        />
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="input"
+                          placeholder="Unit Price"
+                          required
+                          value={row.unitPrice}
+                          onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })}
+                        />
+                        <div className="input flex items-center justify-end font-medium text-ink bg-brand-50">{formatCurrency(lineTotal(row))}</div>
+                        <button type="button" className="text-red-500 text-xs" onClick={() => removeItemRow(idx)} disabled={items.length === 1}>
+                          Remove
+                        </button>
+                      </div>
+                      {row.productId && (
+                        <p className="text-[11px] text-brand-500 px-0.5">
+                          Model No is {available > 0 ? <span className="text-emerald-700">In Stock</span> : <span className="text-red-600">Sold</span>} - Required: {qty} →{' '}
+                          {stockPortion > 0 && <span className="text-emerald-700">Stock {stockPortion}</span>}
+                          {stockPortion > 0 && productionPortion > 0 && ' + '}
+                          {productionPortion > 0 && <span className="text-amber-600">Production {productionPortion}</span>}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex items-center justify-between mt-2">
                 <button type="button" className="text-brand-600 text-xs hover:underline" onClick={addItemRow}>
@@ -537,6 +590,31 @@ function CustomerOrdersContent() {
                 </select>
               </FormField>
             </FormRow>
+
+            <div>
+              <label className="label">Product Images / Gallery</label>
+              <button type="button" className="btn-secondary w-full justify-start text-left" onClick={() => setGalleryPickerOpen(true)}>
+                {selectedGalleryImages.length > 0 ? `${selectedGalleryImages.length} image(s) selected` : 'Select Gallery Images...'}
+              </button>
+              {selectedGalleryImages.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {selectedGalleryImages.map((img) => (
+                    <div key={img.id} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={assetUrl(img.url) ?? ''} alt={img.fileName} className="h-14 w-14 object-cover rounded-md border border-brand-200" />
+                      <button
+                        type="button"
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-[11px] leading-none"
+                        onClick={() => toggleGalleryImage(img)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-brand-400 mt-1">Picked from the existing Gallery - never uploaded again.</p>
+            </div>
 
             {formError && <p className="text-sm text-red-600">{formError}</p>}
 
@@ -602,27 +680,32 @@ function CustomerOrdersContent() {
               payload,
             );
             const w = result.whatsapp;
-            setNotice(
-              w?.sent || w?.group?.sent
-                ? `Work assigned. WhatsApp sent${w?.sent ? ' to worker' : ''}${w?.group?.sent ? (w?.sent ? ' and team group' : ' to team group') : ''}.`
-                : 'Work assigned. WhatsApp was not sent (check phone/group configuration).',
-            );
+            const whatsappNote = w?.sent || w?.group?.sent
+              ? ` WhatsApp sent${w?.sent ? ' to worker' : ''}${w?.group?.sent ? (w?.sent ? ' and team group' : ' to team group') : ''}.`
+              : '';
+            setNotice(`Work assigned.${whatsappNote}`);
             setAssignTarget(null);
+            mutate();
           }}
         />
       )}
 
-      {assignEmployeeTarget && (
-        <AssignEmployeeModal
-          title={`Assign Production Employee - ${assignEmployeeTarget.orderId}`}
-          onClose={() => setAssignEmployeeTarget(null)}
-          onSubmit={async (employeeId) => {
-            await api.post(`/customer-orders/${assignEmployeeTarget.id}/assign-employee`, { employeeId });
-            setNotice(`${assignEmployeeTarget.orderId} assigned. The employee will enter the Model No.`);
-            setAssignEmployeeTarget(null);
-            mutate();
-          }}
-        />
+      {viewTarget && <OrderDetailsModal order={viewTarget} onClose={() => setViewTarget(null)} />}
+
+      {galleryPickerOpen && (
+        <Modal title="Select Gallery Images" onClose={() => setGalleryPickerOpen(false)} wide>
+          <GalleryGrid
+            canManage={false}
+            selectable
+            selectedIds={selectedGalleryImages.map((i) => i.id)}
+            onToggle={toggleGalleryImage}
+          />
+          <div className="flex justify-end pt-3">
+            <button type="button" className="btn-primary text-sm" onClick={() => setGalleryPickerOpen(false)}>
+              Done ({selectedGalleryImages.length} selected)
+            </button>
+          </div>
+        </Modal>
       )}
 
       {showModal && whatsappOptions && (
@@ -634,6 +717,7 @@ function CustomerOrdersContent() {
           }}
           defaultMessage={whatsappOptions.defaultMessage}
           defaultImageUrl={whatsappOptions.defaultImageUrl}
+          defaultImageUrls={whatsappOptions.defaultImageUrls}
           onSuccess={() => mutate()}
         />
       )}
@@ -646,5 +730,86 @@ export default function CustomerOrdersPage() {
     <RoleGate minRole="ADMIN">
       <CustomerOrdersContent />
     </RoleGate>
+  );
+}
+
+const STAGE_CHIP: Record<string, ChipColor> = { CARPENTER: 'blue', CARVING: 'amber', POLISH: 'darkGreen' };
+const STATUS_CHIP: Record<string, ChipColor> = {
+  ASSIGNED: 'gray',
+  IN_PROGRESS: 'blue',
+  QUALITY_CHECK: 'amber',
+  REWORK: 'red',
+  COMPLETED: 'green',
+};
+
+// "Who's actually making this" - the order list only shows who's
+// responsible for entering the Model No (a separate, optional field), which
+// looks like "nobody's working on it" even when production is well
+// underway. This pulls the real Carpenter/Carving/Polish job(s) for the
+// order so that question has a real answer.
+function OrderDetailsModal({ order, onClose }: { order: CustomerOrder; onClose: () => void }) {
+  const { data: workItems, isLoading } = useSWR<CarpenterWorkItem[]>(
+    `/carpenter-work-items?sourceCustomerOrderId=${order.id}`,
+    fetcher,
+  );
+
+  return (
+    <Modal title={`${order.orderId} - Order Details`} onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 text-sm">
+          <ViewField label="Job No" value={order.jobNumber ?? '-'} />
+          <ViewField label="Customer" value={order.customerName} />
+          <ViewField label="Phone" value={order.phone ?? '-'} />
+          <ViewField label="Order Date" value={formatDate(order.orderDate)} />
+          <ViewField label="Model No" value={order.cotTrack ?? 'Not Updated'} />
+          <ViewField label="Model No Entered By" value={order.modelNoUpdatedBy?.name ?? 'Not entered yet'} />
+          <ViewField label="Delivery Status" value={order.deliveryStatus} />
+          <ViewField label="Order Value" value={formatCurrency(order.orderValue ?? 0)} />
+          <ViewField label="Balance" value={formatCurrency(order.balanceAmount ?? 0)} />
+        </div>
+
+        <div className="border-t border-brand-100 pt-3">
+          <h3 className="text-sm font-semibold text-brand-900 mb-2">Products</h3>
+          <div className="space-y-2">
+            {(order.items ?? []).map((item) => (
+              <div key={item.id} className="border border-brand-100 rounded-lg p-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
+                  <ViewField label="Product" value={item.productName} />
+                  <ViewField label="Qty" value={String(item.quantity)} />
+                  <ViewField label="From Stock" value={String(item.stockReservedQty ?? 0)} />
+                  <ViewField label="From Production" value={String(item.productionQty ?? 0)} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="border-t border-brand-100 pt-3">
+          <h3 className="text-sm font-semibold text-brand-900 mb-2">Who&apos;s Working On It</h3>
+          {isLoading && <p className="text-sm text-brand-400">Loading...</p>}
+          {!isLoading && (workItems?.length ?? 0) === 0 && (
+            <p className="text-sm text-brand-400">No production job has been assigned for this order yet.</p>
+          )}
+          <div className="space-y-2">
+            {workItems?.map((w) => (
+              <div key={w.id} className="border border-brand-100 rounded-lg p-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
+                  <ViewField label="Stage" value={<Chip color={STAGE_CHIP[w.stage] ?? 'gray'} label={w.stage} />} />
+                  <ViewField label="Employee" value={w.carpenter?.name ?? 'Unassigned'} />
+                  <ViewField label="Qty" value={String(w.quantity)} />
+                  <ViewField label="Status" value={<Chip color={STATUS_CHIP[w.status] ?? 'gray'} label={w.status.replace('_', ' ')} />} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <button className="btn-secondary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }

@@ -8,25 +8,34 @@ import type { CarpenterSummary } from '@/types';
 
 export interface AssignProductionPayload {
   carpenterId: string;
+  stage?: 'CARPENTER' | 'CARVING' | 'POLISH';
   workDate: string;
   category?: string;
   size?: string;
   price: number;
   extra?: number;
   quantity?: number;
+  notes?: string;
   notifyWhatsapp?: boolean;
 }
 
+// Unified "Assign to Production" - puts the order into production (creates
+// the work item). Model No is entered directly by whoever's doing the
+// Carpenter/Carving stage work (see My Work) - no separate "who's
+// responsible for the Model No" pre-assignment needed.
 export function AssignProductionModal({
   productName,
+  currentStage,
   onClose,
   onSubmit,
 }: {
   productName: string;
+  currentStage?: 'CARPENTER' | 'CARVING' | 'POLISH';
   onClose: () => void;
   onSubmit: (payload: AssignProductionPayload) => Promise<void>;
 }) {
   const { data: carpenters } = useSWR<CarpenterSummary[]>('/carpenters', fetcher);
+  const [stage, setStage] = useState<'CARPENTER' | 'CARVING' | 'POLISH'>(currentStage ?? 'CARPENTER');
   const [carpenterId, setCarpenterId] = useState('');
   const [workDate, setWorkDate] = useState(new Date().toISOString().slice(0, 10));
   const [category, setCategory] = useState('');
@@ -34,6 +43,7 @@ export function AssignProductionModal({
   const [price, setPrice] = useState('');
   const [extra, setExtra] = useState('');
   const [quantity, setQuantity] = useState('1');
+  const [notes, setNotes] = useState('');
   const [notify, setNotify] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,12 +55,14 @@ export function AssignProductionModal({
     try {
       await onSubmit({
         carpenterId,
+        stage,
         workDate,
         category: category || undefined,
         size: size || undefined,
         price: parseFloat(price),
         extra: extra ? parseFloat(extra) : undefined,
         quantity: quantity ? parseInt(quantity, 10) : undefined,
+        notes: notes || undefined,
         notifyWhatsapp: notify,
       });
     } catch (err) {
@@ -64,7 +76,15 @@ export function AssignProductionModal({
     <Modal title={`Assign to Production - ${productName}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div>
-          <label className="label">Assign to</label>
+          <label className="label">Stage</label>
+          <select className="input" value={stage} onChange={(e) => setStage(e.target.value as typeof stage)}>
+            <option value="CARPENTER">Carpenter</option>
+            <option value="CARVING">Carving</option>
+            <option value="POLISH">Polish</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">Assign Worker (paid for this stage)</label>
           <select className="input" required value={carpenterId} onChange={(e) => setCarpenterId(e.target.value)}>
             <option value="">Select worker</option>
             {carpenters?.map((c) => (
@@ -103,6 +123,10 @@ export function AssignProductionModal({
             <label className="label">Extra (Rs.)</label>
             <input type="number" min="0" step="0.01" className="input" value={extra} onChange={(e) => setExtra(e.target.value)} />
           </div>
+        </div>
+        <div>
+          <label className="label">Notes (optional)</label>
+          <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any instructions for this stage" />
         </div>
         <label className="flex items-center gap-2 text-sm text-brand-600">
           <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />

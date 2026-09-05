@@ -11,19 +11,24 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { StatCard } from '@/components/StatCard';
 import { PermissionMatrix } from '@/components/PermissionMatrix';
+import { PasswordInput } from '@/components/PasswordInput';
 import { formatDate } from '@/lib/format';
-import type { User, Role } from '@/types';
+import type { User, Role, CarpenterSummary } from '@/types';
+
+const PRODUCTION_ROLES: Role[] = ['CARPENTER', 'CARVER', 'POLISHER'];
 
 const ROLE_LABEL: Record<Role, string> = {
   SUPERADMIN: 'Super Admin',
   ADMIN: 'Admin',
   CARPENTER: 'Carpenter Team',
+  CARVER: 'Carving Team',
   POLISHER: 'Polish Team',
 };
 const ROLE_CHIP_COLOR: Record<Role, ChipColor> = {
   SUPERADMIN: 'darkGreen',
   ADMIN: 'blue',
   CARPENTER: 'amber',
+  CARVER: 'green',
   POLISHER: 'gray',
 };
 
@@ -42,6 +47,16 @@ function UsersPageContent() {
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [pendingDeactivation, setPendingDeactivation] = useState(false);
+  const [linkCarpenterId, setLinkCarpenterId] = useState('');
+
+  // Unlinked worker profiles matching the selected role - lets a brand new
+  // Carpenter/Carver/Polisher login be tied to their payee profile in the
+  // same step, instead of a separate trip to Production > Edit worker.
+  const { data: carpentersForRole } = useSWR<CarpenterSummary[]>(
+    formOpen && !editing && PRODUCTION_ROLES.includes(role) ? `/carpenters?workerType=${role}` : null,
+    fetcher,
+  );
+  const unlinkedCarpenters = (carpentersForRole ?? []).filter((c) => !c.user);
 
   function openCreate() {
     setEditing(null);
@@ -50,6 +65,7 @@ function UsersPageContent() {
     setPassword('');
     setRole('CARPENTER');
     setIsActive(true);
+    setLinkCarpenterId('');
     setError(null);
     setFormOpen(true);
   }
@@ -61,6 +77,7 @@ function UsersPageContent() {
     setPassword('');
     setRole(u.role);
     setIsActive(u.isActive);
+    setLinkCarpenterId('');
     setError(null);
     setFormOpen(true);
   }
@@ -90,7 +107,10 @@ function UsersPageContent() {
           ...(password ? { password } : {}),
         });
       } else {
-        await api.post('/users', { name, email, password, role });
+        const created = await api.post<User>('/users', { name, email, password, role });
+        if (linkCarpenterId) {
+          await api.patch(`/carpenters/${linkCarpenterId}`, { userId: created.id });
+        }
       }
       setFormOpen(false);
       setPendingDeactivation(false);
@@ -135,8 +155,8 @@ function UsersPageContent() {
         <StatCard label="Admins" value={String(data?.filter((u) => u.role === 'ADMIN').length ?? 0)} sub="Operational" />
         <StatCard
           label="Production Team"
-          value={String(data?.filter((u) => u.role === 'CARPENTER' || u.role === 'POLISHER').length ?? 0)}
-          sub="Carpenter + Polish"
+          value={String(data?.filter((u) => u.role === 'CARPENTER' || u.role === 'CARVER' || u.role === 'POLISHER').length ?? 0)}
+          sub="Carpenter + Carving + Polish"
         />
       </div>
 
@@ -203,8 +223,7 @@ function UsersPageContent() {
             </div>
             <div>
               <label className="label">{editing ? 'New Password (leave blank to keep current)' : 'Password'}</label>
-              <input
-                type="password"
+              <PasswordInput
                 className="input"
                 required={!editing}
                 minLength={6}
@@ -218,15 +237,45 @@ function UsersPageContent() {
                 className="input"
                 value={role}
                 disabled={editing?.id === me?.id}
-                onChange={(e) => setRole(e.target.value as Role)}
+                onChange={(e) => {
+                  setRole(e.target.value as Role);
+                  setLinkCarpenterId('');
+                }}
               >
                 <option value="CARPENTER">Carpenter Team</option>
+                <option value="CARVER">Carving Team</option>
                 <option value="POLISHER">Polish Team</option>
                 <option value="ADMIN">Admin</option>
                 <option value="SUPERADMIN">Superadmin</option>
               </select>
               {editing?.id === me?.id && <p className="text-xs text-brand-400 mt-1">You cannot change your own role.</p>}
             </div>
+            {!editing && PRODUCTION_ROLES.includes(role) && (
+              <div>
+                <label className="label">Link to Worker Profile (optional)</label>
+                <select
+                  className="input"
+                  value={linkCarpenterId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setLinkCarpenterId(id);
+                    const worker = unlinkedCarpenters.find((c) => c.id === id);
+                    if (worker) setName(worker.name);
+                  }}
+                >
+                  <option value="">Not now - link later from Production</option>
+                  {unlinkedCarpenters.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.phone ? `(${c.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-brand-400 mt-1">
+                  Ties this login to their existing worker profile so their jobs show up on their My Work page. Only unlinked{' '}
+                  {ROLE_LABEL[role]} workers are listed - create the worker profile first in Production if it doesn&apos;t exist yet.
+                </p>
+              </div>
+            )}
             {editing && (
               <label className="flex items-center gap-2 text-sm text-brand-600">
                 <input
