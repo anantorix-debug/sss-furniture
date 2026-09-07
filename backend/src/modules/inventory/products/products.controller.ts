@@ -3,6 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UpdateModelNoDto } from '../../orders/customer/dto/update-model-no.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -23,6 +24,7 @@ export class ProductsController {
     @Query('modelNo') modelNo?: string,
     @Query('finish') finish?: string,
     @Query('stockStatus') stockStatus?: 'IN_STOCK' | 'OUT_OF_STOCK',
+    @Query('sourceBatchId') sourceBatchId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
@@ -33,6 +35,7 @@ export class ProductsController {
       modelNo,
       finish,
       stockStatus,
+      sourceBatchId,
       viewerRole: user?.role as Role,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
@@ -71,6 +74,14 @@ export class ProductsController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateProductDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, user.userId);
+  }
+
+  // No @Roles restriction - open to whichever worker actually produced this
+  // piece (ownership checked in the service via the batch's work items),
+  // same pattern as CarpenterWorkItem's own model-no endpoint.
+  @Patch(':id/model-no')
+  updateModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateModelNo(id, dto.modelNo, user.userId, user.role as Role);
   }
 
   @Roles(Role.ADMIN)

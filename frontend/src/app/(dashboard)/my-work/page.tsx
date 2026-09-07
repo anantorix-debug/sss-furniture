@@ -7,7 +7,7 @@ import { api, ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
-import type { CarpenterWorkItem, RawMaterial } from '@/types';
+import type { CarpenterWorkItem, Product, RawMaterial } from '@/types';
 
 const STATUS_CHIP: Record<string, ChipColor> = {
   ASSIGNED: 'gray',
@@ -20,6 +20,61 @@ const STATUS_CHIP: Record<string, ChipColor> = {
 interface IssueRow {
   rawMaterialId: string;
   quantity: string;
+}
+
+// A multi-unit Stock Production batch can't take one shared Model No while
+// it's still a single work item (one Model No = one physical piece) - the
+// individual pieces only exist after Admin verifies the batch (see
+// Production Control > Ready for Verification). Once they do, this lets
+// whoever worked the batch assign each piece's Model No right here,
+// without needing Stock Management access.
+function BatchPieceRow({ product, onChanged }: { product: Product; onChanged: () => void }) {
+  const [modelNo, setModelNo] = useState(product.modelNo ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (!modelNo.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch(`/products/${product.id}/model-no`, { modelNo: modelNo.trim() });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+        <input className="input text-sm" placeholder="Enter Model No" value={modelNo} onChange={(e) => setModelNo(e.target.value)} />
+        <button className="btn-secondary text-xs shrink-0" disabled={saving || !modelNo.trim() || modelNo.trim() === product.modelNo} onClick={save}>
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+function BatchProducedPieces({ batchId }: { batchId: string }) {
+  const { data: pieces, isLoading, mutate } = useSWR<Product[]>(`/products?sourceBatchId=${batchId}`, fetcher);
+
+  if (isLoading) return null;
+  if (!pieces || pieces.length === 0) {
+    return <p className="text-xs text-brand-400">Not verified into stock yet - Model Nos can be set here once Admin verifies this batch.</p>;
+  }
+  return (
+    <div className="space-y-2 border-t border-brand-100 pt-2">
+      <p className="text-xs font-medium text-brand-500">Assign Model No to each piece ({pieces.length})</p>
+      {pieces.map((p) => (
+        <BatchPieceRow key={p.id} product={p} onChanged={mutate} />
+      ))}
+    </div>
+  );
 }
 
 function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () => void }) {
@@ -142,6 +197,10 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
         />
+      )}
+
+      {item.source === 'STOCK' && item.quantity > 1 && item.batchId && item.status === 'COMPLETED' && (
+        <BatchProducedPieces batchId={item.batchId} />
       )}
 
       {materialsOpen && (

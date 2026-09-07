@@ -640,6 +640,13 @@ model Product {
   availableQuantity Int @default(0)
   reservedQuantity  Int @default(0)
 
+  // Links this piece back to the Stock Production run that made it -
+  // shared by every unit created from the same multi-unit work item (see
+  // CarpenterService.applyCompletionToStock). Lets the worker who actually
+  // made a batch find and assign Model Nos to just their own just-produced
+  // pieces, without needing full Stock Management access.
+  sourceBatchId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -651,6 +658,7 @@ model Product {
   stockMovements     ProductStockMovement[]
   finishedStockItems FinishedStockItem[]
 
+  @@index([sourceBatchId])
   @@map("products")
 }
 

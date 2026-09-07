@@ -728,7 +728,18 @@ export class CarpenterService {
   // touches Product/Godown Stock - this is what keeps order-bound
   // production from being double-counted as free stock.
   private async applyCompletionToStock(
-    workItem: { id: string; source: string; productId: string | null; modelNo: string | null; productName: string; size: string | null; quantity: number; sourceCustomerOrderId: string | null; sourcePartyOrderItemId: string | null },
+    workItem: {
+      id: string;
+      source: string;
+      productId: string | null;
+      modelNo: string | null;
+      productName: string;
+      size: string | null;
+      quantity: number;
+      sourceCustomerOrderId: string | null;
+      sourcePartyOrderItemId: string | null;
+      batchId: string | null;
+    },
     userId: string,
   ) {
     if (workItem.source === 'STOCK') {
@@ -758,6 +769,7 @@ export class CarpenterService {
               costPrice: template?.costPrice ?? undefined,
               quantity: 1,
               availableQuantity: 1,
+              sourceBatchId: workItem.batchId,
             },
           });
           if (i === 0) firstCreatedId = created.id;

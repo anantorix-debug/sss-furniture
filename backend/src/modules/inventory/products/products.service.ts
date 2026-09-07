@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { extname, join } from 'path';
@@ -51,6 +51,7 @@ export class ProductsService {
     modelNo?: string;
     finish?: string;
     stockStatus?: 'IN_STOCK' | 'OUT_OF_STOCK';
+    sourceBatchId?: string;
     viewerRole?: Role;
     page?: number;
     limit?: number;
@@ -63,6 +64,7 @@ export class ProductsService {
       modelNo: params.modelNo || undefined,
       materialFinish: params.finish ? { contains: params.finish } : undefined,
       availableQuantity: params.stockStatus === 'IN_STOCK' ? { gt: 0 } : params.stockStatus === 'OUT_OF_STOCK' ? { lte: 0 } : undefined,
+      sourceBatchId: params.sourceBatchId || undefined,
       OR: params.search
         ? [
             { name: { contains: params.search } },
@@ -159,6 +161,48 @@ export class ProductsService {
     await this.findOne(id);
     await this.prisma.product.delete({ where: { id } });
     return { success: true };
+  }
+
+  // Narrow, non-Admin-gated Model No entry for a Stock Production piece -
+  // mirrors CarpenterService.updateWorkItemModelNo's "the employee who
+  // actually did the work can enter it" rule, but for a multi-unit STOCK
+  // batch, where the resulting Product rows only exist *after* Admin
+  // verification (see CarpenterService.verifyAndAddToStock), by which
+  // point the worker has no Stock Management access to reach them any
+  // other way. Anyone who worked any stage of the batch (Carpenter/
+  // Carving/Polish) - not just whoever verified it - may set it, since a
+  // Model No is typically decided during Carpenter/Carving, before Polish
+  // even starts.
+  async updateModelNo(id: string, modelNo: string, userId: string, viewerRole?: Role) {
+    const trimmed = modelNo.trim();
+    if (!trimmed) throw new BadRequestException('Model No cannot be empty');
+
+    const product = await this.prisma.product.findUnique({ where: { id } });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const isAdmin = viewerRole === Role.SUPERADMIN || viewerRole === Role.ADMIN;
+    if (!isAdmin) {
+      if (!product.sourceBatchId) {
+        throw new ForbiddenException('This stock item was not created from a production batch - ask an Admin to set its Model No.');
+      }
+      const ownWorkItem = await this.prisma.carpenterWorkItem.findFirst({
+        where: { batchId: product.sourceBatchId, carpenter: { userId } },
+      });
+      if (!ownWorkItem) {
+        throw new ForbiddenException('This piece was not produced by you.');
+      }
+    }
+
+    await this.assertUnique({ modelNo: trimmed }, id);
+    await this.prisma.product.update({ where: { id }, data: { modelNo: trimmed } });
+    await this.audit.log({
+      userId,
+      action: 'MODEL_NO_UPDATED',
+      targetType: 'Product',
+      targetId: id,
+      metadata: { modelNo: trimmed, source: 'STOCK_BATCH' },
+    });
+    return this.findOne(id, viewerRole);
   }
 
   // --- Product images ---------------------------------------------------
