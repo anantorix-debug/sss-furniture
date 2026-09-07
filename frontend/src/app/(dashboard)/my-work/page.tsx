@@ -147,6 +147,12 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
         <Chip color={STATUS_CHIP[item.status] ?? 'gray'} label={item.status.replace('_', ' ')} />
       </div>
 
+      {item.stage === 'POLISH' && (
+        <p className={`text-xs rounded-lg px-2 py-1.5 font-medium ${item.color ? 'text-brand-700 bg-brand-50' : 'text-red-600 bg-red-50'}`}>
+          {item.color ? `Colour: ${item.color}` : 'Colour not set yet - check with Admin before starting.'}
+        </p>
+      )}
+
       {item.notes && <p className="text-xs text-brand-500 bg-brand-50 rounded-lg px-2 py-1.5">Note: {item.notes}</p>}
 
       {item.stage !== 'POLISH' && (

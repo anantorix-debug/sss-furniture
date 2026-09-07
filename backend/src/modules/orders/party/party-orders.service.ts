@@ -394,6 +394,7 @@ export class PartyOrdersService {
         productId: item.productId ?? undefined,
         notes: dto.notes,
         notifyWhatsapp: dto.notifyWhatsapp,
+        color: dto.color,
       },
       userId,
       viewerRole,

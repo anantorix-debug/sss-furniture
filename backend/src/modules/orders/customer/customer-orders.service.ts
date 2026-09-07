@@ -398,6 +398,7 @@ export class CustomerOrdersService {
         total,
         notes: dto.notes,
         notifyWhatsapp: dto.notifyWhatsapp,
+        color: dto.color,
       },
       userId,
       viewerRole,

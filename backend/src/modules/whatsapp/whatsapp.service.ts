@@ -27,6 +27,7 @@ export interface WorkAssignmentMessage {
   modelNo?: string | null;
   category?: string | null;
   size?: string | null;
+  color?: string | null;
   quantity: number;
   price: number;
   extra?: number;
@@ -98,6 +99,7 @@ export class WhatsappService implements OnModuleInit {
       msg.modelNo ? `Model No: ${msg.modelNo}` : null,
       msg.category ? `Category: ${msg.category}` : null,
       msg.size ? `Size: ${msg.size}` : null,
+      msg.color ? `Colour: ${msg.color}` : null,
       `Quantity: ${msg.quantity}`,
       `Price: ₹${msg.price}`,
       msg.extra ? `Extra: ₹${msg.extra}` : null,

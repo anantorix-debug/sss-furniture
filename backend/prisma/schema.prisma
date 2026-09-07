@@ -558,6 +558,14 @@ model CarpenterWorkItem {
   finishedAt DateTime? // set when status moves to COMPLETED (verification, not this stage's own finish)
   notes      String?
 
+  // Which colour to polish this piece - only meaningful at the POLISH
+  // stage. Required whenever production is explicitly assigned at Polish
+  // (see CarpenterService), so the polish worker always knows what colour
+  // to use without having to ask. Null on Carpenter/Carving-stage rows and
+  // on a Polish row auto-assigned by the sequential handoff before an
+  // Admin has set it (see the "Set Color" action on Production Control).
+  color String?
+
   // Who assigned this stage (distinct from createdById, which also covers a
   // worker's own self-entry) - null for a self-entry or an auto-created
   // handoff stage with no assignee chosen yet.

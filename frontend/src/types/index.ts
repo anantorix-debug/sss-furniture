@@ -251,6 +251,9 @@ export interface CarpenterWorkItem {
   productName: string;
   category?: string | null;
   size?: string | null;
+  // Which colour to polish this piece - only meaningful at the POLISH
+  // stage, required whenever production is explicitly assigned there.
+  color?: string | null;
   // Omitted for Carpenter/Polisher viewers.
   price?: number;
   extra?: number;

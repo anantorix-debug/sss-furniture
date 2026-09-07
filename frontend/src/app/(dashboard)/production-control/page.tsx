@@ -42,7 +42,15 @@ const GROUP_TABS: { key: GroupKey; label: string }[] = [
 
 const WORKER_TYPE_FOR_STAGE: Record<string, string> = { CARPENTER: 'CARPENTER', CARVING: 'CARVER', POLISH: 'POLISHER' };
 
-function WorkRow({ item, onAssign }: { item: CarpenterWorkItem; onAssign: (item: CarpenterWorkItem) => void }) {
+function WorkRow({
+  item,
+  onAssign,
+  onSetColor,
+}: {
+  item: CarpenterWorkItem;
+  onAssign: (item: CarpenterWorkItem) => void;
+  onSetColor: (item: CarpenterWorkItem) => void;
+}) {
   return (
     <tr>
       <td className="font-medium">{item.modelNo || <span className="text-brand-400 italic">Not Updated</span>}</td>
@@ -50,6 +58,9 @@ function WorkRow({ item, onAssign }: { item: CarpenterWorkItem; onAssign: (item:
       <td>{item.stage}</td>
       <td>{item.carpenter?.name ?? <span className="text-brand-400">Unassigned</span>}</td>
       <td>{item.quantity}</td>
+      <td>
+        {item.stage === 'POLISH' ? item.color || <span className="text-red-500 italic">Not set</span> : ''}
+      </td>
       <td>{item.source === 'STOCK' ? 'Stock' : item.source === 'CUSTOMER_ORDER' ? 'Customer Order' : 'Party Order'}</td>
       <td><Chip color={STATUS_CHIP[item.status] ?? 'gray'} label={item.status.replace('_', ' ')} /></td>
       <td>{formatDate(item.workDate)}</td>
@@ -57,6 +68,11 @@ function WorkRow({ item, onAssign }: { item: CarpenterWorkItem; onAssign: (item:
         {!item.carpenter && item.status === 'ASSIGNED' && (
           <button className="btn-secondary text-xs" onClick={() => onAssign(item)}>
             Assign
+          </button>
+        )}
+        {item.carpenter && item.stage === 'POLISH' && !item.color && item.status !== 'COMPLETED' && (
+          <button className="btn-secondary text-xs" onClick={() => onSetColor(item)}>
+            Set Colour
           </button>
         )}
       </td>
@@ -72,15 +88,21 @@ function AssignWorkerModal({ item, onClose, onAssigned }: { item: CarpenterWorkI
   const workerType = WORKER_TYPE_FOR_STAGE[item.stage];
   const { data: carpenters } = useSWR<CarpenterSummary[]>(`/carpenters?workerType=${workerType}`, fetcher);
   const [carpenterId, setCarpenterId] = useState('');
+  const [color, setColor] = useState(item.color ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const needsColor = item.stage === 'POLISH';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (needsColor && !color.trim()) {
+      setError('Colour is required for the Polish stage, so the polish worker knows what colour to use.');
+      return;
+    }
     setSubmitting(true);
     try {
-      await api.patch(`/carpenter-work-items/${item.id}`, { carpenterId });
+      await api.patch(`/carpenter-work-items/${item.id}`, { carpenterId, color: needsColor ? color.trim() : undefined });
       onAssigned();
       onClose();
     } catch (err) {
@@ -104,6 +126,13 @@ function AssignWorkerModal({ item, onClose, onAssigned }: { item: CarpenterWorkI
             ))}
           </select>
         </div>
+        {needsColor && (
+          <div>
+            <label className="label">Colour (required for Polish)</label>
+            <input className="input" required value={color} onChange={(e) => setColor(e.target.value)} placeholder="e.g. Walnut Brown" />
+            <p className="text-[11px] text-brand-400 mt-1">Shown to the polish worker so they know what colour to use.</p>
+          </div>
+        )}
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>
@@ -111,6 +140,57 @@ function AssignWorkerModal({ item, onClose, onAssigned }: { item: CarpenterWorkI
           </button>
           <button type="submit" disabled={submitting || !carpenterId} className="btn-primary">
             {submitting ? 'Assigning...' : 'Assign'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// For a Polish job the sequential handoff already auto-assigned to a
+// worker (so AssignWorkerModal above never ran) - this is the fallback
+// entry point for Admin to fill in the colour after the fact.
+function SetColorModal({ item, onClose, onSaved }: { item: CarpenterWorkItem; onClose: () => void; onSaved: () => void }) {
+  const [color, setColor] = useState(item.color ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!color.trim()) {
+      setError('Colour is required.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.patch(`/carpenter-work-items/${item.id}`, { color: color.trim() });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to save colour');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title={`Set Polish Colour - ${item.productName}`} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <p className="text-xs text-brand-400">
+          This job was auto-assigned to {item.carpenter?.name} with no colour set yet. Tell them what colour to use.
+        </p>
+        <div>
+          <label className="label">Colour</label>
+          <input className="input" required autoFocus value={color} onChange={(e) => setColor(e.target.value)} placeholder="e.g. Walnut Brown" />
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-primary">
+            {submitting ? 'Saving...' : 'Save Colour'}
           </button>
         </div>
       </form>
@@ -227,6 +307,7 @@ function OverviewTab() {
   const [groupTab, setGroupTab] = useState<GroupKey>('todaysWork');
   const [startOpen, setStartOpen] = useState(false);
   const [assignTarget, setAssignTarget] = useState<CarpenterWorkItem | null>(null);
+  const [colorTarget, setColorTarget] = useState<CarpenterWorkItem | null>(null);
 
   return (
     <div className="space-y-4">
@@ -274,6 +355,7 @@ function OverviewTab() {
                   <th>Stage</th>
                   <th>Employee</th>
                   <th>Qty</th>
+                  <th>Colour</th>
                   <th>Type</th>
                   <th>Status</th>
                   <th>Date</th>
@@ -282,10 +364,10 @@ function OverviewTab() {
               </thead>
               <tbody>
                 {data.groups[groupTab].length === 0 && (
-                  <tr><td colSpan={9} className="text-center text-brand-400 py-6">Nothing here right now.</td></tr>
+                  <tr><td colSpan={10} className="text-center text-brand-400 py-6">Nothing here right now.</td></tr>
                 )}
                 {data.groups[groupTab].map((item) => (
-                  <WorkRow key={item.id} item={item} onAssign={setAssignTarget} />
+                  <WorkRow key={item.id} item={item} onAssign={setAssignTarget} onSetColor={setColorTarget} />
                 ))}
               </tbody>
             </table>
@@ -296,6 +378,9 @@ function OverviewTab() {
       {startOpen && <StartStockProductionModal onClose={() => setStartOpen(false)} onCreated={mutate} />}
       {assignTarget && (
         <AssignWorkerModal item={assignTarget} onClose={() => setAssignTarget(null)} onAssigned={mutate} />
+      )}
+      {colorTarget && (
+        <SetColorModal item={colorTarget} onClose={() => setColorTarget(null)} onSaved={mutate} />
       )}
     </div>
   );
@@ -406,6 +491,7 @@ function VerificationTab() {
                         <ViewField label="Stage" value={stageItem.stage} />
                         <ViewField label="Employee" value={stageItem.carpenter?.name ?? 'Unassigned'} />
                         <ViewField label="Status" value={stageItem.status} />
+                        {stageItem.stage === 'POLISH' && <ViewField label="Colour" value={stageItem.color ?? 'Not set'} />}
                         <ViewField label="Assigned By" value={stageItem.assignedBy?.name ?? '-'} />
                         <ViewField label="Started" value={stageItem.startedAt ? new Date(stageItem.startedAt).toLocaleString() : '-'} />
                         <ViewField label="Finished" value={stageItem.finishedAt ? new Date(stageItem.finishedAt).toLocaleString() : '-'} />

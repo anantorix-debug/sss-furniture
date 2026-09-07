@@ -826,6 +826,7 @@ function OrderDetailsModal({ order, onClose }: { order: CustomerOrder; onClose: 
                   <ViewField label="Stage" value={<Chip color={STAGE_CHIP[w.stage] ?? 'gray'} label={w.stage} />} />
                   <ViewField label="Employee" value={w.carpenter?.name ?? 'Unassigned'} />
                   <ViewField label="Qty" value={String(w.quantity)} />
+                  {w.stage === 'POLISH' && <ViewField label="Colour" value={w.color ?? 'Not set'} />}
                   <ViewField label="Status" value={<Chip color={STATUS_CHIP[w.status] ?? 'gray'} label={w.status.replace('_', ' ')} />} />
                 </div>
               </div>

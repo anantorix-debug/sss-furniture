@@ -233,6 +233,9 @@ export class CarpenterService {
     if (stage !== 'CARPENTER' && viewerRole !== Role.SUPERADMIN && viewerRole !== Role.ADMIN) {
       throw new ForbiddenException('Only Super Admin/Admin can start a production run directly at Carving or Polish.');
     }
+    if (stage === 'POLISH' && !dto.color?.trim()) {
+      throw new BadRequestException('Colour is required when assigning production at the Polish stage.');
+    }
 
     const workItem = await this.prisma.carpenterWorkItem.create({
       data: {
@@ -249,6 +252,7 @@ export class CarpenterService {
         total,
         productId: dto.productId,
         notes: dto.notes,
+        color: dto.color?.trim() || undefined,
         batchId: randomUUID(),
         assignedById: sourceInfo?.assignedById ?? (isWorkerSelfEntry ? undefined : userId),
         source: sourceInfo?.source,
@@ -324,6 +328,12 @@ export class CarpenterService {
     const quantity = dto.quantity ?? placeholder.quantity;
     const total = (price + extra) * quantity;
 
+    const effectiveStage = (dto.stage as unknown as Stage) ?? (placeholder.stage as Stage);
+    const effectiveColor = dto.color?.trim() || placeholder.color || undefined;
+    if (effectiveStage === 'POLISH' && !effectiveColor) {
+      throw new BadRequestException('Colour is required when assigning production at the Polish stage.');
+    }
+
     const workItem = await this.prisma.carpenterWorkItem.update({
       where: { id: placeholder.id },
       data: {
@@ -338,6 +348,7 @@ export class CarpenterService {
         quantity,
         total,
         notes: dto.notes,
+        color: effectiveColor,
         batchId: placeholder.batchId ?? randomUUID(),
         assignedById: sourceInfo.assignedById,
       },
@@ -365,6 +376,7 @@ export class CarpenterService {
       quantity: number;
       category: string | null;
       size: string | null;
+      color?: string | null;
       price: any;
       extra: any;
       total: any;
@@ -374,7 +386,11 @@ export class CarpenterService {
     notifyWhatsapp: boolean | undefined,
   ) {
     if (workItem.carpenter) {
-      await this.notifyStageEvent(workItem, 'ASSIGNED', `${this.stageLabel(workItem.stage)} work assigned - ${workItem.productName}${workItem.modelNo ? ` (${workItem.modelNo})` : ''}, Qty ${workItem.quantity}, to ${workItem.carpenter.name}.`);
+      await this.notifyStageEvent(
+        workItem,
+        'ASSIGNED',
+        `${this.stageLabel(workItem.stage)} work assigned - ${workItem.productName}${workItem.modelNo ? ` (${workItem.modelNo})` : ''}, Qty ${workItem.quantity}${workItem.color ? `, Colour ${workItem.color}` : ''}, to ${workItem.carpenter.name}.`,
+      );
     }
 
     let whatsapp: { sent: boolean; reason?: string } | undefined;
@@ -389,6 +405,7 @@ export class CarpenterService {
           modelNo: workItem.modelNo,
           category: workItem.category,
           size: workItem.size,
+          color: workItem.color,
           quantity: workItem.quantity,
           price: Number(workItem.price),
           extra: Number(workItem.extra),
@@ -441,6 +458,14 @@ export class CarpenterService {
     const extra = dto.extra ?? Number(existing.extra);
     const quantity = dto.quantity ?? existing.quantity;
 
+    // Assigning a worker to a Polish-stage item (whether it's a fresh
+    // assignment or claiming an auto-handoff placeholder that has no colour
+    // yet) requires a colour, same rule as createWorkItem/assignSourceProduction.
+    const effectiveStage = (dto.stage as unknown as Stage) ?? (existing.stage as Stage);
+    if (dto.carpenterId && effectiveStage === 'POLISH' && !(dto.color?.trim() || existing.color)) {
+      throw new BadRequestException('Colour is required when assigning a worker at the Polish stage.');
+    }
+
     const workItem = await this.prisma.carpenterWorkItem.update({
       where: { id },
       data: {
@@ -454,6 +479,7 @@ export class CarpenterService {
         price: dto.price,
         extra: dto.extra,
         quantity: dto.quantity,
+        color: dto.color?.trim() || undefined,
         total: priceChanged ? (price + extra) * quantity : undefined,
       },
       include: { carpenter: true },
@@ -472,6 +498,7 @@ export class CarpenterService {
           modelNo: workItem.modelNo,
           category: workItem.category,
           size: workItem.size,
+          color: workItem.color,
           quantity: workItem.quantity,
           price: Number(workItem.price),
           extra: Number(workItem.extra),

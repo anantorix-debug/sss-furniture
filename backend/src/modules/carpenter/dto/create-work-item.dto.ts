@@ -77,4 +77,11 @@ export class CreateWorkItemDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  // Required (enforced in the service, not here) whenever production is
+  // explicitly assigned at the Polish stage - tells the polish worker what
+  // colour to use without them having to ask.
+  @IsString()
+  @IsOptional()
+  color?: string;
 }

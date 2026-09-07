@@ -17,6 +17,7 @@ export interface AssignProductionPayload {
   quantity?: number;
   notes?: string;
   notifyWhatsapp?: boolean;
+  color?: string;
 }
 
 // Unified "Assign to Production" - puts the order into production (creates
@@ -43,6 +44,7 @@ export function AssignProductionModal({
   const [price, setPrice] = useState('');
   const [extra, setExtra] = useState('');
   const [quantity, setQuantity] = useState('1');
+  const [color, setColor] = useState('');
   const [notes, setNotes] = useState('');
   const [notify, setNotify] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -51,6 +53,10 @@ export function AssignProductionModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (stage === 'POLISH' && !color.trim()) {
+      setError('Colour is required for the Polish stage, so the polish worker knows what colour to use.');
+      return;
+    }
     setSubmitting(true);
     try {
       await onSubmit({
@@ -64,6 +70,7 @@ export function AssignProductionModal({
         quantity: quantity ? parseInt(quantity, 10) : undefined,
         notes: notes || undefined,
         notifyWhatsapp: notify,
+        color: stage === 'POLISH' ? color.trim() : undefined,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to assign production');
@@ -114,6 +121,19 @@ export function AssignProductionModal({
             <input className="input" value={size} onChange={(e) => setSize(e.target.value)} placeholder="5FT" />
           </div>
         </div>
+        {stage === 'POLISH' && (
+          <div>
+            <label className="label">Colour (required for Polish)</label>
+            <input
+              className="input"
+              required
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              placeholder="e.g. Walnut Brown"
+            />
+            <p className="text-[11px] text-brand-400 mt-1">Shown to the polish worker so they know what colour to use.</p>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">Price (Rs.)</label>

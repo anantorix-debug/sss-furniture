@@ -56,4 +56,10 @@ export class AssignProductionDto {
   @IsBoolean()
   @IsOptional()
   notifyWhatsapp?: boolean;
+
+  // Required (enforced in the service) when stage is POLISH - tells the
+  // polish worker what colour to use without them having to ask.
+  @IsString()
+  @IsOptional()
+  color?: string;
 }

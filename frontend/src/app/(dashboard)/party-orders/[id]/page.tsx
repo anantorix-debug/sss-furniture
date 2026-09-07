@@ -47,6 +47,9 @@ function PartyLineProduction({ itemId }: { itemId: string }) {
           <Chip color={LINE_STAGE_CHIP[w.stage] ?? 'gray'} label={w.stage} />
           <span className="text-brand-600">{w.carpenter?.name ?? 'Unassigned'}</span>
           <span className="text-brand-400">Qty {w.quantity}</span>
+          {w.stage === 'POLISH' && (
+            <span className={w.color ? 'text-brand-600' : 'text-red-500 italic'}>{w.color ? `Colour: ${w.color}` : 'Colour not set'}</span>
+          )}
           <Chip color={LINE_STATUS_CHIP[w.status] ?? 'gray'} label={w.status.replace('_', ' ')} />
         </div>
       ))}
