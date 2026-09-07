@@ -29,12 +29,14 @@ function escapeHtml(s: string) {
 // actually changed. Only a genuine difference should trigger the release/
 // reallocate cycle.
 function itemsDiffer(
-  current: { productId?: string | null; productName: string; quantity: number; unitPrice: number | string }[],
+  current: { productId?: string | null; productName: string; category?: string | null; size?: string | null; sizeUnit?: string | null; quantity: number; unitPrice: number | string }[],
   incoming: CustomerOrderItemDto[],
 ): boolean {
-  const serialize = (items: { productId?: string | null; productName: string; quantity?: number; unitPrice: number | string }[]) =>
+  const serialize = (
+    items: { productId?: string | null; productName: string; category?: string | null; size?: string | null; sizeUnit?: string | null; quantity?: number; unitPrice: number | string }[],
+  ) =>
     items
-      .map((i) => `${i.productId ?? ''}|${i.productName}|${i.quantity ?? 1}|${Number(i.unitPrice)}`)
+      .map((i) => `${i.productId ?? ''}|${i.productName}|${i.category ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.quantity ?? 1}|${Number(i.unitPrice)}`)
       .sort()
       .join(';');
   return serialize(current) !== serialize(incoming);
@@ -181,6 +183,9 @@ export class CustomerOrdersService {
               create: dto.items.map((i) => ({
                 productId: i.productId,
                 productName: i.productName,
+                category: i.category,
+                size: i.size,
+                sizeUnit: i.sizeUnit,
                 quantity: i.quantity ?? 1,
                 unitPrice: i.unitPrice,
               })),
@@ -285,6 +290,9 @@ export class CustomerOrdersService {
               create: dto.items!.map((i) => ({
                 productId: i.productId,
                 productName: i.productName,
+                category: i.category,
+                size: i.size,
+                sizeUnit: i.sizeUnit,
                 quantity: i.quantity ?? 1,
                 unitPrice: i.unitPrice,
               })),

@@ -286,6 +286,9 @@ model CustomerOrderItem {
   productId   String?
   product     Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
   productName String
+  category    String?
+  size        String?
+  sizeUnit    String?
   quantity    Int           @default(1)
   unitPrice   Decimal       @db.Decimal(12, 2)
 

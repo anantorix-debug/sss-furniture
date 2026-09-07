@@ -39,6 +39,9 @@ export interface CustomerOrderItem {
   id: string;
   productId?: string | null;
   productName: string;
+  category?: string | null;
+  size?: string | null;
+  sizeUnit?: string | null;
   quantity: number;
   unitPrice: number;
   // Stock-first split, computed at create/edit time.

@@ -15,6 +15,21 @@ export class CustomerOrderItemDto {
   @MinLength(1)
   productName: string;
 
+  // Auto-filled from the selected Model No's saved product data when one
+  // exists; left for manual entry (or blank) for a brand-new/custom
+  // product with no existing stock record.
+  @IsString()
+  @IsOptional()
+  category?: string;
+
+  @IsString()
+  @IsOptional()
+  size?: string;
+
+  @IsString()
+  @IsOptional()
+  sizeUnit?: string;
+
   @IsInt()
   @Min(1)
   @IsOptional()

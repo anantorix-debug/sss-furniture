@@ -33,12 +33,15 @@ interface ItemRow {
   productId?: string;
   modelNo?: string;
   productName: string;
+  category: string;
+  size: string;
+  sizeUnit: string;
   quantity: string;
   unitPrice: string;
   availableQuantity?: number;
 }
 
-const emptyRow: ItemRow = { productName: '', quantity: '1', unitPrice: '' };
+const emptyRow: ItemRow = { productName: '', category: '', size: '', sizeUnit: '', quantity: '1', unitPrice: '' };
 
 const emptyForm = {
   orderId: '',
@@ -110,6 +113,9 @@ function CustomerOrdersContent() {
       productId: product.id,
       modelNo: product.modelNo ?? '',
       productName: product.name,
+      category: product.category ?? '',
+      size: product.modelSize ?? '',
+      sizeUnit: product.sizeUnit ?? '',
       unitPrice: String(product.retailPrice ?? 0),
       availableQuantity: product.availableQuantity,
     });
@@ -158,10 +164,13 @@ function CustomerOrdersContent() {
         ? order.items.map((i) => ({
             productId: i.productId ?? undefined,
             productName: i.productName,
+            category: i.category ?? '',
+            size: i.size ?? '',
+            sizeUnit: i.sizeUnit ?? '',
             quantity: String(i.quantity),
             unitPrice: String(i.unitPrice),
           }))
-        : [{ productName: order.product, quantity: '1', unitPrice: String(order.orderValue ?? 0) }],
+        : [{ ...emptyRow, productName: order.product, unitPrice: String(order.orderValue ?? 0) }],
     );
     setSelectedGalleryImages(order.galleryImages ?? []);
     setFormError(null);
@@ -188,6 +197,9 @@ function CustomerOrdersContent() {
           .map((i) => ({
             productId: i.productId,
             productName: i.productName,
+            category: i.category || undefined,
+            size: i.size || undefined,
+            sizeUnit: i.sizeUnit || undefined,
             quantity: parseInt(i.quantity, 10) || 1,
             unitPrice: parseFloat(i.unitPrice),
           })),
@@ -515,6 +527,21 @@ function CustomerOrdersContent() {
                           onChange={(e) => updateItemRow(idx, { productName: e.target.value, productId: undefined })}
                         />
                       </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <input
+                          className="input"
+                          placeholder="Category"
+                          value={row.category}
+                          onChange={(e) => updateItemRow(idx, { category: e.target.value })}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Size"
+                          value={row.size}
+                          onChange={(e) => updateItemRow(idx, { size: e.target.value })}
+                        />
+                        <UnitSelect value={row.sizeUnit} onChange={(v) => updateItemRow(idx, { sizeUnit: v })} />
+                      </div>
                       <div className="grid grid-cols-2 sm:grid-cols-[70px_110px_100px_auto] gap-2 sm:items-center">
                         <input
                           type="number"
@@ -775,6 +802,8 @@ function OrderDetailsModal({ order, onClose }: { order: CustomerOrder; onClose: 
               <div key={item.id} className="border border-brand-100 rounded-lg p-3">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
                   <ViewField label="Product" value={item.productName} />
+                  <ViewField label="Category" value={item.category ?? '-'} />
+                  <ViewField label="Size" value={[item.size, item.sizeUnit].filter(Boolean).join(' ') || '-'} />
                   <ViewField label="Qty" value={String(item.quantity)} />
                   <ViewField label="From Stock" value={String(item.stockReservedQty ?? 0)} />
                   <ViewField label="From Production" value={String(item.productionQty ?? 0)} />
