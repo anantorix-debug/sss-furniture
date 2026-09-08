@@ -1,4 +1,5 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { PaymentsService, PaymentSource } from './payments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -22,5 +23,19 @@ export class PaymentsController {
     @Query('search') search?: string,
   ) {
     return this.service.findAll({ source, from, to, search });
+  }
+
+  @Get('pdf')
+  async downloadPdf(
+    @Res() res: Response,
+    @Query('source') source?: PaymentSource,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('search') search?: string,
+  ) {
+    const buffer = await this.service.generatePdf({ source, from, to, search });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="payments-statement-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    res.send(buffer);
   }
 }

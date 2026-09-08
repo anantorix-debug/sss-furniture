@@ -3,12 +3,15 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
+import { getAccessToken } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
 import { PaymentDetailModal } from '@/components/PaymentDetailModal';
 import type { PaymentSource, UnifiedPaymentsResponse } from '@/types';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 const SOURCE_LABEL: Record<PaymentSource, string> = {
   CUSTOMER_ORDER: 'Customer Order',
@@ -30,17 +33,46 @@ function PaymentsContent() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [detailTarget, setDetailTarget] = useState<{ source: PaymentSource; relatedId: string } | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
-  const { data, isLoading } = useSWR<UnifiedPaymentsResponse>(
-    `/payments?${new URLSearchParams({ ...(source ? { source } : {}), ...(search ? { search } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}) })}`,
-    fetcher,
-  );
+  const queryParams = new URLSearchParams({
+    ...(source ? { source } : {}),
+    ...(search ? { search } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+  });
+  const { data, isLoading } = useSWR<UnifiedPaymentsResponse>(`/payments?${queryParams}`, fetcher);
+
+  async function downloadPdf() {
+    setDownloading(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/payments/pdf?${queryParams}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payments-statement-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-brand-900">Payments</h1>
-        <p className="text-sm text-brand-500 mt-1">All customer, party, supplier and carpenter payments in one place.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-900">Payments</h1>
+          <p className="text-sm text-brand-500 mt-1">All customer, party, supplier and carpenter payments in one place.</p>
+        </div>
+        <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
+          {downloading ? 'Preparing...' : 'Download PDF'}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

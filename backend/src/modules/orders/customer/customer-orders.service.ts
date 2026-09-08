@@ -331,7 +331,17 @@ export class CustomerOrdersService {
     // throws if any of it is already dispatched or in progress, blocking
     // the cancel rather than silently orphaning it.
     await this.stockAllocation.release({ sourceCustomerOrderId: id, userId });
-    await this.prisma.customerOrder.delete({ where: { id } });
+    // Explicit child deletes, not a bare customerOrder.delete() relying on
+    // the schema's onDelete: Cascade - confirmed live (via PartyOrder,
+    // same gap) that no such FK constraint actually exists in MySQL, so
+    // relying on it silently orphans payments/items, which then crashes
+    // any full-table query that includes the (required) order relation -
+    // such as the unified Payments ledger.
+    await this.prisma.$transaction([
+      this.prisma.customerOrderPayment.deleteMany({ where: { orderId: id } }),
+      this.prisma.customerOrderItem.deleteMany({ where: { orderId: id } }),
+      this.prisma.customerOrder.delete({ where: { id } }),
+    ]);
     return { success: true };
   }
 

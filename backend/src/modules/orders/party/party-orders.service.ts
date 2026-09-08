@@ -297,7 +297,19 @@ export class PartyOrdersService {
     for (const item of items) {
       await this.stockAllocation.release({ sourcePartyOrderItemId: item.id, userId });
     }
-    await this.prisma.partyOrder.delete({ where: { id } });
+    // Explicit child deletes, not a bare partyOrder.delete() relying on the
+    // schema's onDelete: Cascade - confirmed live that no such FK constraint
+    // actually exists in MySQL (this project's `prisma db push` history
+    // doesn't guarantee one gets created, same caveat already noted on
+    // SuppliersService.remove), so relying on it silently orphaned payments
+    // and items, which then crashed any full-table query that includes the
+    // (required, non-optional) order relation - such as the unified
+    // Payments ledger.
+    await this.prisma.$transaction([
+      this.prisma.partyOrderPayment.deleteMany({ where: { orderId: id } }),
+      this.prisma.partyOrderItem.deleteMany({ where: { orderId: id } }),
+      this.prisma.partyOrder.delete({ where: { id } }),
+    ]);
     return { success: true };
   }
 
