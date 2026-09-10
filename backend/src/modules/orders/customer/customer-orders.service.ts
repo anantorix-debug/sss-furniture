@@ -29,14 +29,14 @@ function escapeHtml(s: string) {
 // actually changed. Only a genuine difference should trigger the release/
 // reallocate cycle.
 function itemsDiffer(
-  current: { productId?: string | null; productName: string; category?: string | null; size?: string | null; sizeUnit?: string | null; quantity: number; unitPrice: number | string }[],
+  current: { productId?: string | null; productName: string; category?: string | null; size?: string | null; sizeUnit?: string | null; color?: string | null; quantity: number; unitPrice: number | string }[],
   incoming: CustomerOrderItemDto[],
 ): boolean {
   const serialize = (
-    items: { productId?: string | null; productName: string; category?: string | null; size?: string | null; sizeUnit?: string | null; quantity?: number; unitPrice: number | string }[],
+    items: { productId?: string | null; productName: string; category?: string | null; size?: string | null; sizeUnit?: string | null; color?: string | null; quantity?: number; unitPrice: number | string }[],
   ) =>
     items
-      .map((i) => `${i.productId ?? ''}|${i.productName}|${i.category ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.quantity ?? 1}|${Number(i.unitPrice)}`)
+      .map((i) => `${i.productId ?? ''}|${i.productName}|${i.category ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.quantity ?? 1}|${Number(i.unitPrice)}`)
       .sort()
       .join(';');
   return serialize(current) !== serialize(incoming);
@@ -186,6 +186,7 @@ export class CustomerOrdersService {
                 category: i.category,
                 size: i.size,
                 sizeUnit: i.sizeUnit,
+                color: i.color,
                 quantity: i.quantity ?? 1,
                 unitPrice: i.unitPrice,
               })),
@@ -220,7 +221,7 @@ export class CustomerOrdersService {
   private async allocateItems(
     orderId: string,
     jobNumberForStock: string,
-    items: { id: string; productId: string | null; productName: string; quantity: number }[],
+    items: { id: string; productId: string | null; productName: string; quantity: number; color?: string | null }[],
     userId: string,
   ) {
     for (const item of items) {
@@ -228,6 +229,7 @@ export class CustomerOrdersService {
         productId: item.productId ?? undefined,
         productName: item.productName,
         quantity: item.quantity,
+        color: item.color ?? undefined,
         source: 'CUSTOMER_ORDER',
         sourceCustomerOrderId: orderId,
         jobNumberForStock,
@@ -293,6 +295,7 @@ export class CustomerOrdersService {
                 category: i.category,
                 size: i.size,
                 sizeUnit: i.sizeUnit,
+                color: i.color,
                 quantity: i.quantity ?? 1,
                 unitPrice: i.unitPrice,
               })),
@@ -402,6 +405,7 @@ export class CustomerOrdersService {
         productName: order.product,
         category: dto.category,
         size: dto.size,
+        sizeUnit: dto.sizeUnit,
         price: dto.price,
         extra,
         quantity,

@@ -30,6 +30,13 @@ export class CustomerOrderItemDto {
   @IsOptional()
   sizeUnit?: string;
 
+  // Pre-set here so the sequential production pipeline can auto-carry it
+  // to the Polish stage - the polisher already knows it without an Admin
+  // having to notice and fill it in later. See CarpenterService's handoff.
+  @IsString()
+  @IsOptional()
+  color?: string;
+
   @IsInt()
   @Min(1)
   @IsOptional()

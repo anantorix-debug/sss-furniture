@@ -29,6 +29,7 @@ function itemsDiffer(
     finish?: string | null;
     size?: string | null;
     sizeUnit?: string | null;
+    color?: string | null;
     pattern?: string | null;
     details?: string | null;
     qty: number;
@@ -44,6 +45,7 @@ function itemsDiffer(
       finish?: string | null;
       size?: string | null;
       sizeUnit?: string | null;
+      color?: string | null;
       pattern?: string | null;
       details?: string | null;
       qty?: number;
@@ -54,7 +56,7 @@ function itemsDiffer(
     items
       .map(
         (i) =>
-          `${i.productId ?? ''}|${i.productName}|${i.finish ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.pattern ?? ''}|${i.details ?? ''}|${i.qty ?? 1}|${Number(i.unitPrice)}|${i.modelNo ?? ''}`,
+          `${i.productId ?? ''}|${i.productName}|${i.finish ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.pattern ?? ''}|${i.details ?? ''}|${i.qty ?? 1}|${Number(i.unitPrice)}|${i.modelNo ?? ''}`,
       )
       .sort()
       .join(';');
@@ -179,6 +181,7 @@ export class PartyOrdersService {
             finish: i.finish,
             size: i.size,
             sizeUnit: i.sizeUnit,
+            color: i.color,
             pattern: i.pattern,
             details: i.details,
             qty: i.qty ?? 1,
@@ -208,7 +211,7 @@ export class PartyOrdersService {
   // the order/items exist so each line's real id can be the source key.
   private async allocateItems(
     jobNumberForStock: string,
-    items: { id: string; productId: string | null; productName: string; size: string | null; qty: number }[],
+    items: { id: string; productId: string | null; productName: string; size: string | null; color?: string | null; qty: number }[],
     userId: string,
   ) {
     for (const item of items) {
@@ -217,6 +220,7 @@ export class PartyOrdersService {
         productName: item.productName,
         quantity: item.qty,
         size: item.size ?? undefined,
+        color: item.color ?? undefined,
         source: 'PARTY_ORDER',
         sourcePartyOrderItemId: item.id,
         jobNumberForStock,
@@ -270,6 +274,7 @@ export class PartyOrdersService {
                 finish: i.finish,
                 size: i.size,
                 sizeUnit: i.sizeUnit,
+                color: i.color,
                 pattern: i.pattern,
                 details: i.details,
                 qty: i.qty ?? 1,
@@ -399,6 +404,7 @@ export class PartyOrdersService {
         productName: item.productName,
         category: dto.category,
         size: dto.size ?? item.size ?? undefined,
+        sizeUnit: dto.sizeUnit ?? item.sizeUnit ?? undefined,
         price: dto.price,
         extra,
         quantity,

@@ -36,12 +36,13 @@ interface ItemRow {
   category: string;
   size: string;
   sizeUnit: string;
+  color: string;
   quantity: string;
   unitPrice: string;
   availableQuantity?: number;
 }
 
-const emptyRow: ItemRow = { productName: '', category: '', size: '', sizeUnit: '', quantity: '1', unitPrice: '' };
+const emptyRow: ItemRow = { productName: '', category: '', size: '', sizeUnit: '', color: '', quantity: '1', unitPrice: '' };
 
 const emptyForm = {
   orderId: '',
@@ -167,6 +168,7 @@ function CustomerOrdersContent() {
             category: i.category ?? '',
             size: i.size ?? '',
             sizeUnit: i.sizeUnit ?? '',
+            color: i.color ?? '',
             quantity: String(i.quantity),
             unitPrice: String(i.unitPrice),
           }))
@@ -200,6 +202,7 @@ function CustomerOrdersContent() {
             category: i.category || undefined,
             size: i.size || undefined,
             sizeUnit: i.sizeUnit || undefined,
+            color: i.color || undefined,
             quantity: parseInt(i.quantity, 10) || 1,
             unitPrice: parseFloat(i.unitPrice),
           })),
@@ -542,6 +545,12 @@ function CustomerOrdersContent() {
                         />
                         <UnitSelect value={row.sizeUnit} onChange={(v) => updateItemRow(idx, { sizeUnit: v })} />
                       </div>
+                      <input
+                        className="input"
+                        placeholder="Polish Colour (e.g. Walnut Brown)"
+                        value={row.color}
+                        onChange={(e) => updateItemRow(idx, { color: e.target.value })}
+                      />
                       <div className="grid grid-cols-2 sm:grid-cols-[70px_110px_100px_auto] gap-2 sm:items-center">
                         <input
                           type="number"
@@ -804,6 +813,7 @@ function OrderDetailsModal({ order, onClose }: { order: CustomerOrder; onClose: 
                   <ViewField label="Product" value={item.productName} />
                   <ViewField label="Category" value={item.category ?? '-'} />
                   <ViewField label="Size" value={[item.size, item.sizeUnit].filter(Boolean).join(' ') || '-'} />
+                  {item.color && <ViewField label="Polish Colour" value={item.color} />}
                   <ViewField label="Qty" value={String(item.quantity)} />
                   <ViewField label="From Stock" value={String(item.stockReservedQty ?? 0)} />
                   <ViewField label="From Production" value={String(item.productionQty ?? 0)} />

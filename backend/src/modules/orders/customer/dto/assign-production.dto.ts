@@ -39,6 +39,10 @@ export class AssignProductionDto {
   @IsOptional()
   size?: string;
 
+  @IsString()
+  @IsOptional()
+  sizeUnit?: string;
+
   @IsNumber()
   @Min(0)
   price: number;

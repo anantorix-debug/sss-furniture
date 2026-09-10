@@ -10,6 +10,7 @@ import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { Modal } from '@/components/Modal';
 import { RoleGate } from '@/components/RoleGate';
 import { ModelNoPicker } from '@/components/ModelNoPicker';
+import { UnitSelect } from '@/components/UnitSelect';
 import { ViewField } from '@/components/ViewField';
 import type {
   ProductionDashboard,
@@ -54,7 +55,7 @@ function WorkRow({
   return (
     <tr>
       <td className="font-medium">{item.modelNo || <span className="text-brand-400 italic">Not Updated</span>}</td>
-      <td>{item.productName}{item.size ? ` · ${item.size}` : ''}</td>
+      <td>{item.productName}{item.size ? ` · ${item.size}${item.sizeUnit ? ` ${item.sizeUnit}` : ''}` : ''}</td>
       <td>{item.stage}</td>
       <td>{item.carpenter?.name ?? <span className="text-brand-400">Unassigned</span>}</td>
       <td>{item.quantity}</td>
@@ -198,92 +199,168 @@ function SetColorModal({ item, onClose, onSaved }: { item: CarpenterWorkItem; on
   );
 }
 
+interface StockProductionRow {
+  modelNo: string;
+  template: Product | null;
+  productName: string;
+  size: string;
+  sizeUnit: string;
+  // Pre-set here so the sequential Carpenter -> Carving -> Polish handoff
+  // auto-carries it to the Polish stage - the polisher already knows it
+  // without an Admin having to notice and fill it in via "Set Colour".
+  color: string;
+  quantity: string;
+  carpenterId: string;
+}
+
+const emptyStockProductionRow: StockProductionRow = {
+  modelNo: '',
+  template: null,
+  productName: '',
+  size: '',
+  sizeUnit: '',
+  color: '',
+  quantity: '1',
+  carpenterId: '',
+};
+
+// Multiple different products in one go - each row becomes its own
+// CarpenterWorkItem (there's no shared "batch order" container for Stock
+// Production the way Customer/Party Orders have multi-line items), so
+// submission just fires one POST per row rather than a single combined call.
 function StartStockProductionModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { data: carpenters } = useSWR<CarpenterSummary[]>('/carpenters', fetcher);
-  const [modelNo, setModelNo] = useState('');
-  const [template, setTemplate] = useState<Product | null>(null);
-  const [productName, setProductName] = useState('');
-  const [size, setSize] = useState('');
-  const [quantity, setQuantity] = useState('1');
-  const [carpenterId, setCarpenterId] = useState('');
+  const [rows, setRows] = useState<StockProductionRow[]>([{ ...emptyStockProductionRow }]);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function selectTemplate(product: Product | null) {
-    setTemplate(product);
-    if (product) {
-      setProductName(product.name);
-      setSize(product.modelSize ?? '');
+  function updateRow(idx: number, patch: Partial<StockProductionRow>) {
+    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+  function addRow() {
+    setRows((rs) => [...rs, { ...emptyStockProductionRow }]);
+  }
+  function removeRow(idx: number) {
+    setRows((rs) => rs.filter((_, i) => i !== idx));
+  }
+  function selectTemplate(idx: number, product: Product | null) {
+    if (!product) {
+      updateRow(idx, { template: null });
+      return;
     }
+    updateRow(idx, { template: product, productName: product.name, size: product.modelSize ?? '', sizeUnit: product.sizeUnit ?? '' });
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!productName.trim()) {
-      setError('Product name is required');
+    const validRows = rows.filter((r) => r.productName.trim());
+    if (validRows.length === 0) {
+      setError('Add at least one product with a name');
       return;
     }
     setSubmitting(true);
     try {
-      await api.post('/carpenter-work-items', {
-        carpenterId: carpenterId || undefined,
-        stage: 'CARPENTER',
-        workDate: new Date().toISOString().slice(0, 10),
-        modelNo: modelNo || undefined,
-        productName,
-        size: size || undefined,
-        quantity: quantity ? parseInt(quantity, 10) : 1,
-        price: 0,
-        productId: template?.id,
-        notes: notes || undefined,
-        notifyWhatsapp: false,
-      });
+      const results = await Promise.allSettled(
+        validRows.map((r) =>
+          api.post('/carpenter-work-items', {
+            carpenterId: r.carpenterId || undefined,
+            stage: 'CARPENTER',
+            workDate: new Date().toISOString().slice(0, 10),
+            modelNo: r.modelNo || undefined,
+            productName: r.productName,
+            size: r.size || undefined,
+            sizeUnit: r.sizeUnit || undefined,
+            color: r.color || undefined,
+            quantity: r.quantity ? parseInt(r.quantity, 10) : 1,
+            price: 0,
+            productId: r.template?.id,
+            notes: notes || undefined,
+            notifyWhatsapp: false,
+          }),
+        ),
+      );
+      const failed = results
+        .map((res, i) => (res.status === 'rejected' ? { row: validRows[i], reason: res.reason } : null))
+        .filter((f): f is { row: StockProductionRow; reason: unknown } => f !== null);
+      if (failed.length > 0) {
+        const succeeded = results.length - failed.length;
+        setError(
+          `${succeeded > 0 ? `${succeeded} product(s) started. ` : ''}Failed: ${failed
+            .map((f) => `${f.row.productName} (${f.reason instanceof ApiError ? f.reason.message : 'error'})`)
+            .join(', ')}`,
+        );
+        onCreated();
+        return;
+      }
       onCreated();
       onClose();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to start stock production');
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <Modal title="Start Stock Production" onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <p className="text-xs text-brand-400">Manufacture without a Customer/Party Order - finished units go straight to Godown Stock once verified.</p>
-        <div>
-          <label className="label">Model No (optional - reuse an existing design as a template, or leave blank)</label>
-          <ModelNoPicker modelNo={modelNo} onChangeModelNo={setModelNo} onSelect={selectTemplate} placeholder="Search or type new Model No" />
+    <Modal title="Start Stock Production" onClose={onClose} wide>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="text-xs text-brand-400">Manufacture without a Customer/Party Order - finished units go straight to Godown Stock once verified. Add as many different products as you&apos;re starting today.</p>
+
+        <div className="space-y-3 max-h-[45vh] overflow-y-auto">
+          {rows.map((row, idx) => (
+            <div key={idx} className="border border-brand-100 rounded-lg p-3 space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-start">
+                <ModelNoPicker
+                  modelNo={row.modelNo}
+                  onChangeModelNo={(v) => updateRow(idx, { modelNo: v })}
+                  onSelect={(p) => selectTemplate(idx, p)}
+                  placeholder="Model No (optional)"
+                />
+                <input
+                  className="input"
+                  placeholder="Product Name"
+                  value={row.productName}
+                  onChange={(e) => updateRow(idx, { productName: e.target.value, template: null })}
+                />
+                <button type="button" className="text-red-500 text-xs px-2 py-2" onClick={() => removeRow(idx)} disabled={rows.length === 1}>
+                  Remove
+                </button>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                <input className="input text-sm" placeholder="Size" value={row.size} onChange={(e) => updateRow(idx, { size: e.target.value })} />
+                <UnitSelect id={`stock-production-size-unit-${idx}`} className="input text-sm" value={row.sizeUnit} onChange={(v) => updateRow(idx, { sizeUnit: v })} />
+                <input
+                  type="number"
+                  min="1"
+                  className="input text-sm"
+                  placeholder="Qty"
+                  value={row.quantity}
+                  onChange={(e) => updateRow(idx, { quantity: e.target.value })}
+                />
+                <select className="input text-sm" value={row.carpenterId} onChange={(e) => updateRow(idx, { carpenterId: e.target.value })}>
+                  <option value="">Unassigned</option>
+                  {carpenters?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.workerType})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <input
+                className="input text-sm"
+                placeholder="Polish Colour (optional - e.g. Walnut Brown)"
+                value={row.color}
+                onChange={(e) => updateRow(idx, { color: e.target.value })}
+              />
+            </div>
+          ))}
         </div>
+        <button type="button" className="text-brand-600 text-xs hover:underline" onClick={addRow}>
+          + Add another product
+        </button>
+
         <div>
-          <label className="label">Product Name</label>
-          <input className="input" required value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="HEARTEN Cot" />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Size</label>
-            <input className="input" value={size} onChange={(e) => setSize(e.target.value)} placeholder="5FT" />
-          </div>
-          <div>
-            <label className="label">Quantity</label>
-            <input type="number" min="1" className="input" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-          </div>
-        </div>
-        <div>
-          <label className="label">Assign Carpenter (optional - leave unassigned to pick later)</label>
-          <select className="input" value={carpenterId} onChange={(e) => setCarpenterId(e.target.value)}>
-            <option value="">Unassigned for now</option>
-            {carpenters?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.workerType})
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">Notes (optional)</label>
+          <label className="label">Notes (optional, applies to all products above)</label>
           <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -292,7 +369,7 @@ function StartStockProductionModal({ onClose, onCreated }: { onClose: () => void
             Cancel
           </button>
           <button type="submit" disabled={submitting} className="btn-primary">
-            {submitting ? 'Starting...' : 'Start Production'}
+            {submitting ? 'Starting...' : `Start Production (${rows.filter((r) => r.productName.trim()).length || 1})`}
           </button>
         </div>
       </form>
@@ -443,7 +520,7 @@ function VerificationTab() {
             {readyForVerification?.map((item) => (
               <tr key={item.id}>
                 <td className="font-medium">{item.modelNo || <span className="text-brand-400 italic">Not Updated</span>}</td>
-                <td>{item.productName}{item.size ? ` · ${item.size}` : ''}</td>
+                <td>{item.productName}{item.size ? ` · ${item.size}${item.sizeUnit ? ` ${item.sizeUnit}` : ''}` : ''}</td>
                 <td>{item.quantity}</td>
                 <td>{item.source === 'STOCK' ? 'Stock Production' : item.source === 'CUSTOMER_ORDER' ? 'Customer Order' : 'Party Order'}</td>
                 <td><Chip color="blue" label="Ready for Verification" /></td>
@@ -701,7 +778,7 @@ function DispatchTab() {
             {rows.map(({ item, jobNumber, stage, stock }) => (
               <tr key={item.id}>
                 <td className="font-medium">{item.modelNo || '-'}</td>
-                <td>{item.productName}{item.size ? ` · ${item.size}` : ''}</td>
+                <td>{item.productName}{item.size ? ` · ${item.size}${item.sizeUnit ? ` ${item.sizeUnit}` : ''}` : ''}</td>
                 <td>{formatDate(item.workDate)}</td>
                 <td><Stepper stage={stage} /></td>
                 <td><Chip color={STAGE_CHIP[stage]} label={STAGE_LABEL[stage]} /></td>

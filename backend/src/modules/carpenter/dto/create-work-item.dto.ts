@@ -38,6 +38,10 @@ export class CreateWorkItemDto {
   @IsOptional()
   size?: string;
 
+  @IsString()
+  @IsOptional()
+  sizeUnit?: string;
+
   // Optional: a Carpenter/Polisher adding their own cot entry doesn't set a
   // price - that's entered by Co-Admin at week-end labour review (see
   // WeeklyLabourService). Required in practice only when an Admin creates

@@ -42,6 +42,9 @@ export interface CustomerOrderItem {
   category?: string | null;
   size?: string | null;
   sizeUnit?: string | null;
+  // Pre-set here so the sequential production pipeline can auto-carry it
+  // to the Polish stage without an Admin having to notice and fill it in.
+  color?: string | null;
   quantity: number;
   unitPrice: number;
   // Stock-first split, computed at create/edit time.
@@ -91,6 +94,9 @@ export interface PartyOrderItem {
   finish?: string | null;
   size?: string | null;
   sizeUnit?: string | null;
+  // Pre-set here so the sequential production pipeline can auto-carry it
+  // to the Polish stage without an Admin having to notice and fill it in.
+  color?: string | null;
   pattern?: string | null;
   details?: string | null;
   qty: number;
@@ -251,6 +257,7 @@ export interface CarpenterWorkItem {
   productName: string;
   category?: string | null;
   size?: string | null;
+  sizeUnit?: string | null;
   // Which colour to polish this piece - only meaningful at the POLISH
   // stage, required whenever production is explicitly assigned there.
   color?: string | null;

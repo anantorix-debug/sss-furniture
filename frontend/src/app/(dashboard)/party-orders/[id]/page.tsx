@@ -164,6 +164,7 @@ function PartyOrderDetailContent() {
                 <ViewField label="Product" value={item.productName} />
                 <ViewField label="Finish" value={item.finish ?? '-'} />
                 <ViewField label="Size" value={[item.size, item.sizeUnit].filter(Boolean).join(' ') || '-'} />
+                {item.color && <ViewField label="Polish Colour" value={item.color} />}
                 <ViewField label="Pattern" value={item.pattern ?? '-'} />
                 <ViewField label="Qty" value={String(item.qty)} />
                 <ViewField label="Unit Price" value={item.unitPrice != null ? formatCurrency(item.unitPrice) : '-'} />

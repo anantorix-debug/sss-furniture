@@ -28,6 +28,12 @@ export class PartyOrderItemDto {
   @IsOptional()
   sizeUnit?: string;
 
+  // Pre-set here so the sequential production pipeline can auto-carry it
+  // to the Polish stage - see the identical note on CustomerOrderItemDto.
+  @IsString()
+  @IsOptional()
+  color?: string;
+
   @IsString()
   @IsOptional()
   pattern?: string;

@@ -17,6 +17,7 @@ interface ItemForm {
   finish: string;
   size: string;
   sizeUnit: string;
+  color: string;
   pattern: string;
   details: string;
   qty: string;
@@ -30,6 +31,7 @@ const emptyItem: ItemForm = {
   finish: '',
   size: '',
   sizeUnit: '',
+  color: '',
   pattern: '',
   details: '',
   qty: '1',
@@ -52,6 +54,7 @@ function itemFromExisting(i: PartyOrderItem): ItemForm {
     finish: i.finish ?? '',
     size: i.size ?? '',
     sizeUnit: i.sizeUnit ?? '',
+    color: i.color ?? '',
     pattern: i.pattern ?? '',
     details: i.details ?? '',
     qty: String(i.qty),
@@ -136,6 +139,7 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
           finish: i.finish || undefined,
           size: i.size || undefined,
           sizeUnit: i.sizeUnit || undefined,
+          color: i.color || undefined,
           pattern: i.pattern || undefined,
           details: i.details || undefined,
           qty: parseInt(i.qty, 10) || 1,
@@ -223,7 +227,15 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
                   <UnitSelect id={`item-size-unit-${idx}`} value={item.sizeUnit} onChange={(v) => updateItem(idx, { sizeUnit: v })} />
                   <input className="input text-sm" placeholder="Pattern" value={item.pattern} onChange={(e) => updateItem(idx, { pattern: e.target.value })} />
                 </div>
-                <input className="input text-sm" placeholder="Details" value={item.details} onChange={(e) => updateItem(idx, { details: e.target.value })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <input className="input text-sm" placeholder="Details" value={item.details} onChange={(e) => updateItem(idx, { details: e.target.value })} />
+                  <input
+                    className="input text-sm"
+                    placeholder="Polish Colour (e.g. Walnut Brown)"
+                    value={item.color}
+                    onChange={(e) => updateItem(idx, { color: e.target.value })}
+                  />
+                </div>
                 <div className="grid grid-cols-3 gap-2 items-center">
                   <div>
                     <label className="text-[10px] text-brand-400">Qty</label>

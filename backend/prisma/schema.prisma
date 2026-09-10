@@ -289,6 +289,11 @@ model CustomerOrderItem {
   category    String?
   size        String?
   sizeUnit    String?
+  // Pre-set at order creation so the sequential Carpenter -> Carving ->
+  // Polish handoff can auto-carry it to the Polish stage's work item -
+  // the polisher then already knows the colour without an Admin having to
+  // notice and fill it in later. See CarpenterService's stage handoff.
+  color       String?
   quantity    Int           @default(1)
   unitPrice   Decimal       @db.Decimal(12, 2)
 
@@ -398,6 +403,10 @@ model PartyOrderItem {
   finish      String?
   size        String?
   sizeUnit    String?
+  // Pre-set at order creation so the sequential Carpenter -> Carving ->
+  // Polish handoff can auto-carry it to the Polish stage's work item -
+  // see the identical note on CustomerOrderItem.color.
+  color       String?
   pattern     String?
   details     String?
   qty         Int        @default(1)
@@ -539,7 +548,8 @@ model CarpenterWorkItem {
   stage         ProductionStageType @default(CARPENTER)
   productName   String // e.g. "HEARTEN"
   category      String? // e.g. "BOTTOM COT", "FULL BOX"
-  size          String? // e.g. "5FT"
+  size          String? // e.g. "5"
+  sizeUnit      String? // e.g. "FT" - paired with size, same split as CustomerOrder/PartyOrder/Product
   price         Decimal             @db.Decimal(12, 2)
   extra         Decimal             @default(0) @db.Decimal(12, 2)
   quantity      Int                 @default(1)

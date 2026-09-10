@@ -140,7 +140,7 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
           <p className="font-semibold text-brand-900">{item.productName}</p>
           <p className="text-xs text-brand-500">
             {item.modelNo ? `Model ${item.modelNo}` : 'Model No not set'} · Qty {item.quantity}
-            {item.size ? ` · ${item.size}` : ''}
+            {item.size ? ` · ${item.size}${item.sizeUnit ? ` ${item.sizeUnit}` : ''}` : ''}
           </p>
           <p className="text-xs text-brand-400 mt-0.5">{formatDate(item.workDate)}</p>
         </div>

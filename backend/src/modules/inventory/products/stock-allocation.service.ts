@@ -9,6 +9,10 @@ export interface AllocateParams {
   productName: string;
   quantity: number;
   size?: string;
+  // Pre-set at order creation - carried onto the placeholder work item so
+  // the sequential handoff can auto-forward it all the way to Polish. See
+  // CustomerOrderItem.color / PartyOrderItem.color.
+  color?: string;
   source: AllocateSource;
   sourceCustomerOrderId?: string;
   sourcePartyOrderItemId?: string;
@@ -108,6 +112,7 @@ export class StockAllocationService {
             workDate: new Date(),
             productName: params.productName,
             size: params.size,
+            color: params.color,
             price: 0,
             extra: 0,
             quantity: productionQty,

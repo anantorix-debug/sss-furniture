@@ -246,6 +246,7 @@ export class CarpenterService {
         productName: dto.productName,
         category: dto.category,
         size: dto.size,
+        sizeUnit: dto.sizeUnit,
         price,
         extra,
         quantity,
@@ -343,6 +344,7 @@ export class CarpenterService {
         modelNo: dto.modelNo ?? placeholder.modelNo,
         category: dto.category,
         size: dto.size ?? placeholder.size,
+        sizeUnit: dto.sizeUnit ?? placeholder.sizeUnit,
         price,
         extra,
         quantity,
@@ -376,6 +378,7 @@ export class CarpenterService {
       quantity: number;
       category: string | null;
       size: string | null;
+      sizeUnit?: string | null;
       color?: string | null;
       price: any;
       extra: any;
@@ -405,6 +408,7 @@ export class CarpenterService {
           modelNo: workItem.modelNo,
           category: workItem.category,
           size: workItem.size,
+          sizeUnit: workItem.sizeUnit,
           color: workItem.color,
           quantity: workItem.quantity,
           price: Number(workItem.price),
@@ -476,6 +480,7 @@ export class CarpenterService {
         productName: dto.productName,
         category: dto.category,
         size: dto.size,
+        sizeUnit: dto.sizeUnit,
         price: dto.price,
         extra: dto.extra,
         quantity: dto.quantity,
@@ -498,6 +503,7 @@ export class CarpenterService {
           modelNo: workItem.modelNo,
           category: workItem.category,
           size: workItem.size,
+          sizeUnit: workItem.sizeUnit,
           color: workItem.color,
           quantity: workItem.quantity,
           price: Number(workItem.price),
@@ -536,6 +542,7 @@ export class CarpenterService {
       modelNo: workItem.modelNo,
       category: workItem.category,
       size: workItem.size,
+      sizeUnit: workItem.sizeUnit,
       quantity: workItem.quantity,
       price: Number(workItem.price),
       extra: Number(workItem.extra),
@@ -636,6 +643,12 @@ export class CarpenterService {
             productName: existing.productName,
             category: existing.category,
             size: existing.size,
+            sizeUnit: existing.sizeUnit,
+            // Carries a pre-set colour (entered at order/stock-production
+            // creation time) all the way to the Polish stage automatically -
+            // if set, the polisher already knows it the moment this job
+            // auto-assigns, with no Admin "Set Colour" step needed.
+            color: existing.color,
             price: 0,
             extra: 0,
             quantity: existing.quantity,
@@ -762,6 +775,7 @@ export class CarpenterService {
       modelNo: string | null;
       productName: string;
       size: string | null;
+      sizeUnit: string | null;
       quantity: number;
       sourceCustomerOrderId: string | null;
       sourcePartyOrderItemId: string | null;
@@ -787,7 +801,7 @@ export class CarpenterService {
               category: template?.category ?? undefined,
               modelSize: template?.modelSize ?? workItem.size ?? undefined,
               materialFinish: template?.materialFinish ?? undefined,
-              sizeUnit: template?.sizeUnit ?? undefined,
+              sizeUnit: template?.sizeUnit ?? workItem.sizeUnit ?? undefined,
               pattern: template?.pattern ?? undefined,
               details: template?.details ?? undefined,
               unit: template?.unit ?? undefined,

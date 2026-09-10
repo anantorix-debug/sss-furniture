@@ -4,6 +4,7 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { Modal } from './Modal';
+import { UnitSelect } from './UnitSelect';
 import type { CarpenterSummary } from '@/types';
 
 export interface AssignProductionPayload {
@@ -12,6 +13,7 @@ export interface AssignProductionPayload {
   workDate: string;
   category?: string;
   size?: string;
+  sizeUnit?: string;
   price: number;
   extra?: number;
   quantity?: number;
@@ -41,6 +43,7 @@ export function AssignProductionModal({
   const [workDate, setWorkDate] = useState(new Date().toISOString().slice(0, 10));
   const [category, setCategory] = useState('');
   const [size, setSize] = useState('');
+  const [sizeUnit, setSizeUnit] = useState('');
   const [price, setPrice] = useState('');
   const [extra, setExtra] = useState('');
   const [quantity, setQuantity] = useState('1');
@@ -65,6 +68,7 @@ export function AssignProductionModal({
         workDate,
         category: category || undefined,
         size: size || undefined,
+        sizeUnit: sizeUnit || undefined,
         price: parseFloat(price),
         extra: extra ? parseFloat(extra) : undefined,
         quantity: quantity ? parseInt(quantity, 10) : undefined,
@@ -111,14 +115,18 @@ export function AssignProductionModal({
             <input type="number" min="1" className="input" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="label">Category</label>
             <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="BOTTOM COT" />
           </div>
           <div>
             <label className="label">Size</label>
-            <input className="input" value={size} onChange={(e) => setSize(e.target.value)} placeholder="5FT" />
+            <input className="input" value={size} onChange={(e) => setSize(e.target.value)} placeholder="5" />
+          </div>
+          <div>
+            <label className="label">Unit</label>
+            <UnitSelect id="assign-production-size-unit" value={sizeUnit} onChange={setSizeUnit} />
           </div>
         </div>
         {stage === 'POLISH' && (
