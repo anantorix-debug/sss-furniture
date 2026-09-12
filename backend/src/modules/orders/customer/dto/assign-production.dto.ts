@@ -43,9 +43,13 @@ export class AssignProductionDto {
   @IsOptional()
   sizeUnit?: string;
 
+  // Optional - a Carpenter/Polisher's own self-entry never sets this
+  // anyway (see CarpenterService.createWorkItem), and an Admin can leave
+  // it blank to fill in the labour price later at week-end review.
   @IsNumber()
   @Min(0)
-  price: number;
+  @IsOptional()
+  price?: number;
 
   @IsNumber()
   @Min(0)

@@ -12,7 +12,7 @@ export interface AssignProductionPayload {
   stage?: 'CARPENTER' | 'CARVING' | 'POLISH';
   workDate: string;
   category?: string;
-  price: number;
+  price?: number;
   extra?: number;
   quantity?: number;
   notes?: string;
@@ -86,7 +86,7 @@ export function AssignProductionModal({
         stage,
         workDate,
         category: category || undefined,
-        price: parseFloat(price),
+        price: price ? parseFloat(price) : undefined,
         extra: extra ? parseFloat(extra) : undefined,
         quantity: quantity ? parseInt(quantity, 10) : undefined,
         notes: notes || undefined,
@@ -168,10 +168,10 @@ export function AssignProductionModal({
         )}
 
         <FormRow>
-          <FormField label="Price (Rs.)">
-            <input type="number" min="0" step="0.01" className="input" required value={price} onChange={(e) => setPrice(e.target.value)} />
+          <FormField label="Price (Rs.) - optional">
+            <input type="number" min="0" step="0.01" className="input" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Fill in later at week-end review" />
           </FormField>
-          <FormField label="Extra (Rs.)">
+          <FormField label="Extra (Rs.) - optional">
             <input type="number" min="0" step="0.01" className="input" value={extra} onChange={(e) => setExtra(e.target.value)} />
           </FormField>
         </FormRow>

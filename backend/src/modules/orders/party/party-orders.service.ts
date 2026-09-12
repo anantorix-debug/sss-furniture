@@ -392,7 +392,8 @@ export class PartyOrdersService {
 
     const quantity = dto.quantity ?? item.productionQty ?? 1;
     const extra = dto.extra ?? 0;
-    const total = dto.price * quantity + extra;
+    const price = dto.price ?? 0;
+    const total = price * quantity + extra;
 
     await this.carpenter.assignSourceProduction(
       { source: 'PARTY_ORDER', sourcePartyOrderItemId: itemId, assignedById: userId },
@@ -405,7 +406,7 @@ export class PartyOrdersService {
         category: dto.category,
         size: dto.size ?? item.size ?? undefined,
         sizeUnit: dto.sizeUnit ?? item.sizeUnit ?? undefined,
-        price: dto.price,
+        price,
         extra,
         quantity,
         total,

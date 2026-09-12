@@ -383,7 +383,8 @@ export class CustomerOrdersService {
     const order = await this.findOne(orderId);
     const quantity = dto.quantity ?? 1;
     const extra = dto.extra ?? 0;
-    const total = dto.price * quantity + extra;
+    const price = dto.price ?? 0;
+    const total = price * quantity + extra;
 
     if (dto.employeeUserId) {
       const employee = await this.prisma.user.findUnique({ where: { id: dto.employeeUserId } });
@@ -407,7 +408,7 @@ export class CustomerOrdersService {
         category: dto.category,
         size: dto.size,
         sizeUnit: dto.sizeUnit,
-        price: dto.price,
+        price,
         extra,
         quantity,
         total,
@@ -444,7 +445,8 @@ export class CustomerOrdersService {
 
     const quantity = dto.quantity ?? item.productionQty ?? 1;
     const extra = dto.extra ?? 0;
-    const total = dto.price * quantity + extra;
+    const price = dto.price ?? 0;
+    const total = price * quantity + extra;
 
     return this.carpenter.assignSourceProduction(
       { source: 'CUSTOMER_ORDER', sourceCustomerOrderId: orderId, sourceCustomerOrderItemId: itemId, assignedById: userId },
@@ -457,7 +459,7 @@ export class CustomerOrdersService {
         category: dto.category ?? item.category ?? undefined,
         size: dto.size ?? item.size ?? undefined,
         sizeUnit: dto.sizeUnit ?? item.sizeUnit ?? undefined,
-        price: dto.price,
+        price,
         extra,
         quantity,
         total,
