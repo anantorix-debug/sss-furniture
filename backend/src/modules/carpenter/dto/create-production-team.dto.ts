@@ -9,6 +9,11 @@ export class CreateProductionTeamDto {
   @IsEnum(WorkerTypeDto)
   workerType: WorkerTypeDto;
 
+  // Who leads this crew - a plain display name, not a linked worker/login.
+  @IsString()
+  @IsOptional()
+  headName?: string;
+
   // WhatsApp group this team's work-assignment notifications go to -
   // optional, falls back to the type-wide WhatsappGroupSetting if unset.
   @IsString()

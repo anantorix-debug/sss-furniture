@@ -559,6 +559,7 @@ model Carpenter {
 model ProductionTeam {
   id         String     @id @default(cuid())
   name       String
+  headName   String?
   workerType WorkerType
   groupId    String?
   groupName  String?

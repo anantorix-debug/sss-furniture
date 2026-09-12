@@ -10,7 +10,7 @@ import { formatCurrency, formatDate } from '@/lib/format';
 import { Modal } from '@/components/Modal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { UpdateModelNoModal } from '@/components/UpdateModelNoModal';
-import { TeamsManagerModal } from '@/components/TeamsManagerModal';
+import { TeamsManagerPanel } from '@/components/TeamsManagerPanel';
 import { BalanceBadge, Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
 import type { CarpenterSummary, WorkerType, CustomerOrder, PartyOrder, User, ProductionTeam } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
@@ -61,7 +61,10 @@ export default function CarpentersPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CarpenterSummary | null>(null);
-  const [teamsManagerOpen, setTeamsManagerOpen] = useState(false);
+  // One combined entry point for both "add/edit a worker" and "manage
+  // teams" - a tab inside the same modal, instead of two separate buttons/
+  // popups for what's really one workforce-management flow.
+  const [modalTab, setModalTab] = useState<'worker' | 'teams'>('worker');
   const { data: loginUsers } = useSWR<User[]>(formOpen && hasRole('SUPERADMIN') ? '/users' : null, fetcher);
   const productionLogins = (loginUsers ?? []).filter((u) => u.role === 'CARPENTER' || u.role === 'CARVER' || u.role === 'POLISHER');
   const { data: teams, mutate: mutateTeams } = useSWR<ProductionTeam[]>(formOpen ? `/production-teams?workerType=${form.workerType}` : null, fetcher);
@@ -70,6 +73,7 @@ export default function CarpentersPage() {
     setEditing(null);
     setForm(emptyWorkerForm);
     setError(null);
+    setModalTab('worker');
     setFormOpen(true);
   }
 
@@ -77,6 +81,7 @@ export default function CarpentersPage() {
     setEditing(w);
     setForm({ name: w.name, phone: w.phone ?? '', workerType: w.workerType, userId: w.user?.id ?? '', teamId: w.team?.id ?? '' });
     setError(null);
+    setModalTab('worker');
     setFormOpen(true);
   }
 
@@ -138,14 +143,9 @@ export default function CarpentersPage() {
           </p>
         </div>
         {hasRole('ADMIN') && (
-          <div className="flex gap-2">
-            <button className="btn-secondary" onClick={() => setTeamsManagerOpen(true)}>
-              Manage Teams
-            </button>
-            <button className="btn-primary" onClick={openCreate}>
-              + New Worker
-            </button>
-          </div>
+          <button className="btn-primary" onClick={openCreate}>
+            + New Worker
+          </button>
         )}
       </div>
 
@@ -241,62 +241,102 @@ export default function CarpentersPage() {
       )}
 
       {formOpen && (
-        <Modal title={editing ? `Edit ${editing.name}` : 'New Worker'} onClose={() => setFormOpen(false)}>
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div>
-              <label className="label">Name</label>
-              <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label">Worker Type</label>
-              <select
-                className="input"
-                value={form.workerType}
-                onChange={(e) => setForm((f) => ({ ...f, workerType: e.target.value as WorkerType, teamId: '' }))}
-              >
-                <option value="CARPENTER">Carpenter</option>
-                <option value="POLISHER">Polisher</option>
-                <option value="CARVER">Carving Man</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">Team (optional)</label>
-              <select className="input" value={form.teamId} onChange={(e) => setForm((f) => ({ ...f, teamId: e.target.value }))}>
-                <option value="">No team / shared pool</option>
-                {teams?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">WhatsApp Phone</label>
-              <input className="input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="9876543210" />
-              <p className="text-xs text-brand-400 mt-1">Used to send work-assignment notifications via WhatsApp.</p>
-            </div>
-            <div>
-              <label className="label">Linked Login (optional)</label>
-              <select className="input" value={form.userId} onChange={(e) => setForm((f) => ({ ...f, userId: e.target.value }))}>
-                <option value="">No app login</option>
-                {productionLogins.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.role === 'CARPENTER' ? 'Carpenter Team' : u.role === 'CARVER' ? 'Carving Team' : 'Polish Team'})
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-brand-400 mt-1">Links this payee to their own login so their jobs show up on their My Work page.</p>
-            </div>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>
-                Cancel
-              </button>
-              <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Create'}
-              </button>
-            </div>
-          </form>
+        <Modal
+          title={modalTab === 'teams' ? 'Manage Production Teams' : editing ? `Edit ${editing.name}` : 'New Worker'}
+          onClose={() => setFormOpen(false)}
+          wide={modalTab === 'teams'}
+        >
+          <div className="flex gap-1 border-b border-brand-100 mb-4 -mt-1">
+            <button
+              type="button"
+              onClick={() => setModalTab('worker')}
+              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                modalTab === 'worker' ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
+              }`}
+            >
+              {editing ? 'Worker Details' : 'New Worker'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalTab('teams')}
+              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                modalTab === 'teams' ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
+              }`}
+            >
+              Manage Teams
+            </button>
+          </div>
+
+          {modalTab === 'worker' ? (
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <div>
+                <label className="label">Name</label>
+                <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Worker Type</label>
+                <select
+                  className="input"
+                  value={form.workerType}
+                  onChange={(e) => setForm((f) => ({ ...f, workerType: e.target.value as WorkerType, teamId: '' }))}
+                >
+                  <option value="CARPENTER">Carpenter</option>
+                  <option value="POLISHER">Polisher</option>
+                  <option value="CARVER">Carving Man</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Team (optional)</label>
+                <select className="input" value={form.teamId} onChange={(e) => setForm((f) => ({ ...f, teamId: e.target.value }))}>
+                  <option value="">No team / shared pool</option>
+                  {teams?.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-brand-400 mt-1">
+                  Don&apos;t see the team you want?{' '}
+                  <button type="button" className="text-brand-600 hover:underline" onClick={() => setModalTab('teams')}>
+                    Manage Teams
+                  </button>
+                </p>
+              </div>
+              <div>
+                <label className="label">WhatsApp Phone</label>
+                <input className="input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="9876543210" />
+                <p className="text-xs text-brand-400 mt-1">Used to send work-assignment notifications via WhatsApp.</p>
+              </div>
+              <div>
+                <label className="label">Linked Login (optional)</label>
+                <select className="input" value={form.userId} onChange={(e) => setForm((f) => ({ ...f, userId: e.target.value }))}>
+                  <option value="">No app login</option>
+                  {productionLogins.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.role === 'CARPENTER' ? 'Carpenter Team' : u.role === 'CARVER' ? 'Carving Team' : 'Polish Team'})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-brand-400 mt-1">Links this payee to their own login so their jobs show up on their My Work page.</p>
+              </div>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={submitting} className="btn-primary">
+                  {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Create'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <TeamsManagerPanel
+              onChange={() => {
+                mutate();
+                mutateTeams();
+              }}
+            />
+          )}
         </Modal>
       )}
 
@@ -308,16 +348,6 @@ export default function CarpentersPage() {
           danger
           onConfirm={handleDeleteWorker}
           onCancel={() => setDeleteTarget(null)}
-        />
-      )}
-
-      {teamsManagerOpen && (
-        <TeamsManagerModal
-          onClose={() => setTeamsManagerOpen(false)}
-          onChange={() => {
-            mutate();
-            mutateTeams();
-          }}
         />
       )}
     </div>
