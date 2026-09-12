@@ -236,12 +236,26 @@ export interface CarpenterSummary {
   // The login (Carpenter/Carver/Polisher role User) this payee profile is
   // linked to, if any - lets that user's "My Work" page find their own jobs.
   user?: { id: string; name: string; role: Role } | null;
+  // Which named team (of this worker's own type) they belong to, if any -
+  // see ProductionTeam. Null/omitted means the type-wide pool, unchanged
+  // from before teams existed.
+  team?: { id: string; name: string } | null;
   // Omitted entirely for Carpenter/Polisher viewers - they never see
   // wages/balances, including their own or anyone else's.
   totalWorkValue?: number;
   totalPaid?: number;
   balance?: number;
   workItemCount: number;
+}
+
+export interface ProductionTeam {
+  id: string;
+  name: string;
+  workerType: WorkerType;
+  groupId?: string | null;
+  groupName?: string | null;
+  isActive: boolean;
+  workers?: { id: string; name: string; phone?: string | null }[];
 }
 
 export type ProductionStage = 'CARPENTER' | 'CARVING' | 'POLISH';

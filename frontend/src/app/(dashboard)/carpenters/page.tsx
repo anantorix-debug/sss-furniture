@@ -10,11 +10,12 @@ import { formatCurrency, formatDate } from '@/lib/format';
 import { Modal } from '@/components/Modal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { UpdateModelNoModal } from '@/components/UpdateModelNoModal';
+import { TeamsManagerModal } from '@/components/TeamsManagerModal';
 import { BalanceBadge, Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
-import type { CarpenterSummary, WorkerType, CustomerOrder, PartyOrder, User } from '@/types';
+import type { CarpenterSummary, WorkerType, CustomerOrder, PartyOrder, User, ProductionTeam } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
-const emptyWorkerForm = { name: '', phone: '', workerType: 'CARPENTER' as WorkerType, userId: '' };
+const emptyWorkerForm = { name: '', phone: '', workerType: 'CARPENTER' as WorkerType, userId: '', teamId: '' };
 
 const WORKER_TYPE_LABEL: Record<WorkerType, string> = {
   CARPENTER: 'Carpenter',
@@ -60,8 +61,10 @@ export default function CarpentersPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CarpenterSummary | null>(null);
+  const [teamsManagerOpen, setTeamsManagerOpen] = useState(false);
   const { data: loginUsers } = useSWR<User[]>(formOpen && hasRole('SUPERADMIN') ? '/users' : null, fetcher);
   const productionLogins = (loginUsers ?? []).filter((u) => u.role === 'CARPENTER' || u.role === 'CARVER' || u.role === 'POLISHER');
+  const { data: teams, mutate: mutateTeams } = useSWR<ProductionTeam[]>(formOpen ? `/production-teams?workerType=${form.workerType}` : null, fetcher);
 
   function openCreate() {
     setEditing(null);
@@ -72,7 +75,7 @@ export default function CarpentersPage() {
 
   function openEditWorker(w: CarpenterSummary) {
     setEditing(w);
-    setForm({ name: w.name, phone: w.phone ?? '', workerType: w.workerType, userId: w.user?.id ?? '' });
+    setForm({ name: w.name, phone: w.phone ?? '', workerType: w.workerType, userId: w.user?.id ?? '', teamId: w.team?.id ?? '' });
     setError(null);
     setFormOpen(true);
   }
@@ -83,11 +86,23 @@ export default function CarpentersPage() {
     setSubmitting(true);
     try {
       if (editing) {
-        // Always send userId explicitly (even when clearing it back to
-        // "no login") so unlinking actually works, not just linking.
-        await api.patch(`/carpenters/${editing.id}`, { name: form.name, phone: form.phone || undefined, workerType: form.workerType, userId: form.userId || null });
+        // Always send userId/teamId explicitly (even when clearing back to
+        // "none") so unlinking actually works, not just linking.
+        await api.patch(`/carpenters/${editing.id}`, {
+          name: form.name,
+          phone: form.phone || undefined,
+          workerType: form.workerType,
+          userId: form.userId || null,
+          teamId: form.teamId || null,
+        });
       } else {
-        await api.post('/carpenters', { name: form.name, phone: form.phone || undefined, workerType: form.workerType, userId: form.userId || undefined });
+        await api.post('/carpenters', {
+          name: form.name,
+          phone: form.phone || undefined,
+          workerType: form.workerType,
+          userId: form.userId || undefined,
+          teamId: form.teamId || undefined,
+        });
       }
       setFormOpen(false);
       mutate();
@@ -123,9 +138,14 @@ export default function CarpentersPage() {
           </p>
         </div>
         {hasRole('ADMIN') && (
-          <button className="btn-primary" onClick={openCreate}>
-            + New Worker
-          </button>
+          <div className="flex gap-2">
+            <button className="btn-secondary" onClick={() => setTeamsManagerOpen(true)}>
+              Manage Teams
+            </button>
+            <button className="btn-primary" onClick={openCreate}>
+              + New Worker
+            </button>
+          </div>
         )}
       </div>
 
@@ -165,8 +185,9 @@ export default function CarpentersPage() {
               </div>
               {hasRole('ADMIN') && c.balance !== undefined && <BalanceBadge amount={c.balance} />}
             </div>
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
               <Chip color={WORKER_TYPE_CHIP[c.workerType]} label={WORKER_TYPE_LABEL[c.workerType]} />
+              {c.team && <span className="text-xs text-brand-500">{c.team.name}</span>}
             </div>
             <div className="grid grid-cols-2 gap-2 mt-4 text-sm">
               <div>
@@ -228,10 +249,25 @@ export default function CarpentersPage() {
             </div>
             <div>
               <label className="label">Worker Type</label>
-              <select className="input" value={form.workerType} onChange={(e) => setForm((f) => ({ ...f, workerType: e.target.value as WorkerType }))}>
+              <select
+                className="input"
+                value={form.workerType}
+                onChange={(e) => setForm((f) => ({ ...f, workerType: e.target.value as WorkerType, teamId: '' }))}
+              >
                 <option value="CARPENTER">Carpenter</option>
                 <option value="POLISHER">Polisher</option>
                 <option value="CARVER">Carving Man</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Team (optional)</label>
+              <select className="input" value={form.teamId} onChange={(e) => setForm((f) => ({ ...f, teamId: e.target.value }))}>
+                <option value="">No team / shared pool</option>
+                {teams?.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -272,6 +308,16 @@ export default function CarpentersPage() {
           danger
           onConfirm={handleDeleteWorker}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {teamsManagerOpen && (
+        <TeamsManagerModal
+          onClose={() => setTeamsManagerOpen(false)}
+          onChange={() => {
+            mutate();
+            mutateTeams();
+          }}
         />
       )}
     </div>

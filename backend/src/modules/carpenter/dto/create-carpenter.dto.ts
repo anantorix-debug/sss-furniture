@@ -27,4 +27,11 @@ export class CreateCarpenterDto {
   @IsString()
   @IsOptional()
   userId?: string | null;
+
+  // Which named team (of this worker's own workerType) they belong to -
+  // omit or send null to leave them in the type-wide pool with no team.
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @IsOptional()
+  teamId?: string | null;
 }

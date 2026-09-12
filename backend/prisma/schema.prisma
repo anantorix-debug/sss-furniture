@@ -534,12 +534,42 @@ model Carpenter {
   userId String? @unique
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  // Which named team (of this worker's own workerType) this worker
+  // belongs to - e.g. "Carpenter Team A" vs "Carpenter Team B". Optional:
+  // a worker with no team keeps working exactly as before (pooled
+  // load-balancing across all workers of that type, notifications go to
+  // the type-wide WhatsappGroupSetting).
+  teamId String?
+  team   ProductionTeam? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
   workItems     CarpenterWorkItem[]
   payments      CarpenterPayment[]
   weeklyLabours WeeklyLabour[]
   expenses      Expense[]
 
   @@map("carpenters")
+}
+
+// Named grouping of workers within one category (Carpenter/Carving/Polish) -
+// e.g. a shop running two independent Carpenter crews. Each team can have
+// its own WhatsApp group, so a work-assignment notification for a worker on
+// "Team B" goes to Team B's own group rather than one shared group for the
+// whole category (WhatsappGroupSetting, kept as the type-wide fallback for
+// workers with no team set).
+model ProductionTeam {
+  id         String     @id @default(cuid())
+  name       String
+  workerType WorkerType
+  groupId    String?
+  groupName  String?
+  isActive   Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  workers Carpenter[]
+
+  @@unique([name, workerType])
+  @@map("production_teams")
 }
 
 model CarpenterWorkItem {

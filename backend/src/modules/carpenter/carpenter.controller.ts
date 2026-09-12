@@ -6,6 +6,8 @@ import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { UpdateWorkStatusDto } from './dto/update-work-status.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
+import { CreateProductionTeamDto } from './dto/create-production-team.dto';
+import { UpdateProductionTeamDto } from './dto/update-production-team.dto';
 import { UpdateModelNoDto } from '../orders/customer/dto/update-model-no.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -74,6 +76,36 @@ export class CarpenterController {
   @Delete('carpenters/:id/payments/:paymentId')
   removePayment(@Param('id') id: string, @Param('paymentId') paymentId: string) {
     return this.service.removePayment(id, paymentId);
+  }
+
+  // Production Teams
+
+  @Get('production-teams')
+  findAllTeams(@Query('workerType') workerType?: string) {
+    return this.service.findAllTeams({ workerType });
+  }
+
+  @Get('production-teams/:id')
+  findOneTeam(@Param('id') id: string) {
+    return this.service.findOneTeam(id);
+  }
+
+  @Roles(Role.ADMIN)
+  @Post('production-teams')
+  createTeam(@Body() dto: CreateProductionTeamDto) {
+    return this.service.createTeam(dto);
+  }
+
+  @Roles(Role.ADMIN)
+  @Patch('production-teams/:id')
+  updateTeam(@Param('id') id: string, @Body() dto: UpdateProductionTeamDto) {
+    return this.service.updateTeam(id, dto);
+  }
+
+  @Roles(Role.ADMIN)
+  @Delete('production-teams/:id')
+  removeTeam(@Param('id') id: string) {
+    return this.service.removeTeam(id);
   }
 
   // Work items (job list & assignment)

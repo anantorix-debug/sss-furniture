@@ -120,7 +120,7 @@ export function AssignProductionModal({
               <option value="">Select worker</option>
               {carpenters?.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} ({c.workerType})
+                  {c.name} ({c.team?.name ?? c.workerType})
                 </option>
               ))}
             </select>

@@ -10,6 +10,8 @@ import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
 import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
+import { CreateProductionTeamDto } from './dto/create-production-team.dto';
+import { UpdateProductionTeamDto } from './dto/update-production-team.dto';
 import { Role } from '../../common/enums/role.enum';
 import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 
@@ -60,7 +62,12 @@ export class CarpenterService {
     const [carpenters, total] = await Promise.all([
       this.prisma.carpenter.findMany({
         where,
-        include: { workItems: true, payments: true, user: { select: { id: true, name: true, role: true } } },
+        include: {
+          workItems: true,
+          payments: true,
+          user: { select: { id: true, name: true, role: true } },
+          team: { select: { id: true, name: true } },
+        },
         orderBy: { name: 'asc' },
         ...(paginated ? toSkipTake(page, limit) : {}),
       }),
@@ -76,6 +83,7 @@ export class CarpenterService {
         workerType: c.workerType,
         workItemCount: c.workItems.length,
         user: c.user,
+        team: c.team,
         ...(hide ? {} : { totalWorkValue, totalPaid, balance: totalWorkValue - totalPaid }),
       };
     });
@@ -89,6 +97,7 @@ export class CarpenterService {
       include: {
         workItems: { orderBy: { workDate: 'desc' } },
         payments: { orderBy: { date: 'desc' } },
+        team: { select: { id: true, name: true } },
       },
     });
     if (!carpenter) throw new NotFoundException('Carpenter not found');
@@ -103,16 +112,30 @@ export class CarpenterService {
     return { ...carpenter, totalWorkValue, totalPaid, balance: totalWorkValue - totalPaid };
   }
 
+  // A team is scoped to one category (Carpenter/Carving/Polish) - refuse a
+  // mismatch (e.g. a Carpenter worker pointed at a Polish team) rather than
+  // silently accepting data that would make auto-assignment/notifications
+  // nonsensical.
+  private async assertTeamMatchesWorkerType(teamId: string, workerType: string) {
+    const team = await this.prisma.productionTeam.findUnique({ where: { id: teamId } });
+    if (!team) throw new NotFoundException('Team not found');
+    if (team.workerType !== workerType) {
+      throw new ConflictException(`"${team.name}" is a ${team.workerType} team and can't be assigned to a ${workerType} worker`);
+    }
+  }
+
   async createCarpenter(dto: CreateCarpenterDto) {
     const existing = await this.prisma.carpenter.findUnique({ where: { name: dto.name } });
     if (existing) throw new ConflictException('A carpenter with this name already exists');
     if (dto.userId) await this.assertLoginNotLinked(dto.userId);
+    if (dto.teamId) await this.assertTeamMatchesWorkerType(dto.teamId, dto.workerType ?? 'CARPENTER');
     return this.prisma.carpenter.create({ data: dto });
   }
 
   async updateCarpenter(id: string, dto: UpdateCarpenterDto) {
-    await this.findOneCarpenter(id);
+    const existing = await this.findOneCarpenter(id);
     if (dto.userId) await this.assertLoginNotLinked(dto.userId, id);
+    if (dto.teamId) await this.assertTeamMatchesWorkerType(dto.teamId, dto.workerType ?? existing.workerType);
     return this.prisma.carpenter.update({ where: { id }, data: dto });
   }
 
@@ -146,6 +169,55 @@ export class CarpenterService {
       );
     }
     await this.prisma.carpenter.delete({ where: { id } });
+    return { success: true };
+  }
+
+  // --- Production Teams ---------------------------------------------------
+  // Named worker groupings within one category (e.g. two independent
+  // Carpenter crews), each optionally with its own WhatsApp group - see the
+  // schema note on ProductionTeam. A shop that never sets these up keeps
+  // working exactly as before (every worker pooled by workerType alone).
+
+  async findAllTeams(params: { workerType?: string } = {}) {
+    return this.prisma.productionTeam.findMany({
+      where: { workerType: params.workerType as any },
+      include: { workers: { select: { id: true, name: true } } },
+      orderBy: [{ workerType: 'asc' }, { name: 'asc' }],
+    });
+  }
+
+  async findOneTeam(id: string) {
+    const team = await this.prisma.productionTeam.findUnique({
+      where: { id },
+      include: { workers: { select: { id: true, name: true, phone: true } } },
+    });
+    if (!team) throw new NotFoundException('Team not found');
+    return team;
+  }
+
+  async createTeam(dto: CreateProductionTeamDto) {
+    const existing = await this.prisma.productionTeam.findFirst({ where: { name: dto.name, workerType: dto.workerType } });
+    if (existing) throw new ConflictException(`A ${dto.workerType} team named "${dto.name}" already exists`);
+    return this.prisma.productionTeam.create({ data: dto });
+  }
+
+  async updateTeam(id: string, dto: UpdateProductionTeamDto) {
+    const existing = await this.findOneTeam(id);
+    if (dto.name || dto.workerType) {
+      const clash = await this.prisma.productionTeam.findFirst({
+        where: { name: dto.name ?? existing.name, workerType: dto.workerType ?? existing.workerType, NOT: { id } },
+      });
+      if (clash) throw new ConflictException(`A ${dto.workerType ?? existing.workerType} team named "${dto.name ?? existing.name}" already exists`);
+    }
+    return this.prisma.productionTeam.update({ where: { id }, data: dto });
+  }
+
+  async removeTeam(id: string) {
+    await this.findOneTeam(id);
+    // Workers keep existing (teamId just goes back to null via onDelete:
+    // SetNull) - deleting a team is a reorganization, not a reason to
+    // orphan or block on its members.
+    await this.prisma.productionTeam.delete({ where: { id } });
     return { success: true };
   }
 
@@ -263,7 +335,7 @@ export class CarpenterService {
         sourcePartyOrderItemId: sourceInfo?.sourcePartyOrderItemId,
         createdById: userId,
       },
-      include: { carpenter: true },
+      include: { carpenter: { include: { team: true } } },
     });
 
     await this.audit.log({
@@ -369,7 +441,7 @@ export class CarpenterService {
         batchId: placeholder.batchId ?? randomUUID(),
         assignedById: sourceInfo.assignedById,
       },
-      include: { carpenter: true },
+      include: { carpenter: { include: { team: true } } },
     });
 
     await this.audit.log({
@@ -399,7 +471,7 @@ export class CarpenterService {
       extra: any;
       total: any;
       workDate: Date;
-      carpenter: { name: string; phone: string | null; workerType: WorkerType } | null;
+      carpenter: { name: string; phone: string | null; workerType: WorkerType; team?: { groupId: string | null } | null } | null;
     },
     notifyWhatsapp: boolean | undefined,
   ) {
@@ -413,7 +485,10 @@ export class CarpenterService {
 
     let whatsapp: { sent: boolean; reason?: string } | undefined;
     if (notifyWhatsapp !== false && workItem.carpenter) {
-      const groupId = await this.whatsapp.getGroupIdForWorkerType(workItem.carpenter.workerType);
+      // A worker's own team group (if set) takes priority over the
+      // type-wide default - lets two Carpenter crews each get notified in
+      // their own group instead of one shared group for the category.
+      const groupId = workItem.carpenter.team?.groupId || (await this.whatsapp.getGroupIdForWorkerType(workItem.carpenter.workerType));
       if (workItem.carpenter.phone || groupId) {
         whatsapp = await this.whatsapp.sendWorkAssignment({
           carpenterName: workItem.carpenter.name,
@@ -502,13 +577,13 @@ export class CarpenterService {
         color: dto.color?.trim() || undefined,
         total: priceChanged ? (price + extra) * quantity : undefined,
       },
-      include: { carpenter: true },
+      include: { carpenter: { include: { team: true } } },
     });
 
     let whatsapp: { sent: boolean; reason?: string } | undefined;
     const carpenterChanged = dto.carpenterId && dto.carpenterId !== previousCarpenterId;
     if (dto.notifyWhatsapp && carpenterChanged && workItem.carpenter) {
-      const groupId = await this.whatsapp.getGroupIdForWorkerType(workItem.carpenter.workerType);
+      const groupId = workItem.carpenter.team?.groupId || (await this.whatsapp.getGroupIdForWorkerType(workItem.carpenter.workerType));
       if (workItem.carpenter.phone || groupId) {
         whatsapp = await this.whatsapp.sendWorkAssignment({
           carpenterName: workItem.carpenter.name,
@@ -540,11 +615,11 @@ export class CarpenterService {
   }
 
   async notifyWorkItem(id: string) {
-    const workItem = await this.prisma.carpenterWorkItem.findUnique({ where: { id }, include: { carpenter: true } });
+    const workItem = await this.prisma.carpenterWorkItem.findUnique({ where: { id }, include: { carpenter: { include: { team: true } } } });
     if (!workItem) throw new NotFoundException('Work item not found');
     if (!workItem.carpenter) throw new ConflictException('This work item has no carpenter assigned');
 
-    const groupId = await this.whatsapp.getGroupIdForWorkerType(workItem.carpenter.workerType);
+    const groupId = workItem.carpenter.team?.groupId || (await this.whatsapp.getGroupIdForWorkerType(workItem.carpenter.workerType));
     if (!workItem.carpenter.phone && !groupId) {
       throw new ConflictException('Carpenter has no phone number on file and no team group is configured');
     }
@@ -679,7 +754,7 @@ export class CarpenterService {
             sourcePartyOrderItemId: existing.sourcePartyOrderItemId,
             createdById: userId!,
           },
-          include: { carpenter: true },
+          include: { carpenter: { include: { team: true } } },
         });
         await this.notifyStageEvent(
           updated,
