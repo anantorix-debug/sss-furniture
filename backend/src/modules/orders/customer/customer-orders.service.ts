@@ -615,22 +615,28 @@ export class CustomerOrdersService {
   .meta-box b { display: inline-block; width: 100px; }
   .greeting { margin: 18px 0 4px; font-size: 14px; }
   .greeting .name { font-weight: bold; }
-  .item-box { border: 1px solid #e3d9c6; border-radius: 6px; margin-top: 12px; overflow: hidden; }
+  /* Chromium's print engine (Puppeteer) will otherwise slice a box right
+     across a page boundary, cutting its border/background mid-item - both
+     break-inside (standard) and page-break-inside (older WebKit alias, kept
+     for safety) are needed to actually stop that. */
+  .item-box { border: 1px solid #e3d9c6; border-radius: 6px; margin-top: 12px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
   .item-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; }
   .item-box ul { list-style: none; margin: 0; padding: 8px 16px 10px; font-size: 12.5px; }
   .item-box li { padding: 2px 0; }
-  .summary-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; border-radius: 6px 6px 0 0; margin-top: 20px; }
+  .summary-section { break-inside: avoid; page-break-inside: avoid; margin-top: 20px; }
+  .summary-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; border-radius: 6px 6px 0 0; }
   table.summary { width: 100%; border-collapse: collapse; font-size: 12.5px; border: 1px solid #e3d9c6; border-top: none; }
   table.summary th { background: #f4f2ec; text-align: left; padding: 8px 14px; border-bottom: 1px solid #e3d9c6; }
   table.summary td { padding: 8px 14px; border-bottom: 1px solid #efede6; }
+  table.summary tr { break-inside: avoid; page-break-inside: avoid; }
   .grand-total td { font-weight: bold; font-size: 14px; background: #f1e4c0; border-top: 2px solid #c9a227; }
-  .thanks { text-align: center; margin-top: 22px; font-size: 12px; color: #6b6b6b; }
+  .thanks { text-align: center; margin-top: 22px; font-size: 12px; color: #6b6b6b; break-inside: avoid; page-break-inside: avoid; }
   .thanks strong { color: #80011f; }
 </style></head>
 <body>
   <img class="banner" src="${getBannerDataUri()}" alt="SSS Furniture" />
   <div class="body">
-    <div class="title-row">
+    <div class="title-row" style="break-inside: avoid; page-break-inside: avoid;">
       <div class="title">
         <h1>BILL <span class="accent">&amp; PAYMENT</span></h1>
         <p>ORDER CONFIRMATION</p>
@@ -646,14 +652,16 @@ export class CustomerOrdersService {
 
     ${itemBoxes}
 
-    <div class="summary-title">PAYMENT SUMMARY</div>
-    <table class="summary">
-      <thead><tr><th style="width:40px">S.No</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
-      <tbody>
-        ${summaryRows}
-        <tr class="grand-total"><td colspan="2" style="text-align:right">GRAND TOTAL</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}/-</td></tr>
-      </tbody>
-    </table>
+    <div class="summary-section">
+      <div class="summary-title">PAYMENT SUMMARY</div>
+      <table class="summary">
+        <thead><tr><th style="width:40px">S.No</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>
+          ${summaryRows}
+          <tr class="grand-total"><td colspan="2" style="text-align:right">GRAND TOTAL</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}/-</td></tr>
+        </tbody>
+      </table>
+    </div>
 
     <p class="thanks"><strong>Thank you</strong> for your trust and support - SSS Furniture</p>
   </div>
