@@ -72,6 +72,7 @@ function PartyOrderDetailContent() {
   const [assignProductionItem, setAssignProductionItem] = useState<PartyOrderItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sendingPdf, setSendingPdf] = useState(false);
 
   async function downloadOrderPdf() {
     if (!order) return;
@@ -87,6 +88,26 @@ function PartyOrderDetailContent() {
     a.download = `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // Standalone quick-send, separate from the picker-based flow above - goes
+  // straight to the shop's own phone number on file, no chat selection needed.
+  async function sendOrderPdfViaWhatsApp() {
+    if (!order || sendingPdf) return;
+    setSendingPdf(true);
+    setNotice(null);
+    try {
+      const result = await api.post<{ sent: boolean; reason?: string }>(`/party-orders/${order.id}/send-whatsapp`);
+      setNotice(
+        result.sent
+          ? `PDF sent to ${order.shopName} via WhatsApp.`
+          : `Could not send PDF: ${result.reason === 'no_shop_phone' ? 'no phone number on file for this shop.' : (result.reason ?? 'unknown error')}`,
+      );
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to send PDF via WhatsApp');
+    } finally {
+      setSendingPdf(false);
+    }
   }
 
   async function handleDelete() {
@@ -134,6 +155,9 @@ function PartyOrderDetailContent() {
             />
             <button className="btn-secondary" onClick={downloadOrderPdf}>
               Download PDF
+            </button>
+            <button className="btn-secondary" disabled={sendingPdf} onClick={sendOrderPdfViaWhatsApp}>
+              {sendingPdf ? 'Sending...' : 'Send PDF via WhatsApp'}
             </button>
             <button className="btn-secondary" onClick={() => setEditOpen(true)}>
               Edit

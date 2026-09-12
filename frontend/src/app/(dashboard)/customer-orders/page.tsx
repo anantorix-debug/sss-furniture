@@ -132,6 +132,7 @@ function CustomerOrdersContent() {
   const [assignItemTarget, setAssignItemTarget] = useState<{ order: CustomerOrder; item: CustomerOrderItem } | null>(null);
   const [viewTarget, setViewTarget] = useState<CustomerOrder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sendingPdfId, setSendingPdfId] = useState<string | null>(null);
   const [selectedGalleryImages, setSelectedGalleryImages] = useState<GalleryImage[]>([]);
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
 
@@ -311,6 +312,27 @@ function CustomerOrdersContent() {
     });
   }
 
+  // Standalone quick-send, separate from the picker-based flow above -
+  // goes straight to the customer's own phone number on file, no chat
+  // selection needed.
+  async function sendOrderPdfViaWhatsApp(order: CustomerOrder) {
+    if (sendingPdfId) return;
+    setSendingPdfId(order.id);
+    setNotice(null);
+    try {
+      const result = await api.post<{ sent: boolean; reason?: string }>(`/customer-orders/${order.id}/send-whatsapp`);
+      setNotice(
+        result.sent
+          ? `PDF sent to ${order.customerName} via WhatsApp.`
+          : `Could not send PDF: ${result.reason === 'no_customer_phone' ? 'no phone number on file for this customer.' : (result.reason ?? 'unknown error')}`,
+      );
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to send PDF via WhatsApp');
+    } finally {
+      setSendingPdfId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -443,6 +465,10 @@ function CustomerOrdersContent() {
                         { label: 'Payments', onClick: () => setPaymentsOrder(order) },
                         { label: 'Edit', onClick: () => openEdit(order) },
                         { label: 'Download PDF', onClick: () => downloadOrderPdf(order) },
+                        {
+                          label: sendingPdfId === order.id ? 'Sending PDF...' : 'Send PDF via WhatsApp',
+                          onClick: () => sendOrderPdfViaWhatsApp(order),
+                        },
                         {
                           label: 'Assign to Production',
                           onClick: () => setAssignTarget(order),

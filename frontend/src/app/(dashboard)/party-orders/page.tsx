@@ -94,6 +94,7 @@ function PartyOrdersContent() {
   const [editing, setEditing] = useState<PartyOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PartyOrder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sendingPdfId, setSendingPdfId] = useState<string | null>(null);
 
   function openCreate() {
     setEditing(null);
@@ -132,6 +133,27 @@ function PartyOrdersContent() {
     a.download = `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // Standalone quick-send, separate from the picker-based flow in
+  // handleSendWhatsApp below - goes straight to the shop's own phone
+  // number on file, no chat selection needed.
+  async function sendOrderPdfViaWhatsApp(order: PartyOrder) {
+    if (sendingPdfId) return;
+    setSendingPdfId(order.id);
+    setNotice(null);
+    try {
+      const result = await api.post<{ sent: boolean; reason?: string }>(`/party-orders/${order.id}/send-whatsapp`);
+      setNotice(
+        result.sent
+          ? `PDF sent to ${order.shopName} via WhatsApp.`
+          : `Could not send PDF: ${result.reason === 'no_shop_phone' ? 'no phone number on file for this shop.' : (result.reason ?? 'unknown error')}`,
+      );
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to send PDF via WhatsApp');
+    } finally {
+      setSendingPdfId(null);
+    }
   }
 
   function handleSendWhatsApp(order: PartyOrder) {
@@ -269,6 +291,17 @@ function PartyOrdersContent() {
                   }}
                 >
                   Download PDF
+                </button>
+                <button
+                  className="text-brand-600 hover:underline text-xs"
+                  disabled={sendingPdfId === order.id}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendOrderPdfViaWhatsApp(order);
+                  }}
+                >
+                  {sendingPdfId === order.id ? 'Sending...' : 'Send PDF'}
                 </button>
                 {hasRole('ADMIN') && (
                   <button
