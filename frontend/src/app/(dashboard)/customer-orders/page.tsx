@@ -24,7 +24,6 @@ import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
-import { UnitSelect } from '@/components/UnitSelect';
 import type { CustomerOrder, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -517,21 +516,12 @@ function CustomerOrdersContent() {
                           onChange={(e) => updateItemRow(idx, { productName: e.target.value, productId: undefined })}
                         />
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        <input
-                          className="input"
-                          placeholder="Category"
-                          value={row.category}
-                          onChange={(e) => updateItemRow(idx, { category: e.target.value })}
-                        />
-                        <input
-                          className="input"
-                          placeholder="Size"
-                          value={row.size}
-                          onChange={(e) => updateItemRow(idx, { size: e.target.value })}
-                        />
-                        <UnitSelect value={row.sizeUnit} onChange={(v) => updateItemRow(idx, { sizeUnit: v })} />
-                      </div>
+                      <input
+                        className="input"
+                        placeholder="Category"
+                        value={row.category}
+                        onChange={(e) => updateItemRow(idx, { category: e.target.value })}
+                      />
                       <input
                         className="input"
                         placeholder="Polish Colour (e.g. Walnut Brown)"
