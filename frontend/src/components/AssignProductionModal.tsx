@@ -5,7 +5,8 @@ import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { Modal } from './Modal';
 import { UnitSelect } from './UnitSelect';
-import type { CarpenterSummary } from '@/types';
+import { FormRow, FormField } from './orders/OrderFormFields';
+import type { CarpenterSummary, User } from '@/types';
 
 export interface AssignProductionPayload {
   carpenterId: string;
@@ -20,6 +21,7 @@ export interface AssignProductionPayload {
   notes?: string;
   notifyWhatsapp?: boolean;
   color?: string;
+  employeeUserId?: string;
 }
 
 // Unified "Assign to Production" - puts the order into production (creates
@@ -59,8 +61,15 @@ export function AssignProductionModal({
   onSubmit: (payload: AssignProductionPayload) => Promise<void>;
 }) {
   const { data: carpenters } = useSWR<CarpenterSummary[]>('/carpenters', fetcher);
+  // Reuses the Users & Roles list (Superadmin-only), same source as the
+  // standalone AssignEmployeeModal - filtered to the three production-side
+  // roles. This is a login/Model-No permission, distinct from the
+  // Assign Worker (Carpenter payee) field below.
+  const { data: users } = useSWR<User[]>('/users', fetcher);
+  const employees = (users ?? []).filter((u) => u.role === 'CARPENTER' || u.role === 'CARVER' || u.role === 'POLISHER');
   const [stage, setStage] = useState<'CARPENTER' | 'CARVING' | 'POLISH'>(currentStage ?? 'CARPENTER');
   const [carpenterId, setCarpenterId] = useState('');
+  const [employeeUserId, setEmployeeUserId] = useState('');
   const [workDate, setWorkDate] = useState(new Date().toISOString().slice(0, 10));
   const [category, setCategory] = useState(initialCategory ?? '');
   const [size, setSize] = useState(initialSize ?? '');
@@ -96,6 +105,7 @@ export function AssignProductionModal({
         notes: notes || undefined,
         notifyWhatsapp: notify,
         color: stage === 'POLISH' ? color.trim() : undefined,
+        employeeUserId: employeeUserId || undefined,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to assign production');
@@ -105,54 +115,65 @@ export function AssignProductionModal({
   }
 
   return (
-    <Modal title={`Assign to Production - ${productName}`} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div>
-          <label className="label">Stage</label>
-          <select className="input" value={stage} onChange={(e) => setStage(e.target.value as typeof stage)}>
-            <option value="CARPENTER">Carpenter</option>
-            <option value="CARVING">Carving</option>
-            <option value="POLISH">Polish</option>
-          </select>
-        </div>
-        <div>
-          <label className="label">Assign Worker (paid for this stage)</label>
-          <select className="input" required value={carpenterId} onChange={(e) => setCarpenterId(e.target.value)}>
-            <option value="">Select worker</option>
-            {carpenters?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.workerType})
+    <Modal title={`Assign to Production - ${productName}`} onClose={onClose} wide>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <FormRow>
+          <FormField label="Stage">
+            <select className="input" value={stage} onChange={(e) => setStage(e.target.value as typeof stage)}>
+              <option value="CARPENTER">Carpenter</option>
+              <option value="CARVING">Carving</option>
+              <option value="POLISH">Polish</option>
+            </select>
+          </FormField>
+          <FormField label="Assign Worker (paid for this stage)">
+            <select className="input" required value={carpenterId} onChange={(e) => setCarpenterId(e.target.value)}>
+              <option value="">Select worker</option>
+              {carpenters?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.workerType})
+                </option>
+              ))}
+            </select>
+          </FormField>
+        </FormRow>
+
+        <FormField label="Assign Employee (responsible for Model No)" full>
+          <select className="input" value={employeeUserId} onChange={(e) => setEmployeeUserId(e.target.value)}>
+            <option value="">Not set / leave as-is</option>
+            {employees.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.role === 'CARPENTER' ? 'Carpenter Team' : u.role === 'CARVER' ? 'Carving Team' : 'Polish Team'})
               </option>
             ))}
           </select>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Work Date</label>
+          <p className="text-[11px] text-brand-400 mt-1">
+            This login enters the Model No once production begins - separate from the worker above, who&apos;s paid for this stage.
+          </p>
+        </FormField>
+
+        <FormRow>
+          <FormField label="Work Date">
             <input type="date" className="input" required value={workDate} onChange={(e) => setWorkDate(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Quantity</label>
+          </FormField>
+          <FormField label="Quantity">
             <input type="number" min="1" className="input" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className="label">Category</label>
+          </FormField>
+        </FormRow>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <FormField label="Category">
             <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="BOTTOM COT" />
-          </div>
-          <div>
-            <label className="label">Size</label>
+          </FormField>
+          <FormField label="Size">
             <input className="input" value={size} onChange={(e) => setSize(e.target.value)} placeholder="5" />
-          </div>
-          <div>
-            <label className="label">Unit</label>
+          </FormField>
+          <FormField label="Unit">
             <UnitSelect id="assign-production-size-unit" value={sizeUnit} onChange={setSizeUnit} />
-          </div>
+          </FormField>
         </div>
+
         {stage === 'POLISH' && (
-          <div>
-            <label className="label">Colour (required for Polish)</label>
+          <FormField label="Colour (required for Polish)" full>
             <input
               className="input"
               required
@@ -161,31 +182,34 @@ export function AssignProductionModal({
               placeholder="e.g. Walnut Brown"
             />
             <p className="text-[11px] text-brand-400 mt-1">Shown to the polish worker so they know what colour to use.</p>
-          </div>
+          </FormField>
         )}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Price (Rs.)</label>
+
+        <FormRow>
+          <FormField label="Price (Rs.)">
             <input type="number" min="0" step="0.01" className="input" required value={price} onChange={(e) => setPrice(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Extra (Rs.)</label>
+          </FormField>
+          <FormField label="Extra (Rs.)">
             <input type="number" min="0" step="0.01" className="input" value={extra} onChange={(e) => setExtra(e.target.value)} />
-          </div>
-        </div>
-        <div>
-          <label className="label">Notes (optional)</label>
+          </FormField>
+        </FormRow>
+
+        <FormField label="Notes (optional)" full>
           <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any instructions for this stage" />
+        </FormField>
+
+        <div className="border-t border-brand-100 pt-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm text-brand-600">
+            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+            Notify via WhatsApp (worker + team group, if configured)
+          </label>
+          {onOpenWhatsAppPicker && (
+            <button type="button" className="text-brand-600 text-xs hover:underline" onClick={onOpenWhatsAppPicker}>
+              Or choose a specific WhatsApp chat/group to notify...
+            </button>
+          )}
         </div>
-        <label className="flex items-center gap-2 text-sm text-brand-600">
-          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
-          Notify via WhatsApp (worker + team group, if configured)
-        </label>
-        {onOpenWhatsAppPicker && (
-          <button type="button" className="text-brand-600 text-xs hover:underline -mt-1" onClick={onOpenWhatsAppPicker}>
-            Or choose a specific WhatsApp chat/group to notify...
-          </button>
-        )}
+
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>
