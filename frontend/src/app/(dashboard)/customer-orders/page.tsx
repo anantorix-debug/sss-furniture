@@ -493,19 +493,6 @@ function CustomerOrdersContent() {
             <FormField label="Address" full>
               <input className="input" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
             </FormField>
-            <FormRow>
-              <FormField label="Size">
-                <input
-                  className="input"
-                  placeholder="e.g. 78x72"
-                  value={form.size}
-                  onChange={(e) => setForm((f) => ({ ...f, size: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Size Unit">
-                <UnitSelect value={form.sizeUnit} onChange={(v) => setForm((f) => ({ ...f, sizeUnit: v }))} />
-              </FormField>
-            </FormRow>
 
             <div>
               <label className="label">Products</label>
