@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
@@ -21,6 +23,23 @@ const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
 
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+}
+
+// The branded letterhead (logo, tagline, contact/address/proprietor) - the
+// same image already sent alongside every WhatsApp order-confirmation
+// message - embedded as a data URI so Puppeteer (running server-side, no
+// web server to fetch a relative /public path from) can render it without
+// a network round-trip. Read once and cached; the file itself lives in
+// src/ (not dist/) since nest-cli isn't configured to copy assets, but
+// process.cwd() at runtime is the backend project root either way (dev or
+// PM2-run dist/src/main), so this path resolves the same in both.
+let cachedBannerDataUri: string | null = null;
+function getBannerDataUri(): string {
+  if (!cachedBannerDataUri) {
+    const bytes = readFileSync(join(process.cwd(), 'src/assets/wa-template.jpeg'));
+    cachedBannerDataUri = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+  }
+  return cachedBannerDataUri;
 }
 
 // Order-insensitive comparison of the saved lines against a submitted
@@ -528,62 +547,115 @@ export class CustomerOrdersService {
     return this.findOne(updated.id, user.role as Role);
   }
 
+  // Matches the shop's own printed "BILL & PAYMENT / ORDER CONFIRMATION"
+  // template - the branded banner is the same image already attached to
+  // every WhatsApp order-confirmation message; everything below it (item
+  // boxes, payment summary, grand total) is generated from the real order
+  // data instead of copied text.
   private buildPdfHtml(order: Awaited<ReturnType<CustomerOrdersService['findOne']>>): string {
-    const rows = order.items.length
-      ? order.items
-          .map(
-            (i) => `<tr>
-              <td>${escapeHtml(i.productName)}</td>
-              <td style="text-align:right">${i.quantity}</td>
-              <td style="text-align:right">₹${Number(i.unitPrice).toLocaleString('en-IN')}</td>
-              <td style="text-align:right">₹${(i.quantity * Number(i.unitPrice)).toLocaleString('en-IN')}</td>
-            </tr>`,
-          )
-          .join('')
-      : `<tr><td>${escapeHtml(order.product)}</td><td style="text-align:right">1</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}</td></tr>`;
+    const lines: { label: string; qty: number; unitPrice: number; total: number; details: string[] }[] = order.items.length
+      ? order.items.map((i) => ({
+          label: i.category || i.productName,
+          qty: i.quantity,
+          unitPrice: Number(i.unitPrice),
+          total: i.quantity * Number(i.unitPrice),
+          details: [
+            `Product : ${i.productName}`,
+            i.size ? `Size : ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : null,
+            i.color ? `Colour : ${i.color}` : null,
+            `Quantity : ${i.quantity}`,
+            `Price : ₹${Number(i.unitPrice).toLocaleString('en-IN')}/-`,
+          ].filter((d): d is string => d !== null),
+        }))
+      : [
+          {
+            label: order.product,
+            qty: 1,
+            unitPrice: Number(order.orderValue),
+            total: Number(order.orderValue),
+            details: [`Product : ${order.product}`, `Price : ₹${Number(order.orderValue).toLocaleString('en-IN')}/-`],
+          },
+        ];
+
+    const itemBoxes = lines
+      .map(
+        (l) => `
+        <div class="item-box">
+          <div class="item-title">${escapeHtml(l.label.toUpperCase())}</div>
+          <ul>${l.details.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}</ul>
+        </div>`,
+      )
+      .join('');
+
+    const summaryRows = lines
+      .map(
+        (l, i) => `<tr>
+          <td>${i + 1}</td>
+          <td>${escapeHtml(l.label)}${l.qty > 1 ? ` (${l.qty} Nos)` : ''}</td>
+          <td style="text-align:right">₹${l.total.toLocaleString('en-IN')}/-</td>
+        </tr>`,
+      )
+      .join('');
+
+    const latestPayment = order.payments && order.payments.length > 0 ? order.payments[order.payments.length - 1] : null;
+    const paymentMode = latestPayment?.mode || 'Cash / Bank';
 
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>
-  body { font-family: Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; }
-  .header { background: #80011f; color: #fff; padding: 24px 28px; }
-  .header h1 { margin: 0; font-size: 20px; }
-  .header p { margin: 4px 0 0; font-size: 12px; color: #f5c2c9; }
-  .body { padding: 24px 28px; }
-  .meta { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 13px; }
-  .meta div { line-height: 1.6; }
-  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  th { background: #f4f2ec; text-align: left; padding: 8px 10px; border-bottom: 1px solid #e3e1d9; }
-  td { padding: 8px 10px; border-bottom: 1px solid #efede6; }
-  .total-row td { font-weight: bold; border-top: 2px solid #1f2933; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #2b2b2b; margin: 0; background: #fff; }
+  .banner { width: 100%; display: block; }
+  .body { padding: 20px 28px 28px; }
+  .title-row { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 6px; }
+  .title h1 { margin: 0; font-size: 26px; letter-spacing: 0.5px; }
+  .title h1 .accent { color: #80011f; }
+  .title p { margin: 2px 0 0; font-size: 12px; letter-spacing: 3px; color: #80011f; font-weight: bold; }
+  .meta-box { border: 1px solid #c9a227; border-radius: 6px; padding: 10px 16px; font-size: 12px; text-align: left; min-width: 220px; }
+  .meta-box div { margin: 2px 0; }
+  .meta-box b { display: inline-block; width: 100px; }
+  .greeting { margin: 18px 0 4px; font-size: 14px; }
+  .greeting .name { font-weight: bold; }
+  .item-box { border: 1px solid #e3d9c6; border-radius: 6px; margin-top: 12px; overflow: hidden; }
+  .item-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; }
+  .item-box ul { list-style: none; margin: 0; padding: 8px 16px 10px; font-size: 12.5px; }
+  .item-box li { padding: 2px 0; }
+  .summary-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; border-radius: 6px 6px 0 0; margin-top: 20px; }
+  table.summary { width: 100%; border-collapse: collapse; font-size: 12.5px; border: 1px solid #e3d9c6; border-top: none; }
+  table.summary th { background: #f4f2ec; text-align: left; padding: 8px 14px; border-bottom: 1px solid #e3d9c6; }
+  table.summary td { padding: 8px 14px; border-bottom: 1px solid #efede6; }
+  .grand-total td { font-weight: bold; font-size: 14px; background: #f1e4c0; border-top: 2px solid #c9a227; }
+  .thanks { text-align: center; margin-top: 22px; font-size: 12px; color: #6b6b6b; }
+  .thanks strong { color: #80011f; }
 </style></head>
 <body>
-  <div class="header">
-    <h1>Order Confirmation - ${escapeHtml(order.orderId)}</h1>
-    <p>SSS Company</p>
-  </div>
+  <img class="banner" src="${getBannerDataUri()}" alt="SSS Furniture" />
   <div class="body">
-    <div class="meta">
-      <div>
-        <strong>Customer</strong><br/>
-        ${escapeHtml(order.customerName)}<br/>
-        ${order.phone ? escapeHtml(order.phone) : ''}<br/>
-        ${order.address ? escapeHtml(order.address) : ''}
+    <div class="title-row">
+      <div class="title">
+        <h1>BILL <span class="accent">&amp; PAYMENT</span></h1>
+        <p>ORDER CONFIRMATION</p>
       </div>
-      <div style="text-align:right">
-        <strong>Order Date</strong>: ${order.orderDate.toLocaleDateString('en-IN')}<br/>
-        ${order.jobNumber ? `<strong>Job No</strong>: ${escapeHtml(order.jobNumber)}<br/>` : ''}
-        ${order.cotTrack ? `<strong>Model No</strong>: ${escapeHtml(order.cotTrack)}<br/>` : ''}
-        <strong>Status</strong>: ${order.deliveryStatus.replace('_', ' ')}
+      <div class="meta-box">
+        <div><b>Invoice No</b> : ${escapeHtml(order.jobNumber ?? order.orderId)}</div>
+        <div><b>Date</b> : ${order.orderDate.toLocaleDateString('en-IN')}</div>
+        <div><b>Payment Mode</b> : ${escapeHtml(paymentMode)}</div>
       </div>
     </div>
-    <table>
-      <thead><tr><th>Product</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Line Total</th></tr></thead>
+
+    <p class="greeting">Dear <span class="name">${escapeHtml(order.customerName)}</span>,<br/>Kindly check and confirm the following order details:</p>
+
+    ${itemBoxes}
+
+    <div class="summary-title">PAYMENT SUMMARY</div>
+    <table class="summary">
+      <thead><tr><th style="width:40px">S.No</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
       <tbody>
-        ${rows}
-        <tr class="total-row"><td colspan="3" style="text-align:right">Total</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}</td></tr>
+        ${summaryRows}
+        <tr class="grand-total"><td colspan="2" style="text-align:right">GRAND TOTAL</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}/-</td></tr>
       </tbody>
     </table>
+
+    <p class="thanks"><strong>Thank you</strong> for your trust and support - SSS Furniture</p>
   </div>
 </body></html>`;
   }
