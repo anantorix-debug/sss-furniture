@@ -247,8 +247,6 @@ function PartyOrderDetailContent() {
       {assignProductionItem && (
         <AssignProductionModal
           productName={assignProductionItem.productName}
-          initialSize={assignProductionItem.size ?? undefined}
-          initialSizeUnit={assignProductionItem.sizeUnit ?? undefined}
           initialColor={assignProductionItem.color ?? undefined}
           initialQuantity={assignProductionItem.productionQty}
           onOpenWhatsAppPicker={

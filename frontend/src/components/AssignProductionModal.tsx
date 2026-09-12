@@ -4,7 +4,6 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { Modal } from './Modal';
-import { UnitSelect } from './UnitSelect';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import type { CarpenterSummary, User } from '@/types';
 
@@ -13,8 +12,6 @@ export interface AssignProductionPayload {
   stage?: 'CARPENTER' | 'CARVING' | 'POLISH';
   workDate: string;
   category?: string;
-  size?: string;
-  sizeUnit?: string;
   price: number;
   extra?: number;
   quantity?: number;
@@ -37,13 +34,10 @@ export function AssignProductionModal({
   // something different (e.g. a Category correction discovered during
   // production).
   initialCategory,
-  initialSize,
-  initialSizeUnit,
   initialColor,
   initialQuantity,
   // Opens a full WhatsApp chat/group picker (e.g. the shared WhatsAppModal)
-  // for a one-off manual notification, in addition to the automatic
-  // worker+team-group send below - the caller owns that modal since it
+  // for a one-off manual notification - the caller owns that modal since it
   // needs page-level WhatsApp context this component doesn't have.
   onOpenWhatsAppPicker,
   onClose,
@@ -52,8 +46,6 @@ export function AssignProductionModal({
   productName: string;
   currentStage?: 'CARPENTER' | 'CARVING' | 'POLISH';
   initialCategory?: string;
-  initialSize?: string;
-  initialSizeUnit?: string;
   initialColor?: string;
   initialQuantity?: number;
   onOpenWhatsAppPicker?: () => void;
@@ -72,14 +64,11 @@ export function AssignProductionModal({
   const [employeeUserId, setEmployeeUserId] = useState('');
   const [workDate, setWorkDate] = useState(new Date().toISOString().slice(0, 10));
   const [category, setCategory] = useState(initialCategory ?? '');
-  const [size, setSize] = useState(initialSize ?? '');
-  const [sizeUnit, setSizeUnit] = useState(initialSizeUnit ?? '');
   const [price, setPrice] = useState('');
   const [extra, setExtra] = useState('');
   const [quantity, setQuantity] = useState(initialQuantity ? String(initialQuantity) : '1');
   const [color, setColor] = useState(initialColor ?? '');
   const [notes, setNotes] = useState('');
-  const [notify, setNotify] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,13 +86,14 @@ export function AssignProductionModal({
         stage,
         workDate,
         category: category || undefined,
-        size: size || undefined,
-        sizeUnit: sizeUnit || undefined,
         price: parseFloat(price),
         extra: extra ? parseFloat(extra) : undefined,
         quantity: quantity ? parseInt(quantity, 10) : undefined,
         notes: notes || undefined,
-        notifyWhatsapp: notify,
+        // Always notified by default (worker + team group, if configured) -
+        // the picker below is for an additional one-off manual send, not a
+        // replacement toggle.
+        notifyWhatsapp: true,
         color: stage === 'POLISH' ? color.trim() : undefined,
         employeeUserId: employeeUserId || undefined,
       });
@@ -160,17 +150,9 @@ export function AssignProductionModal({
           </FormField>
         </FormRow>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <FormField label="Category">
-            <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="BOTTOM COT" />
-          </FormField>
-          <FormField label="Size">
-            <input className="input" value={size} onChange={(e) => setSize(e.target.value)} placeholder="5" />
-          </FormField>
-          <FormField label="Unit">
-            <UnitSelect id="assign-production-size-unit" value={sizeUnit} onChange={setSizeUnit} />
-          </FormField>
-        </div>
+        <FormField label="Category">
+          <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="BOTTOM COT" />
+        </FormField>
 
         {stage === 'POLISH' && (
           <FormField label="Colour (required for Polish)" full>
@@ -198,17 +180,16 @@ export function AssignProductionModal({
           <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any instructions for this stage" />
         </FormField>
 
-        <div className="border-t border-brand-100 pt-3 space-y-2">
-          <label className="flex items-center gap-2 text-sm text-brand-600">
-            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
-            Notify via WhatsApp (worker + team group, if configured)
-          </label>
-          {onOpenWhatsAppPicker && (
-            <button type="button" className="text-brand-600 text-xs hover:underline" onClick={onOpenWhatsAppPicker}>
-              Or choose a specific WhatsApp chat/group to notify...
+        {onOpenWhatsAppPicker && (
+          <div className="border-t border-brand-100 pt-3">
+            <button type="button" className="btn-secondary text-sm" onClick={onOpenWhatsAppPicker}>
+              📱 Send via WhatsApp...
             </button>
-          )}
-        </div>
+            <p className="text-[11px] text-brand-400 mt-1">
+              The worker and their team group are notified automatically - use this to also notify a specific chat or group.
+            </p>
+          </div>
+        )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">

@@ -707,8 +707,6 @@ function CustomerOrdersContent() {
         <AssignProductionModal
           productName={assignItemTarget.item.productName}
           initialCategory={assignItemTarget.item.category ?? undefined}
-          initialSize={assignItemTarget.item.size ?? undefined}
-          initialSizeUnit={assignItemTarget.item.sizeUnit ?? undefined}
           initialColor={assignItemTarget.item.color ?? undefined}
           initialQuantity={assignItemTarget.item.productionQty}
           onOpenWhatsAppPicker={
