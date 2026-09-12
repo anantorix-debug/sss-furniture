@@ -45,7 +45,7 @@ interface ItemRow {
 const emptyRow: ItemRow = { productName: '', category: '', size: '', sizeUnit: '', color: '', quantity: '1', unitPrice: '' };
 
 const emptyForm = {
-  orderId: '',
+  orderId: 'SSS-',
   orderDate: new Date().toISOString().slice(0, 10),
   customerName: '',
   phone: '',
