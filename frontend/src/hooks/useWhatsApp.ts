@@ -7,6 +7,11 @@ interface UseWhatsAppOptions {
   defaultMessage?: string;
   defaultImageUrl?: string;
   defaultImageUrls?: string[];
+  // Backend route (e.g. `/customer-orders/:id/pdf`) the modal can fetch on
+  // demand and attach as a file - lets the sender pick the chat/group first
+  // instead of it going out automatically to the order's own phone number.
+  pdfUrl?: string;
+  pdfFilename?: string;
 }
 
 export function useWhatsApp() {

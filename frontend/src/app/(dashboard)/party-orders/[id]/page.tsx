@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, getAccessToken } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
@@ -20,6 +20,8 @@ import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import type { PartyOrder, PartyOrderItem, CarpenterWorkItem } from '@/types';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 const LINE_STAGE_CHIP: Record<string, ChipColor> = { CARPENTER: 'blue', CARVING: 'amber', POLISH: 'darkGreen' };
 const LINE_STATUS_CHIP: Record<string, ChipColor> = {
@@ -71,6 +73,22 @@ function PartyOrderDetailContent() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  async function downloadOrderPdf() {
+    if (!order) return;
+    const token = getAccessToken();
+    const res = await fetch(`${API_BASE_URL}/party-orders/${order.id}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+    });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleDelete() {
     if (!order) return;
     try {
@@ -108,10 +126,15 @@ function PartyOrderDetailContent() {
                   recipientPhone: order.phone ?? undefined,
                   defaultMessage: `Order ${order.jobNumber ?? ''} for ${order.shopName} - Total ₹${order.totalAmount ?? 0}, Balance ₹${order.balanceAmount ?? 0}.`,
                   defaultImageUrl: '/wa-template.jpeg',
+                  pdfUrl: `/party-orders/${order.id}/pdf`,
+                  pdfFilename: `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`,
                 })
               }
               size="md"
             />
+            <button className="btn-secondary" onClick={downloadOrderPdf}>
+              Download PDF
+            </button>
             <button className="btn-secondary" onClick={() => setEditOpen(true)}>
               Edit
             </button>
@@ -274,6 +297,8 @@ function PartyOrderDetailContent() {
           recipientInfo={{ name: whatsappOptions.recipientName, phone: whatsappOptions.recipientPhone }}
           defaultMessage={whatsappOptions.defaultMessage}
           defaultImageUrl={whatsappOptions.defaultImageUrl}
+          pdfUrl={whatsappOptions.pdfUrl}
+          pdfFilename={whatsappOptions.pdfFilename}
           onSuccess={() => mutate()}
         />
       )}

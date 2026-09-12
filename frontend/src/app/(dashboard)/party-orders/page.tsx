@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, getAccessToken } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -18,6 +18,8 @@ import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import type { PartyOrder } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 function productSummary(order: PartyOrder): string {
   if (order.items.length === 0) return order.model ?? '-';
@@ -117,12 +119,31 @@ function PartyOrdersContent() {
     }
   }
 
+  async function downloadOrderPdf(order: PartyOrder) {
+    const token = getAccessToken();
+    const res = await fetch(`${API_BASE_URL}/party-orders/${order.id}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+    });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function handleSendWhatsApp(order: PartyOrder) {
     openWhatsApp({
       recipientName: (order.shopName ?? '') || 'Shop',
       recipientPhone: order.phone ?? undefined,
       defaultMessage: buildOrderConfirmationMessage(order),
       defaultImageUrl: '/wa-template.jpeg',
+      // Lets the sender attach the branded PDF instead, from inside the
+      // same chat-picker popup.
+      pdfUrl: `/party-orders/${order.id}/pdf`,
+      pdfFilename: `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`,
     });
   }
 
@@ -239,6 +260,16 @@ function PartyOrdersContent() {
                 <button className="text-brand-600 hover:underline text-xs" onClick={(e) => openEdit(e, order)}>
                   Edit
                 </button>
+                <button
+                  className="text-brand-600 hover:underline text-xs"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    downloadOrderPdf(order);
+                  }}
+                >
+                  Download PDF
+                </button>
                 {hasRole('ADMIN') && (
                   <button
                     className="text-red-500 hover:underline text-xs"
@@ -292,6 +323,8 @@ function PartyOrdersContent() {
           }}
           defaultMessage={whatsappOptions.defaultMessage}
           defaultImageUrl={whatsappOptions.defaultImageUrl}
+          pdfUrl={whatsappOptions.pdfUrl}
+          pdfFilename={whatsappOptions.pdfFilename}
           onSuccess={() => mutate()}
         />
       )}

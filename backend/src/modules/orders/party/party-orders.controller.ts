@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { PartyOrdersService } from './party-orders.service';
 import { CreatePartyOrderDto } from './dto/create-party-order.dto';
 import { UpdatePartyOrderDto } from './dto/update-party-order.dto';
@@ -107,5 +108,21 @@ export class PartyOrdersController {
   @Post(':id/model-no')
   updateModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
     return this.service.updateModelNo(id, dto, user);
+  }
+
+  @Roles(Role.ADMIN)
+  @Get(':id/pdf')
+  async downloadPdf(@Param('id') id: string, @Res() res: Response) {
+    const buffer = await this.service.generatePdf(id);
+    const order = await this.service.findOne(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Order Confirmation - ${order.jobNumber ?? order.id}.pdf"`);
+    res.send(buffer);
+  }
+
+  @Roles(Role.ADMIN)
+  @Post(':id/send-whatsapp')
+  sendWhatsapp(@Param('id') id: string) {
+    return this.service.sendPdfToShop(id);
   }
 }

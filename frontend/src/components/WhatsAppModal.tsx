@@ -4,9 +4,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError, sendWhatsappMedia, WHATSAPP_MEDIA_MAX_BYTES } from '@/lib/api';
+import { api, ApiError, getAccessToken, sendWhatsappMedia, WHATSAPP_MEDIA_MAX_BYTES } from '@/lib/api';
 import type { WhatsappChat } from '@/types';
 import { Modal } from './Modal';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 // WhatsApp renders no HTML - these are its own native markdown wrappers, so
 // this toolbar wraps the textarea's selection with the syntax WhatsApp
@@ -39,6 +41,11 @@ interface WhatsAppModalProps {
   // given. Each URL is fetched client-side and sent directly - never
   // re-uploaded/stored again server-side.
   defaultImageUrls?: string[];
+  // Backend route (e.g. `/customer-orders/:id/pdf`) offered as an
+  // "Attach Order Confirmation PDF" button - fetched (with auth) and
+  // attached in place of any image default, once the sender picks a chat.
+  pdfUrl?: string;
+  pdfFilename?: string;
 }
 
 export function WhatsAppModal({
@@ -48,6 +55,8 @@ export function WhatsAppModal({
   defaultMessage = '',
   defaultImageUrl,
   defaultImageUrls,
+  pdfUrl,
+  pdfFilename,
 }: WhatsAppModalProps) {
   const router = useRouter();
   const [selectedChat, setSelectedChat] = useState<WhatsappChat | null>(null);
@@ -58,8 +67,29 @@ export function WhatsAppModal({
   const [success, setSuccess] = useState(false);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [extraMediaFiles, setExtraMediaFiles] = useState<File[]>([]);
+  const [attachingPdf, setAttachingPdf] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function attachOrderPdf() {
+    if (!pdfUrl) return;
+    setAttachingPdf(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}${pdfUrl}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error('Failed to fetch PDF');
+      const blob = await res.blob();
+      setMediaFile(new File([blob], pdfFilename || 'Order Confirmation.pdf', { type: 'application/pdf' }));
+      setExtraMediaFiles([]);
+    } catch {
+      setError('Failed to attach the PDF - please try again.');
+    } finally {
+      setAttachingPdf(false);
+    }
+  }
 
   function applyFormat(wrap: string) {
     const el = textareaRef.current;
@@ -339,6 +369,16 @@ export function WhatsAppModal({
                   </button>
                 )}
               </div>
+              {pdfUrl && (
+                <button
+                  type="button"
+                  onClick={attachOrderPdf}
+                  disabled={attachingPdf}
+                  className="btn-secondary text-xs mt-2"
+                >
+                  {attachingPdf ? 'Attaching PDF...' : '📄 Attach Order Confirmation PDF'}
+                </button>
+              )}
               {mediaFile && (
                 <p className="text-xs text-brand-500 mt-1">
                   📎 {mediaFile.name} ({(mediaFile.size / 1024).toFixed(0)} KB)

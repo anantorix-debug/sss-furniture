@@ -1,5 +1,3 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
@@ -16,6 +14,7 @@ import { UpdateModelNoDto } from './dto/update-model-no.dto';
 import { computeBalance, suggestPaymentType } from '../../../common/utils/balance.util';
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
+import { getPdfBannerDataUri } from '../../../common/utils/pdf-banner.util';
 import { Role } from '../../../common/enums/role.enum';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
@@ -23,23 +22,6 @@ const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
 
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-}
-
-// The branded letterhead (logo, tagline, contact/address/proprietor) - the
-// same image already sent alongside every WhatsApp order-confirmation
-// message - embedded as a data URI so Puppeteer (running server-side, no
-// web server to fetch a relative /public path from) can render it without
-// a network round-trip. Read once and cached; the file itself lives in
-// src/ (not dist/) since nest-cli isn't configured to copy assets, but
-// process.cwd() at runtime is the backend project root either way (dev or
-// PM2-run dist/src/main), so this path resolves the same in both.
-let cachedBannerDataUri: string | null = null;
-function getBannerDataUri(): string {
-  if (!cachedBannerDataUri) {
-    const bytes = readFileSync(join(process.cwd(), 'src/assets/wa-template.jpeg'));
-    cachedBannerDataUri = `data:image/jpeg;base64,${bytes.toString('base64')}`;
-  }
-  return cachedBannerDataUri;
 }
 
 // Order-insensitive comparison of the saved lines against a submitted
@@ -634,7 +616,7 @@ export class CustomerOrdersService {
   .thanks strong { color: #80011f; }
 </style></head>
 <body>
-  <img class="banner" src="${getBannerDataUri()}" alt="SSS Furniture" />
+  <img class="banner" src="${getPdfBannerDataUri()}" alt="SSS Furniture" />
   <div class="body">
     <div class="title-row" style="break-inside: avoid; page-break-inside: avoid;">
       <div class="title">
@@ -681,7 +663,7 @@ export class CustomerOrdersService {
     const buffer = await this.generatePdf(id);
     return this.whatsapp.sendDocument(order.phone, {
       buffer,
-      filename: `${order.orderId}.pdf`,
+      filename: `Order Confirmation - ${order.orderId}.pdf`,
       mimetype: 'application/pdf',
       caption: `Order confirmation ${order.orderId} - ${order.product} - SSS Company`,
     });

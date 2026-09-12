@@ -132,7 +132,6 @@ function CustomerOrdersContent() {
   const [assignItemTarget, setAssignItemTarget] = useState<{ order: CustomerOrder; item: CustomerOrderItem } | null>(null);
   const [viewTarget, setViewTarget] = useState<CustomerOrder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [sendingPdfId, setSendingPdfId] = useState<string | null>(null);
   const [selectedGalleryImages, setSelectedGalleryImages] = useState<GalleryImage[]>([]);
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
 
@@ -254,7 +253,7 @@ function CustomerOrdersContent() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${order.orderId}.pdf`;
+    a.download = `Order Confirmation - ${order.orderId}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -304,27 +303,12 @@ function CustomerOrdersContent() {
       // Selected Gallery images (if any) go out instead of the generic
       // template image - multiple images send as one message per image.
       ...(galleryUrls.length > 0 ? { defaultImageUrls: galleryUrls } : { defaultImageUrl: '/wa-template.jpeg' }),
+      // Lets the sender attach the branded PDF instead, from inside the
+      // same chat-picker popup - see WhatsAppModal's "Attach Order
+      // Confirmation PDF" button.
+      pdfUrl: `/customer-orders/${order.id}/pdf`,
+      pdfFilename: `Order Confirmation - ${order.orderId}.pdf`,
     });
-  }
-
-  // Alternative to the text+image message above - sends the branded PDF
-  // (same template as Download PDF) as a WhatsApp document instead.
-  async function sendOrderPdfViaWhatsApp(order: CustomerOrder) {
-    if (sendingPdfId) return;
-    setSendingPdfId(order.id);
-    setNotice(null);
-    try {
-      const result = await api.post<{ sent: boolean; reason?: string }>(`/customer-orders/${order.id}/send-whatsapp`);
-      setNotice(
-        result.sent
-          ? `PDF sent to ${order.customerName} via WhatsApp.`
-          : `Could not send PDF: ${result.reason === 'no_customer_phone' ? 'no phone number on file for this customer.' : (result.reason ?? 'unknown error')}`,
-      );
-    } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : 'Failed to send PDF via WhatsApp');
-    } finally {
-      setSendingPdfId(null);
-    }
   }
 
   return (
@@ -459,7 +443,6 @@ function CustomerOrdersContent() {
                         { label: 'Payments', onClick: () => setPaymentsOrder(order) },
                         { label: 'Edit', onClick: () => openEdit(order) },
                         { label: 'Download PDF', onClick: () => downloadOrderPdf(order) },
-                        { label: 'Send PDF via WhatsApp', onClick: () => sendOrderPdfViaWhatsApp(order) },
                         {
                           label: 'Assign to Production',
                           onClick: () => setAssignTarget(order),
@@ -805,6 +788,8 @@ function CustomerOrdersContent() {
           defaultMessage={whatsappOptions.defaultMessage}
           defaultImageUrl={whatsappOptions.defaultImageUrl}
           defaultImageUrls={whatsappOptions.defaultImageUrls}
+          pdfUrl={whatsappOptions.pdfUrl}
+          pdfFilename={whatsappOptions.pdfFilename}
           onSuccess={() => mutate()}
         />
       )}

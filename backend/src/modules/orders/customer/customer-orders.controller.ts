@@ -110,7 +110,7 @@ export class CustomerOrdersController {
     const buffer = await this.service.generatePdf(id);
     const order = await this.service.findOne(id);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${order.orderId}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Order Confirmation - ${order.orderId}.pdf"`);
     res.send(buffer);
   }
 
