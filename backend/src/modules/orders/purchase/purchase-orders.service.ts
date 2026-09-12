@@ -168,7 +168,14 @@ export class PurchaseOrdersService {
     if (existing.status !== 'DRAFT' && existing.status !== 'REJECTED') {
       throw new BadRequestException('Only draft or rejected purchase orders can be deleted');
     }
-    await this.prisma.purchaseOrder.delete({ where: { id } });
+    // Explicit delete of items first, not relying on onDelete: Cascade -
+    // MySQL FK constraints aren't guaranteed to have actually been created
+    // by every historical `prisma db push` in this project (hit live as an
+    // orphaned PurchaseOrderItem after a plain purchaseOrder.delete()).
+    await this.prisma.$transaction([
+      this.prisma.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: id } }),
+      this.prisma.purchaseOrder.delete({ where: { id } }),
+    ]);
     return { success: true };
   }
 
