@@ -223,9 +223,14 @@ function CustomerOrdersContent() {
 
   async function handleDelete() {
     if (!deleteTarget) return;
-    await api.delete(`/customer-orders/${deleteTarget.id}`);
-    setDeleteTarget(null);
-    mutate();
+    try {
+      await api.delete(`/customer-orders/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      mutate();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to delete order');
+      setDeleteTarget(null);
+    }
   }
 
   async function refreshPaymentsOrder(id: string) {
