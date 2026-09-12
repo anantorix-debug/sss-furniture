@@ -15,13 +15,13 @@ export default function MaterialDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { hasRole } = useAuth();
-  // Stock In (recording a new purchase/receipt) is Admin+ only, matching
-  // the backend @Roles(ADMIN) on POST /raw-materials/stock-in. Issuing
-  // material against a work item stays open to Carpenter/Polisher - that's
-  // the flow that lets Super Admin see how much material each employee
-  // actually used. Stock Adjustment (damage/wastage correction) is also
-  // Admin-only.
-  const canStockIn = hasRole('ADMIN');
+  // Recording a purchase/receipt now happens on the Suppliers ledger, so
+  // stock and the supplier/financial record always stay in sync - this
+  // page only links there. Issuing material against a work item stays open
+  // to Carpenter/Polisher - that's the flow that lets Super Admin see how
+  // much material each employee actually used. Stock Adjustment (damage/
+  // wastage correction) is Admin-only.
+  const canRecordPurchase = hasRole('ADMIN');
   const canIssue = hasRole('ADMIN', 'CARPENTER', 'CARVER', 'POLISHER');
   const canAdjust = hasRole('ADMIN');
   const canSeeCost = hasRole('ADMIN');
@@ -32,28 +32,9 @@ export default function MaterialDetailPage() {
   const { data: workItems } = useSWR<CarpenterWorkItem[]>(canIssue ? '/carpenter-work-items' : null, fetcher);
   const openWorkItems = (workItems ?? []).filter((w) => w.status !== 'COMPLETED');
 
-  const [stockInForm, setStockInForm] = useState({ date: new Date().toISOString().slice(0, 10), quantity: '', unitCost: '', reason: '' });
   const [adjustForm, setAdjustForm] = useState({ date: new Date().toISOString().slice(0, 10), quantity: '', reason: '' });
   const [issueForm, setIssueForm] = useState({ date: new Date().toISOString().slice(0, 10), workItemId: '', quantity: '', reason: '' });
   const [error, setError] = useState<string | null>(null);
-
-  async function submitStockIn(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      await api.post('/raw-materials/stock-in', {
-        rawMaterialId: id,
-        date: stockInForm.date,
-        quantity: parseFloat(stockInForm.quantity),
-        unitCost: stockInForm.unitCost ? parseFloat(stockInForm.unitCost) : undefined,
-        reason: stockInForm.reason || undefined,
-      });
-      setStockInForm({ date: new Date().toISOString().slice(0, 10), quantity: '', unitCost: '', reason: '' });
-      mutate();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to record stock in');
-    }
-  }
 
   async function submitIssue(e: React.FormEvent) {
     e.preventDefault();
@@ -103,8 +84,11 @@ export default function MaterialDetailPage() {
         </p>
       </div>
 
-      <div className={`grid grid-cols-1 gap-4 ${canSeeCost ? 'sm:grid-cols-3' : ''}`}>
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${canSeeCost ? 'lg:grid-cols-6' : 'lg:grid-cols-4'}`}>
         <StatCard label="In Stock" value={`${material.inStock} ${material.unit}`} />
+        <StatCard label="Purchased" value={`${material.totalPurchased} ${material.unit}`} />
+        <StatCard label="Consumed" value={`${material.totalConsumed} ${material.unit}`} />
+        <StatCard label="Adjusted" value={`${material.totalAdjusted} ${material.unit}`} />
         {canSeeCost && (
           <>
             <StatCard label="Purchase Rate" value={formatCurrency(material.purchaseRate)} />
@@ -161,24 +145,18 @@ export default function MaterialDetailPage() {
         </div>
       </div>
 
-      {(canStockIn || canIssue || canAdjust) && (
+      {(canRecordPurchase || canIssue || canAdjust) && (
         <div className="grid lg:grid-cols-2 gap-6">
-          {canStockIn && (
+          {canRecordPurchase && (
             <div className="card p-5">
-              <h2 className="font-semibold text-brand-900 mb-3">Stock In (Purchase / Receipt)</h2>
-              <form onSubmit={submitStockIn} className="space-y-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input type="date" className="input" required value={stockInForm.date} onChange={(e) => setStockInForm((f) => ({ ...f, date: e.target.value }))} />
-                  <input type="number" step="0.01" className="input" placeholder={`Quantity (${material.unit})`} required value={stockInForm.quantity} onChange={(e) => setStockInForm((f) => ({ ...f, quantity: e.target.value }))} />
-                </div>
-                {canSeeCost && (
-                  <input type="number" step="0.01" className="input" placeholder="Unit cost / purchase rate" value={stockInForm.unitCost} onChange={(e) => setStockInForm((f) => ({ ...f, unitCost: e.target.value }))} />
-                )}
-                <input className="input" placeholder="Reason / reference (optional)" value={stockInForm.reason} onChange={(e) => setStockInForm((f) => ({ ...f, reason: e.target.value }))} />
-                <button type="submit" className="btn-primary w-full">
-                  Record Stock In
-                </button>
-              </form>
+              <h2 className="font-semibold text-brand-900 mb-3">Record a Purchase</h2>
+              <p className="text-xs text-brand-400 mb-3">
+                Purchases are recorded from the Suppliers ledger - supplier, price, and this material&apos;s stock update together in
+                one step.
+              </p>
+              <button className="btn-primary w-full" onClick={() => router.push(`/suppliers?materialId=${id}`)}>
+                Record a purchase for this material &rarr; Suppliers
+              </button>
             </div>
           )}
 

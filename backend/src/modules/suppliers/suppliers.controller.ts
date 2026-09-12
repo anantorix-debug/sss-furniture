@@ -55,8 +55,13 @@ export class SuppliersController {
 
   @Roles(Role.ADMIN)
   @Patch(':id/purchases/:purchaseId')
-  updatePurchase(@Param('id') id: string, @Param('purchaseId') purchaseId: string, @Body() dto: CreatePurchaseDto) {
-    return this.service.updatePurchase(id, purchaseId, dto);
+  updatePurchase(
+    @Param('id') id: string,
+    @Param('purchaseId') purchaseId: string,
+    @Body() dto: CreatePurchaseDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.updatePurchase(id, purchaseId, dto, user.userId);
   }
 
   @Roles(Role.ADMIN)

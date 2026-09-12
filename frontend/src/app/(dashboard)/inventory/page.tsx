@@ -18,7 +18,7 @@ import { assetUrl, uploadGalleryImage, validateProductImageFile } from '@/lib/ap
 import { GalleryGrid } from '@/components/GalleryGrid';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
-import type { GalleryImage, MaterialGroup, Product, ProductStockMovement, RawMaterial, StockMovement, WorkerType } from '@/types';
+import type { GalleryImage, MaterialGroup, MaterialMeasurementKind, Product, ProductStockMovement, RawMaterial, StockMovement, WorkerType } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
 type Tab = 'products' | 'materials' | 'movements' | 'stock-movements' | 'gallery';
@@ -60,13 +60,19 @@ const emptyBulkRow: BulkProductRow = {
   retailPrice: '',
 };
 
-const emptyMaterialForm = { name: '', type: '', unit: '', reorderLevel: '', materialGroup: 'WOOD' as MaterialGroup };
+const emptyMaterialForm = { name: '', type: '', unit: '', reorderLevel: '', materialGroup: 'WOOD' as MaterialGroup, measurementKind: 'OTHER' as MaterialMeasurementKind };
 
 const MATERIAL_GROUP_LABEL: Record<MaterialGroup, string> = {
   WOOD: 'Carpenter Team',
   CARVING: 'Carving Team',
   POLISH: 'Polish Team',
   OTHER: 'Other / Shared',
+};
+
+const LOCKED_MEASUREMENT_UNIT: Partial<Record<MaterialMeasurementKind, string>> = {
+  BOARD_FEET: 'Board Feet',
+  SHEET: 'Sheet',
+  COUNT: 'Nos',
 };
 
 const ALL_TABS: [Tab, string, boolean][] = [
@@ -811,9 +817,10 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
       await api.post('/raw-materials', {
         name: form.name,
         type: form.type || undefined,
-        unit: form.unit,
+        unit: form.measurementKind === 'OTHER' || form.measurementKind === 'LIQUID' ? form.unit : undefined,
         reorderLevel: form.reorderLevel ? parseFloat(form.reorderLevel) : undefined,
         materialGroup: form.materialGroup,
+        measurementKind: form.measurementKind,
       });
       setFormOpen(false);
       setForm(emptyMaterialForm);
@@ -874,8 +881,8 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
               <th>Type</th>
               <th>Team</th>
               <th>Unit</th>
-              <th>In Stock</th>
-              <th>Min</th>
+              <th>Current Stock</th>
+              <th>Minimum Stock</th>
               <th>Purchase Rate</th>
               <th>Stock Value</th>
               <th>Status</th>
@@ -943,9 +950,34 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
                 <input className="input" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))} placeholder="Plywood / Timber / Mica" />
               </div>
               <div>
-                <label className="label">Unit</label>
-                <UnitSelect id="material-unit" required value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} />
+                <label className="label">Measurement Type</label>
+                <select
+                  className="input"
+                  value={form.measurementKind}
+                  onChange={(e) => setForm((f) => ({ ...f, measurementKind: e.target.value as MaterialMeasurementKind, unit: '' }))}
+                >
+                  <option value="OTHER">Other (choose a unit below)</option>
+                  <option value="BOARD_FEET">Wood / Timber - Board Feet</option>
+                  <option value="SHEET">Plywood / Sheet material</option>
+                  <option value="LIQUID">Polish / Liquid</option>
+                  <option value="COUNT">Tools / Hardware - Nos</option>
+                </select>
               </div>
+            </div>
+            <div>
+              <label className="label">Unit</label>
+              {LOCKED_MEASUREMENT_UNIT[form.measurementKind] ? (
+                <div className="input bg-brand-50 text-brand-700">{LOCKED_MEASUREMENT_UNIT[form.measurementKind]}</div>
+              ) : form.measurementKind === 'LIQUID' ? (
+                <select className="input" required value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}>
+                  <option value="">Select unit...</option>
+                  <option value="Litre">Litre</option>
+                  <option value="Kg">Kg</option>
+                  <option value="Gram">Gram</option>
+                </select>
+              ) : (
+                <UnitSelect id="material-unit" required value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} />
+              )}
             </div>
             <div>
               <label className="label">Team (which employees can use this material)</label>

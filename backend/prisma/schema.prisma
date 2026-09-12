@@ -96,6 +96,20 @@ enum MaterialGroup {
   OTHER
 }
 
+// Which physical quantity a material is bought/sold in - separate from
+// MaterialGroup (which team uses it: e.g. Plywood is WOOD group but SHEET
+// kind). Drives which purchase-math fields the Suppliers "Add Purchase"
+// form shows and the material's locked unit. BOARD_FEET -> Thickness x
+// Width x Length x Pieces / 144; SHEET -> plain count; LIQUID -> Litre/Kg/
+// Gram; COUNT -> Nos; OTHER -> today's free-text UnitSelect, unchanged.
+enum MaterialMeasurementKind {
+  BOARD_FEET
+  SHEET
+  LIQUID
+  COUNT
+  OTHER
+}
+
 enum QcResult {
   PASSED
   FAILED
@@ -491,9 +505,28 @@ model SupplierPurchase {
   price       Decimal? @db.Decimal(12, 2)
   value       Decimal  @db.Decimal(12, 2)
 
+  // Optional link to the RawMaterial this purchase replenishes - null for a
+  // lump-sum non-material line (e.g. "RENT"). When set, a paired
+  // StockMovement (see StockMovement.supplierPurchaseId) keeps stock in
+  // sync automatically; qty/price/value above stay the one authoritative
+  // financial record either way.
+  rawMaterialId String?
+  rawMaterial   RawMaterial? @relation(fields: [rawMaterialId], references: [id], onDelete: SetNull)
+
+  // Original wood dimensions (inches) - populated only when rawMaterial's
+  // measurementKind is BOARD_FEET, kept purely so they stay visible/
+  // editable later. qty (=Total Board Feet) and price (=rate/BF) above are
+  // the authoritative, server-recomputed values - these four are not.
+  thicknessIn Decimal? @db.Decimal(8, 3)
+  widthIn     Decimal? @db.Decimal(8, 3)
+  lengthIn    Decimal? @db.Decimal(8, 3)
+  pieces      Int?
+
   createdById String
   createdBy   User     @relation(fields: [createdById], references: [id])
   createdAt   DateTime @default(now())
+
+  stockMovements StockMovement[]
 
   @@map("supplier_purchases")
 }
@@ -839,18 +872,23 @@ model ProductImage {
 // ---------------------------------------------------------------------------
 
 model RawMaterial {
-  id            String        @id @default(cuid())
-  name          String        @unique
-  type          String? // e.g. "Plywood", "Timber", "Mica", "Hardware", "Thinner", "Sealer"
-  materialGroup MaterialGroup @default(WOOD) // WOOD -> Carpenter team; POLISH -> Polish team
-  unit          String // e.g. "sheet", "cft", "kg", "nos"
-  reorderLevel  Decimal?      @db.Decimal(12, 2)
-  photoUrl      String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id              String                  @id @default(cuid())
+  name            String                  @unique
+  type            String? // e.g. "Plywood", "Timber", "Mica", "Hardware", "Thinner", "Sealer"
+  materialGroup   MaterialGroup           @default(WOOD) // WOOD -> Carpenter team; POLISH -> Polish team
+  // Locks the unit and drives dynamic purchase-math fields - see
+  // MaterialMeasurementKind. Defaults to OTHER so every existing row keeps
+  // behaving exactly as before (free-text unit) until explicitly set.
+  measurementKind MaterialMeasurementKind @default(OTHER)
+  unit            String // e.g. "sheet", "cft", "kg", "nos"
+  reorderLevel    Decimal?                @db.Decimal(12, 2)
+  photoUrl        String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
 
   stockMovements     StockMovement[]
   purchaseOrderItems PurchaseOrderItem[]
+  supplierPurchases  SupplierPurchase[]
 
   @@map("raw_materials")
 }
@@ -872,6 +910,13 @@ model StockMovement {
 
   purchaseOrderId String?
   purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  // Mirrors purchaseOrderId above - links a material-linked Suppliers
+  // purchase to its paired stock-in movement so edit/delete can find and
+  // reverse it. Null for movements from PO receive(), stock-in, issue, and
+  // adjustment.
+  supplierPurchaseId String?
+  supplierPurchase   SupplierPurchase? @relation(fields: [supplierPurchaseId], references: [id], onDelete: SetNull)
 
   date        DateTime
   createdById String

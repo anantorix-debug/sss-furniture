@@ -60,6 +60,15 @@ function CarpenterDetailContent() {
   const { data: carpenter, isLoading, mutate } = useSWR<CarpenterDetail>(`/carpenters/${id}`, fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
   const { data: materialsUsed } = useSWR<StockMovement[]>(`/stock-movements?type=OUT&carpenterId=${id}`, fetcher);
+  // Actual cost of material this worker consumed today, regardless of which
+  // order/project the work item belongs to - unitCost is the material's
+  // purchase rate snapshotted at the moment it was issued (see
+  // RawMaterialsService.issueToWorkItem), so this stays accurate even if
+  // the material's rate changes later from a new purchase.
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const materialCostToday = (materialsUsed ?? [])
+    .filter((m) => m.date.slice(0, 10) === todayStr)
+    .reduce((sum, m) => sum + Math.abs(m.quantity) * (m.unitCost ?? 0), 0);
   const {
     showModal,
     whatsappOptions,
@@ -239,10 +248,11 @@ Please confirm receipt.`,
       </div>
 
       {canEdit && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Total Work Value" value={formatCurrency(carpenter.totalWorkValue ?? 0)} />
           <StatCard label="Total Paid" value={formatCurrency(carpenter.totalPaid ?? 0)} accent="success" />
           <StatCard label="Balance Payable" value={formatCurrency(carpenter.balance ?? 0)} accent="warning" />
+          <StatCard label="Material Cost Today" value={formatCurrency(materialCostToday)} />
         </div>
       )}
 
@@ -367,6 +377,7 @@ Please confirm receipt.`,
                 <th>Date</th>
                 <th>Material</th>
                 <th>Qty</th>
+                {canEdit && <th>Cost</th>}
                 <th>Work Item</th>
                 <th>Reason</th>
               </tr>
@@ -374,7 +385,7 @@ Please confirm receipt.`,
             <tbody>
               {(!materialsUsed || materialsUsed.length === 0) && (
                 <tr>
-                  <td colSpan={5} className="text-center text-brand-400 py-4">
+                  <td colSpan={canEdit ? 6 : 5} className="text-center text-brand-400 py-4">
                     No materials issued yet
                   </td>
                 </tr>
@@ -386,6 +397,9 @@ Please confirm receipt.`,
                   <td className="text-red-600">
                     {m.quantity} {m.rawMaterial?.unit}
                   </td>
+                  {canEdit && (
+                    <td className="text-brand-700 font-medium">{m.unitCost != null ? formatCurrency(Math.abs(m.quantity) * m.unitCost) : '-'}</td>
+                  )}
                   <td className="text-brand-500">{m.workItem?.productName ?? '-'}</td>
                   <td className="text-brand-500">{m.reason ?? '-'}</td>
                 </tr>

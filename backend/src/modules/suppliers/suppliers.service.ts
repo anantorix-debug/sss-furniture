@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, SupplierPurchase } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
@@ -48,7 +48,10 @@ export class SuppliersService {
     const supplier = await this.prisma.supplier.findUnique({
       where: { id },
       include: {
-        purchases: { orderBy: { date: 'asc' } },
+        purchases: {
+          orderBy: { date: 'asc' },
+          include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } },
+        },
         payments: { orderBy: { date: 'asc' } },
       },
     });
@@ -110,46 +113,179 @@ export class SuppliersService {
     return fallback;
   }
 
+  // D x S x L / 144 per piece, x number of pieces - the standard board-foot
+  // formula for raw wood/timber, all dimensions in inches. Recomputed here
+  // (never trusts a client-sent total) so the formula is enforced
+  // consistently no matter which client called the API.
+  private resolveBoardFeet(d: { thicknessIn?: number; widthIn?: number; lengthIn?: number; pieces?: number }): number {
+    const { thicknessIn, widthIn, lengthIn, pieces } = d;
+    if (thicknessIn == null || widthIn == null || lengthIn == null || pieces == null) {
+      throw new BadRequestException('Thickness, width, length and number of pieces are all required for a board-feet material purchase');
+    }
+    if (thicknessIn <= 0 || widthIn <= 0 || lengthIn <= 0 || pieces <= 0) {
+      throw new BadRequestException('Thickness, width, length and pieces must be positive numbers');
+    }
+    return Math.round(((thicknessIn * widthIn * lengthIn) / 144) * pieces * 100) / 100;
+  }
+
+  // The one place addPurchase/updatePurchase resolve the linked RawMaterial
+  // (if any), lock the unit server-side, and compute qty/value - so a
+  // material link behaves identically whether the purchase is being
+  // created or edited. `existing` is passed on update so omitted fields
+  // fall back to what's already stored.
+  private async resolvePurchaseData(dto: Partial<CreatePurchaseDto>, existing?: SupplierPurchase) {
+    const rawMaterialId = dto.rawMaterialId !== undefined ? dto.rawMaterialId : (existing?.rawMaterialId ?? null);
+
+    let material: { id: string; unit: string; measurementKind: string } | null = null;
+    if (rawMaterialId) {
+      material = await this.prisma.rawMaterial.findUnique({
+        where: { id: rawMaterialId },
+        select: { id: true, unit: true, measurementKind: true },
+      });
+      if (!material) throw new NotFoundException('Raw material not found');
+    }
+
+    let qty = dto.qty ?? (existing?.qty != null ? Number(existing.qty) : undefined);
+    let unit = dto.unit ?? existing?.unit ?? undefined;
+    let thicknessIn = dto.thicknessIn ?? (existing?.thicknessIn != null ? Number(existing.thicknessIn) : undefined);
+    let widthIn = dto.widthIn ?? (existing?.widthIn != null ? Number(existing.widthIn) : undefined);
+    let lengthIn = dto.lengthIn ?? (existing?.lengthIn != null ? Number(existing.lengthIn) : undefined);
+    let pieces = dto.pieces ?? existing?.pieces ?? undefined;
+    const price = dto.price ?? (existing?.price != null ? Number(existing.price) : undefined);
+
+    if (material) {
+      // Client's unit is always ignored once linked - the material's own
+      // unit is the only source of truth, so StockMovement/RawMaterial
+      // units can never disagree.
+      unit = material.unit;
+      if (price == null) throw new BadRequestException('Price/Rate is required when linking a purchase to a raw material');
+
+      if (material.measurementKind === 'BOARD_FEET') {
+        qty = this.resolveBoardFeet({ thicknessIn, widthIn, lengthIn, pieces });
+      } else {
+        if (qty == null) throw new BadRequestException('Quantity is required when linking a purchase to a raw material');
+        thicknessIn = undefined;
+        widthIn = undefined;
+        lengthIn = undefined;
+        pieces = undefined;
+      }
+    } else {
+      thicknessIn = undefined;
+      widthIn = undefined;
+      lengthIn = undefined;
+      pieces = undefined;
+    }
+
+    const value = this.computeValue(qty, price, dto.value ?? (existing ? Number(existing.value) : undefined));
+    return { rawMaterialId, qty, unit, price, value, thicknessIn, widthIn, lengthIn, pieces };
+  }
+
   async addPurchase(supplierId: string, dto: CreatePurchaseDto, userId: string) {
-    await this.findOne(supplierId);
-    await this.prisma.supplierPurchase.create({
-      data: {
-        supplierId,
-        date: new Date(dto.date),
-        particulars: dto.particulars,
-        qty: dto.qty,
-        unit: dto.unit,
-        price: dto.price,
-        value: this.computeValue(dto.qty, dto.price, dto.value),
-        createdById: userId,
-      },
+    const supplier = await this.findOne(supplierId);
+    const r = await this.resolvePurchaseData(dto);
+
+    await this.prisma.$transaction(async (tx) => {
+      const created = await tx.supplierPurchase.create({
+        data: {
+          supplierId,
+          date: new Date(dto.date),
+          particulars: dto.particulars,
+          qty: r.qty,
+          unit: r.unit,
+          price: r.price,
+          value: r.value,
+          rawMaterialId: r.rawMaterialId,
+          thicknessIn: r.thicknessIn,
+          widthIn: r.widthIn,
+          lengthIn: r.lengthIn,
+          pieces: r.pieces,
+          createdById: userId,
+        },
+      });
+
+      if (r.rawMaterialId) {
+        await tx.stockMovement.create({
+          data: {
+            rawMaterialId: r.rawMaterialId,
+            type: 'IN',
+            quantity: r.qty!,
+            unitCost: r.price,
+            reason: `Purchase from ${supplier.name}`,
+            supplierPurchaseId: created.id,
+            date: new Date(dto.date),
+            createdById: userId,
+          },
+        });
+      }
     });
+
     return this.findOne(supplierId);
   }
 
-  async updatePurchase(supplierId: string, purchaseId: string, dto: Partial<CreatePurchaseDto>) {
+  async updatePurchase(supplierId: string, purchaseId: string, dto: Partial<CreatePurchaseDto>, userId: string) {
     const purchase = await this.prisma.supplierPurchase.findUnique({ where: { id: purchaseId } });
     if (!purchase || purchase.supplierId !== supplierId) throw new NotFoundException('Purchase entry not found');
-    const qty = dto.qty ?? (purchase.qty != null ? Number(purchase.qty) : undefined);
-    const price = dto.price ?? (purchase.price != null ? Number(purchase.price) : undefined);
-    await this.prisma.supplierPurchase.update({
-      where: { id: purchaseId },
-      data: {
-        date: dto.date ? new Date(dto.date) : undefined,
-        particulars: dto.particulars,
-        qty: dto.qty,
-        unit: dto.unit,
-        price: dto.price,
-        value: this.computeValue(qty, price, dto.value ?? Number(purchase.value)),
-      },
+    const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId }, select: { name: true } });
+    if (!supplier) throw new NotFoundException('Supplier not found');
+
+    const r = await this.resolvePurchaseData(dto, purchase);
+    const date = dto.date ? new Date(dto.date) : purchase.date;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Delete-and-recreate the linked movement rather than diffing fields -
+      // simplest correct approach, and handles "material added/changed/
+      // removed on edit" in one code path via resolvePurchaseData above.
+      await tx.stockMovement.deleteMany({ where: { supplierPurchaseId: purchaseId } });
+
+      await tx.supplierPurchase.update({
+        where: { id: purchaseId },
+        data: {
+          date,
+          particulars: dto.particulars,
+          qty: r.qty,
+          unit: r.unit,
+          price: r.price,
+          value: r.value,
+          rawMaterialId: r.rawMaterialId,
+          thicknessIn: r.thicknessIn,
+          widthIn: r.widthIn,
+          lengthIn: r.lengthIn,
+          pieces: r.pieces,
+        },
+      });
+
+      if (r.rawMaterialId) {
+        await tx.stockMovement.create({
+          data: {
+            rawMaterialId: r.rawMaterialId,
+            type: 'IN',
+            quantity: r.qty!,
+            unitCost: r.price,
+            reason: `Purchase from ${supplier.name}`,
+            supplierPurchaseId: purchaseId,
+            date,
+            createdById: userId,
+          },
+        });
+      }
     });
+
     return this.findOne(supplierId);
   }
 
   async removePurchase(supplierId: string, purchaseId: string) {
     const purchase = await this.prisma.supplierPurchase.findUnique({ where: { id: purchaseId } });
     if (!purchase || purchase.supplierId !== supplierId) throw new NotFoundException('Purchase entry not found');
-    await this.prisma.supplierPurchase.delete({ where: { id: purchaseId } });
+
+    // Explicit delete of the linked movement first, not relying on
+    // onDelete: SetNull/cascade - see the identical convention on
+    // remove() above (MySQL FK constraints aren't guaranteed present from
+    // every historical `prisma db push`).
+    await this.prisma.$transaction(async (tx) => {
+      await tx.stockMovement.deleteMany({ where: { supplierPurchaseId: purchaseId } });
+      await tx.supplierPurchase.delete({ where: { id: purchaseId } });
+    });
+
     return this.findOne(supplierId);
   }
 

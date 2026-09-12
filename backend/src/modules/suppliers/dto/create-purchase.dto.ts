@@ -1,4 +1,4 @@
-import { IsDateString, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsInt, IsNumber, IsDateString, IsOptional, IsString, Min, MinLength, ValidateIf } from 'class-validator';
 
 export class CreatePurchaseDto {
   @IsDateString()
@@ -28,4 +28,36 @@ export class CreatePurchaseDto {
   @Min(0)
   @IsOptional()
   value?: number;
+
+  // Optional link to a RawMaterial - when set, a paired StockMovement keeps
+  // stock in sync (see SuppliersService.resolvePurchaseData). Send explicit
+  // null on an edit to unlink a material from a purchase (same "explicit
+  // null to clear" pattern as Carpenter.teamId/userId elsewhere).
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @IsOptional()
+  rawMaterialId?: string | null;
+
+  // Wood dimensions (inches) - required together only when the linked
+  // material's measurementKind is BOARD_FEET; enforced in the service since
+  // that depends on a DB-looked-up value, not expressible as a DTO rule.
+  @IsNumber()
+  @Min(0.001)
+  @IsOptional()
+  thicknessIn?: number;
+
+  @IsNumber()
+  @Min(0.001)
+  @IsOptional()
+  widthIn?: number;
+
+  @IsNumber()
+  @Min(0.001)
+  @IsOptional()
+  lengthIn?: number;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  pieces?: number;
 }

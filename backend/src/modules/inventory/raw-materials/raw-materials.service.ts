@@ -42,12 +42,18 @@ export class RawMaterialsService {
   ) {}
 
   private summarize(material: { stockMovements: { quantity: any; unitCost: any; type: string; date: Date }[] }) {
+    const byType = (t: string) => sumAmounts(material.stockMovements.filter((m) => m.type === t).map((m) => ({ amount: m.quantity })));
     const inStock = sumAmounts(material.stockMovements.map((m) => ({ amount: m.quantity })));
+    // OUT movements are stored as negative quantities - Math.abs turns
+    // "consumed" into a plain positive amount for display.
+    const totalPurchased = byType('IN');
+    const totalConsumed = Math.abs(byType('OUT'));
+    const totalAdjusted = byType('ADJUSTMENT');
     const lastCostMovement = [...material.stockMovements]
       .filter((m) => m.unitCost != null)
       .sort((a, b) => b.date.getTime() - a.date.getTime())[0];
     const purchaseRate = lastCostMovement ? Number(lastCostMovement.unitCost) : 0;
-    return { inStock, purchaseRate, stockValue: inStock * purchaseRate };
+    return { inStock, purchaseRate, stockValue: inStock * purchaseRate, totalPurchased, totalConsumed, totalAdjusted };
   }
 
   // Opt-in pagination, applied in JS rather than at the DB level: isLow is
@@ -69,9 +75,9 @@ export class RawMaterialsService {
 
     const summarized = materials.map((m) => {
       const { stockMovements, ...rest } = m;
-      const { inStock, purchaseRate, stockValue } = this.summarize(m);
-      const isLow = m.reorderLevel != null && inStock < Number(m.reorderLevel);
-      return stripFinancials({ ...rest, inStock, purchaseRate, stockValue, isLow }, params.viewerRole);
+      const summary = this.summarize(m);
+      const isLow = m.reorderLevel != null && summary.inStock < Number(m.reorderLevel);
+      return stripFinancials({ ...rest, ...summary, isLow }, params.viewerRole);
     });
 
     const filtered = params.lowStockOnly ? summarized.filter((m) => (m as any).isLow) : summarized;
@@ -99,24 +105,64 @@ export class RawMaterialsService {
     });
     if (!material) throw new NotFoundException('Raw material not found');
 
-    const { inStock, purchaseRate, stockValue } = this.summarize(material);
+    const summary = this.summarize(material);
     const stockMovements = material.stockMovements.map((m) => stripFinancials(m, viewerRole));
-    return stripFinancials({ ...material, stockMovements, inStock, purchaseRate, stockValue }, viewerRole);
+    return stripFinancials({ ...material, stockMovements, ...summary }, viewerRole);
+  }
+
+  // Locks the unit for every measurementKind except OTHER, so a material's
+  // unit and the physical quantity it's actually bought/sold in (and every
+  // paired StockMovement/SupplierPurchase) can never disagree.
+  private resolveUnit(measurementKind: string, requestedUnit?: string): string {
+    const LOCKED: Partial<Record<string, string>> = { BOARD_FEET: 'Board Feet', SHEET: 'Sheet', COUNT: 'Nos' };
+    if (LOCKED[measurementKind]) return LOCKED[measurementKind]!;
+    if (measurementKind === 'LIQUID') {
+      const LIQUID_UNITS = ['Litre', 'Kg', 'Gram'];
+      if (!requestedUnit || !LIQUID_UNITS.includes(requestedUnit)) {
+        throw new BadRequestException('Choose Litre, Kg or Gram for a liquid/polish material');
+      }
+      return requestedUnit;
+    }
+    if (!requestedUnit) throw new BadRequestException('Unit is required');
+    return requestedUnit;
   }
 
   async create(dto: CreateRawMaterialDto) {
     const existing = await this.prisma.rawMaterial.findUnique({ where: { name: dto.name } });
     if (existing) throw new ConflictException('A raw material with this name already exists');
-    return this.prisma.rawMaterial.create({ data: dto });
+    const measurementKind = dto.measurementKind ?? 'OTHER';
+    return this.prisma.rawMaterial.create({
+      data: { ...dto, measurementKind, unit: this.resolveUnit(measurementKind, dto.unit) },
+    });
   }
 
   async update(id: string, dto: UpdateRawMaterialDto) {
-    await this.findOne(id);
-    return this.prisma.rawMaterial.update({ where: { id }, data: dto });
+    const existing = await this.findOne(id);
+    const measurementKind = dto.measurementKind ?? (existing.measurementKind as unknown as string);
+    const unit =
+      dto.measurementKind !== undefined || dto.unit !== undefined ? this.resolveUnit(measurementKind, dto.unit ?? existing.unit) : undefined;
+    return this.prisma.rawMaterial.update({ where: { id }, data: { ...dto, measurementKind: measurementKind as any, unit } });
   }
 
   async remove(id: string) {
     await this.findOne(id);
+    // Same defensive check as SuppliersService.remove() - don't rely on the
+    // schema's onDelete behavior alone (MySQL FK constraints aren't
+    // guaranteed to have actually been created by every `prisma db push`
+    // in this project's history). Without this, deleting a material with
+    // real stock/purchase history orphans those rows' rawMaterialId,
+    // which then breaks any query that includes the (required) rawMaterial
+    // relation on StockMovement.
+    const [movementCount, purchaseOrderItemCount, supplierPurchaseCount] = await Promise.all([
+      this.prisma.stockMovement.count({ where: { rawMaterialId: id } }),
+      this.prisma.purchaseOrderItem.count({ where: { rawMaterialId: id } }),
+      this.prisma.supplierPurchase.count({ where: { rawMaterialId: id } }),
+    ]);
+    if (movementCount > 0 || purchaseOrderItemCount > 0 || supplierPurchaseCount > 0) {
+      throw new ConflictException(
+        'This material has stock movement or purchase history and cannot be deleted. Remove those entries first if you really need to delete it.',
+      );
+    }
     await this.prisma.rawMaterial.delete({ where: { id } });
     return { success: true };
   }
@@ -174,22 +220,26 @@ export class RawMaterialsService {
       dto.items.map(async (item) => {
         const material = await this.prisma.rawMaterial.findUnique({
           where: { id: item.rawMaterialId },
-          include: { stockMovements: { select: { quantity: true } } },
+          include: { stockMovements: { select: { quantity: true, unitCost: true, type: true, date: true } } },
         });
         if (!material) throw new NotFoundException(`Raw material ${item.rawMaterialId} not found`);
-        const inStock = sumAmounts(material.stockMovements.map((m) => ({ amount: m.quantity })));
+        const { inStock, purchaseRate } = this.summarize(material);
         if (inStock < item.quantity) {
           throw new ConflictException(`Not enough ${material.name} in stock - available ${inStock} ${material.unit}, requested ${item.quantity}.`);
         }
-        return { material, requested: item.quantity };
+        return { material, requested: item.quantity, purchaseRate };
       }),
     );
 
     await this.prisma.stockMovement.createMany({
-      data: dto.items.map((item) => ({
+      data: dto.items.map((item, idx) => ({
         rawMaterialId: item.rawMaterialId,
         type: 'OUT' as const,
         quantity: -Math.abs(item.quantity),
+        // Snapshot the material's purchase rate at the moment of issue, so
+        // "actual material cost" per employee/day stays accurate even if
+        // future purchases change the rate.
+        unitCost: materials[idx].purchaseRate || undefined,
         reason: dto.reason ?? 'Issued to production',
         workItemId: dto.workItemId,
         date: new Date(dto.date),

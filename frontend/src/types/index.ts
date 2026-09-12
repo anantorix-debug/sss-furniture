@@ -183,6 +183,12 @@ export interface SupplierPurchase {
   unit?: string | null;
   price?: number | null;
   value: number;
+  rawMaterialId?: string | null;
+  rawMaterial?: { id: string; name: string; unit: string; measurementKind: MaterialMeasurementKind } | null;
+  thicknessIn?: number | null;
+  widthIn?: number | null;
+  lengthIn?: number | null;
+  pieces?: number | null;
 }
 
 export interface SupplierPayment {
@@ -450,17 +456,28 @@ export interface ProductStockMovement {
 
 export type MaterialGroup = 'WOOD' | 'CARVING' | 'POLISH' | 'OTHER';
 
+// Which physical quantity a material is bought/sold in - separate from
+// MaterialGroup (which team uses it). Drives the Suppliers "Add Purchase"
+// form's dynamic fields and the material's locked unit.
+export type MaterialMeasurementKind = 'BOARD_FEET' | 'SHEET' | 'LIQUID' | 'COUNT' | 'OTHER';
+
 export interface RawMaterial {
   id: string;
   name: string;
   type?: string | null;
   unit: string;
   materialGroup: MaterialGroup;
+  measurementKind: MaterialMeasurementKind;
   reorderLevel?: number | null;
   inStock: number;
   purchaseRate: number;
   stockValue: number;
   isLow: boolean;
+  // Physical-quantity breakdown - not financial data, visible to everyone
+  // who can see inStock.
+  totalPurchased: number;
+  totalConsumed: number;
+  totalAdjusted: number;
 }
 
 export interface StockMovement {

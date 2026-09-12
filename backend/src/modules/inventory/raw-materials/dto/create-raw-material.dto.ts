@@ -7,6 +7,14 @@ export enum MaterialGroupDto {
   OTHER = 'OTHER',
 }
 
+export enum MaterialMeasurementKindDto {
+  BOARD_FEET = 'BOARD_FEET',
+  SHEET = 'SHEET',
+  LIQUID = 'LIQUID',
+  COUNT = 'COUNT',
+  OTHER = 'OTHER',
+}
+
 export class CreateRawMaterialDto {
   @IsString()
   @MinLength(1)
@@ -16,9 +24,11 @@ export class CreateRawMaterialDto {
   @IsOptional()
   type?: string;
 
+  // Optional at the DTO level - locked/derived server-side for every
+  // measurementKind except OTHER (see RawMaterialsService.resolveUnit).
   @IsString()
-  @MinLength(1)
-  unit: string;
+  @IsOptional()
+  unit?: string;
 
   @IsNumber()
   @Min(0)
@@ -31,4 +41,11 @@ export class CreateRawMaterialDto {
   @IsEnum(MaterialGroupDto)
   @IsOptional()
   materialGroup?: MaterialGroupDto;
+
+  // Which physical quantity this material is bought/sold in - drives the
+  // locked unit and which purchase-math fields the Suppliers "Add
+  // Purchase" form shows. Defaults to OTHER (today's free-text unit).
+  @IsEnum(MaterialMeasurementKindDto)
+  @IsOptional()
+  measurementKind?: MaterialMeasurementKindDto;
 }
