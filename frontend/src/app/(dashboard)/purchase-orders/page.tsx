@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
@@ -12,6 +13,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
+import { ReceivePurchaseOrderModal } from '@/components/ReceivePurchaseOrderModal';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { PURCHASE_ORDER_STATUS_LABEL } from '@/types';
@@ -24,6 +26,7 @@ const STATUS_CHIP: Record<PurchaseOrderStatus, ChipColor> = {
   REJECTED: 'red',
   APPROVED: 'blue',
   SENT_TO_SHOP: 'amber',
+  PARTIALLY_RECEIVED: 'amber',
   RECEIVED: 'green',
   CANCELLED: 'red',
 };
@@ -32,12 +35,30 @@ interface ItemRow {
   rawMaterialId: string;
   quantity: string;
   unitPrice: string;
+  thicknessIn: string;
+  widthIn: string;
+  lengthIn: string;
+  pieces: string;
 }
 
-const emptyRow: ItemRow = { rawMaterialId: '', quantity: '', unitPrice: '' };
+const emptyRow: ItemRow = { rawMaterialId: '', quantity: '', unitPrice: '', thicknessIn: '', widthIn: '', lengthIn: '', pieces: '' };
+
+// D x S x L / 144 per piece, x pieces - client-side preview only (the
+// server recomputes and enforces this same formula authoritatively).
+function boardFeetPreview(thicknessIn: string, widthIn: string, lengthIn: string, pieces: string) {
+  const t = parseFloat(thicknessIn);
+  const w = parseFloat(widthIn);
+  const l = parseFloat(lengthIn);
+  const p = parseFloat(pieces);
+  if (!t || !w || !l || !p) return null;
+  const perPiece = Math.round(((t * w * l) / 144) * 100) / 100;
+  const total = Math.round(perPiece * p * 100) / 100;
+  return { perPiece, total };
+}
 
 function PurchaseOrdersContent() {
   const { hasRole } = useAuth();
+  const searchParams = useSearchParams();
   const [page, setPage] = useState(1);
   const { data: result, isLoading, mutate } = useSWR<PaginatedResult<PurchaseOrder>>(
     `/purchase-orders?${new URLSearchParams({ page: String(page), limit: '20' })}`,
@@ -65,8 +86,22 @@ function PurchaseOrdersContent() {
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PurchaseOrder | null>(null);
+  const [receiveTarget, setReceiveTarget] = useState<PurchaseOrder | null>(null);
 
-  const materialUnit = (id: string) => materials?.find((m) => m.id === id)?.unit ?? '';
+  const materialOf = (id: string) => materials?.find((m) => m.id === id);
+  const materialUnit = (id: string) => materialOf(id)?.unit ?? '';
+
+  // Deep-linked from a raw material's "Record a Purchase" button - opens
+  // the New PO form with that material pre-selected on the first line (the
+  // supplier is still left for the admin to pick, since a PO always starts
+  // with one supplier).
+  const materialIdParam = searchParams.get('materialId');
+  const [handledMaterialParam, setHandledMaterialParam] = useState(false);
+  if (materialIdParam && !handledMaterialParam && materials) {
+    setHandledMaterialParam(true);
+    setItems([{ ...emptyRow, rawMaterialId: materialIdParam }]);
+    setFormOpen(true);
+  }
 
   function addItemRow() {
     setItems((rows) => [...rows, { ...emptyRow }]);
@@ -99,9 +134,23 @@ function PurchaseOrdersContent() {
     setOrderDate(po.orderDate.slice(0, 10));
     setExpectedDate(po.expectedDate ? po.expectedDate.slice(0, 10) : '');
     setNotes(po.notes ?? '');
-    setItems(po.items.map((i) => ({ rawMaterialId: i.rawMaterialId, quantity: String(i.quantity), unitPrice: String(i.unitPrice) })));
+    setItems(
+      po.items.map((i) => ({
+        rawMaterialId: i.rawMaterialId,
+        quantity: String(i.quantity),
+        unitPrice: String(i.unitPrice),
+        thicknessIn: i.thicknessIn != null ? String(i.thicknessIn) : '',
+        widthIn: i.widthIn != null ? String(i.widthIn) : '',
+        lengthIn: i.lengthIn != null ? String(i.lengthIn) : '',
+        pieces: i.pieces != null ? String(i.pieces) : '',
+      })),
+    );
     setError(null);
     setFormOpen(true);
+  }
+
+  function rowIsBoardFeet(row: ItemRow) {
+    return materialOf(row.rawMaterialId)?.measurementKind === 'BOARD_FEET';
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -115,8 +164,22 @@ function PurchaseOrdersContent() {
         expectedDate: expectedDate || undefined,
         notes: notes || undefined,
         items: items
-          .filter((i) => i.rawMaterialId && i.quantity && i.unitPrice)
-          .map((i) => ({ rawMaterialId: i.rawMaterialId, quantity: parseFloat(i.quantity), unitPrice: parseFloat(i.unitPrice) })),
+          .filter((i) => i.rawMaterialId && i.unitPrice && (rowIsBoardFeet(i) ? i.thicknessIn && i.widthIn && i.lengthIn && i.pieces : i.quantity))
+          .map((i) => {
+            if (rowIsBoardFeet(i)) {
+              const bf = boardFeetPreview(i.thicknessIn, i.widthIn, i.lengthIn, i.pieces);
+              return {
+                rawMaterialId: i.rawMaterialId,
+                quantity: bf?.total ?? 0.01, // server recomputes/overrides this for BOARD_FEET lines anyway
+                unitPrice: parseFloat(i.unitPrice),
+                thicknessIn: parseFloat(i.thicknessIn),
+                widthIn: parseFloat(i.widthIn),
+                lengthIn: parseFloat(i.lengthIn),
+                pieces: parseInt(i.pieces, 10),
+              };
+            }
+            return { rawMaterialId: i.rawMaterialId, quantity: parseFloat(i.quantity), unitPrice: parseFloat(i.unitPrice) };
+          }),
       };
       if (editing) {
         await api.patch(`/purchase-orders/${editing.id}`, payload);
@@ -140,7 +203,7 @@ function PurchaseOrdersContent() {
     mutate();
   }
 
-  type ConfirmActionKind = 'submit' | 'approve' | 'sendToShop' | 'receive' | 'cancel';
+  type ConfirmActionKind = 'submit' | 'approve' | 'sendToShop' | 'cancel';
   const [confirmAction, setConfirmAction] = useState<{ po: PurchaseOrder; action: ConfirmActionKind } | null>(null);
   const [rejectTarget, setRejectTarget] = useState<PurchaseOrder | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -150,7 +213,6 @@ function PurchaseOrdersContent() {
     submit: 'submit',
     approve: 'approve',
     sendToShop: 'send-to-shop',
-    receive: 'receive',
     cancel: 'cancel',
   };
 
@@ -187,7 +249,14 @@ function PurchaseOrdersContent() {
     }
   }
 
-  const lineTotal = (row: ItemRow) => (parseFloat(row.quantity) || 0) * (parseFloat(row.unitPrice) || 0);
+  const lineTotal = (row: ItemRow) => {
+    const price = parseFloat(row.unitPrice) || 0;
+    if (rowIsBoardFeet(row)) {
+      const bf = boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthIn, row.pieces);
+      return (bf?.total ?? 0) * price;
+    }
+    return (parseFloat(row.quantity) || 0) * price;
+  };
   const formTotal = items.reduce((s, r) => s + lineTotal(r), 0);
 
   function handleSendWhatsApp(po: PurchaseOrder) {
@@ -295,10 +364,10 @@ function PurchaseOrdersContent() {
                       Send to Shop
                     </button>
                   )}
-                  {po.status === 'SENT_TO_SHOP' && (
+                  {(po.status === 'APPROVED' || po.status === 'SENT_TO_SHOP' || po.status === 'PARTIALLY_RECEIVED') && (
                     <button
                       className="btn-primary h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-700"
-                      onClick={() => setConfirmAction({ po, action: 'receive' })}
+                      onClick={() => setReceiveTarget(po)}
                     >
                       Receive
                     </button>
@@ -347,44 +416,69 @@ function PurchaseOrdersContent() {
             </div>
 
             <div>
-              <div className="grid grid-cols-2 sm:grid-cols-[1fr_90px_60px_110px_100px_auto] gap-2 text-[11px] font-medium text-ink-muted px-0.5 hidden sm:grid">
-                <span>Material</span>
-                <span>Qty</span>
-                <span>Unit</span>
-                <span>Unit Price</span>
-                <span>Line Total</span>
-                <span></span>
-              </div>
-              <label className="label sm:hidden">Items</label>
-              <div className="space-y-2">
-                {items.map((row, idx) => (
-                  <div key={idx} className="grid grid-cols-2 sm:grid-cols-[1fr_90px_60px_110px_100px_auto] gap-2 sm:items-center">
-                    <select
-                      className="input col-span-2 sm:col-span-1"
-                      required
-                      value={row.rawMaterialId}
-                      onChange={(e) => updateItemRow(idx, { rawMaterialId: e.target.value })}
-                    >
-                      <option value="">Select material</option>
-                      {materials?.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name} ({m.unit})
-                        </option>
-                      ))}
-                    </select>
-                    <input type="number" step="0.01" className="input" placeholder="Qty" required value={row.quantity} onChange={(e) => updateItemRow(idx, { quantity: e.target.value })} />
-                    <div className="input flex items-center bg-brand-50 text-ink-muted text-xs justify-center">{materialUnit(row.rawMaterialId) || '-'}</div>
-                    <input type="number" step="0.01" className="input" placeholder="Unit Price" required value={row.unitPrice} onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })} />
-                    <div className="input flex items-center justify-end font-medium text-ink bg-brand-50">{formatCurrency(lineTotal(row))}</div>
-                    <button type="button" className="text-red-500 text-xs" onClick={() => removeItemRow(idx)} disabled={items.length === 1}>
-                      Remove
-                    </button>
-                  </div>
-                ))}
+              <label className="label">Items</label>
+              <div className="space-y-2 max-h-[45vh] overflow-y-auto">
+                {items.map((row, idx) => {
+                  const isBoardFeet = rowIsBoardFeet(row);
+                  const bf = isBoardFeet ? boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthIn, row.pieces) : null;
+                  return (
+                    <div key={idx} className="border border-brand-100 rounded-lg p-3 space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-start">
+                        <select
+                          className="input"
+                          required
+                          value={row.rawMaterialId}
+                          onChange={(e) => updateItemRow(idx, { rawMaterialId: e.target.value, quantity: '', thicknessIn: '', widthIn: '', lengthIn: '', pieces: '' })}
+                        >
+                          <option value="">Select material</option>
+                          {materials?.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({m.unit})
+                            </option>
+                          ))}
+                        </select>
+                        <button type="button" className="text-red-500 text-xs px-2 py-2" onClick={() => removeItemRow(idx)} disabled={items.length === 1}>
+                          Remove
+                        </button>
+                      </div>
+
+                      {isBoardFeet ? (
+                        <>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <input type="number" step="0.01" className="input text-sm" placeholder="Thickness (in)" required value={row.thicknessIn} onChange={(e) => updateItemRow(idx, { thicknessIn: e.target.value })} />
+                            <input type="number" step="0.01" className="input text-sm" placeholder="Width (in)" required value={row.widthIn} onChange={(e) => updateItemRow(idx, { widthIn: e.target.value })} />
+                            <input type="number" step="0.01" className="input text-sm" placeholder="Length (in)" required value={row.lengthIn} onChange={(e) => updateItemRow(idx, { lengthIn: e.target.value })} />
+                            <input type="number" min="1" className="input text-sm" placeholder="Pieces" required value={row.pieces} onChange={(e) => updateItemRow(idx, { pieces: e.target.value })} />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input type="number" step="0.01" className="input text-sm" placeholder="Rate per Board Foot" required value={row.unitPrice} onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })} />
+                            <div className="input text-xs bg-brand-50 text-brand-700 flex flex-col justify-center leading-tight py-1">
+                              {bf ? (
+                                <>
+                                  <span>{bf.perPiece} BF/pc &times; {row.pieces} = <strong>{bf.total} BF</strong></span>
+                                  <span className="font-semibold">{formatCurrency(lineTotal(row))}</span>
+                                </>
+                              ) : (
+                                <span className="text-brand-400">Enter dimensions</span>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <input type="number" step="0.01" className="input text-sm" placeholder="Qty" required value={row.quantity} onChange={(e) => updateItemRow(idx, { quantity: e.target.value })} />
+                          <div className="input text-sm flex items-center bg-brand-50 text-ink-muted justify-center">{materialUnit(row.rawMaterialId) || '-'}</div>
+                          <input type="number" step="0.01" className="input text-sm" placeholder="Unit Price" required value={row.unitPrice} onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })} />
+                          <div className="input text-sm flex items-center justify-end font-medium text-ink bg-brand-50">{formatCurrency(lineTotal(row))}</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex items-center justify-between mt-2">
                 <button type="button" className="text-brand-600 text-xs hover:underline" onClick={addItemRow}>
-                  + Add line item
+                  + Add Material
                 </button>
                 <p className="text-sm font-semibold text-brand-900">Total: {formatCurrency(formTotal)}</p>
               </div>
@@ -416,7 +510,6 @@ function PurchaseOrdersContent() {
               submit: 'Submit for Approval',
               approve: 'Approve Purchase Order',
               sendToShop: 'Send to Shop',
-              receive: 'Receive Purchase Order',
               cancel: 'Cancel Purchase Order',
             }[confirmAction.action]
           }
@@ -427,16 +520,13 @@ function PurchaseOrdersContent() {
                 ? `Approve ${confirmAction.po.poNumber}? It can then be sent to ${confirmAction.po.supplier?.name}.`
                 : confirmAction.action === 'sendToShop'
                   ? `Send ${confirmAction.po.poNumber} to ${confirmAction.po.supplier?.name}? This notifies them on WhatsApp and lets it be received into stock.`
-                  : confirmAction.action === 'receive'
-                    ? `Receive ${confirmAction.po.poNumber}? This adds ${confirmAction.po.items.length} item(s) to raw material stock and books ${formatCurrency(confirmAction.po.totalValue)} against ${confirmAction.po.supplier?.name}'s payment ledger. This cannot be undone.`
-                    : `Cancel ${confirmAction.po.poNumber}? This cannot be undone.`
+                  : `Cancel ${confirmAction.po.poNumber}? This cannot be undone.`
           }
           confirmLabel={
             {
               submit: 'Submit',
               approve: 'Approve',
               sendToShop: 'Send to Shop',
-              receive: 'Receive',
               cancel: 'Cancel Order',
             }[confirmAction.action]
           }
@@ -492,6 +582,17 @@ function PurchaseOrdersContent() {
           }}
           defaultMessage={whatsappOptions.defaultMessage}
           onSuccess={() => mutate()}
+        />
+      )}
+
+      {receiveTarget && (
+        <ReceivePurchaseOrderModal
+          po={receiveTarget}
+          onClose={() => setReceiveTarget(null)}
+          onReceived={() => {
+            setReceiveTarget(null);
+            mutate();
+          }}
         />
       )}
     </div>

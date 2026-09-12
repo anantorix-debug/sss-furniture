@@ -1,13 +1,22 @@
 export type Role = 'SUPERADMIN' | 'ADMIN' | 'CARPENTER' | 'CARVER' | 'POLISHER';
 export type DeliveryStatus = 'PENDING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'DELIVERY_FAILED' | 'CANCELLED';
 export type WorkStatus = 'ASSIGNED' | 'IN_PROGRESS' | 'QUALITY_CHECK' | 'REWORK' | 'COMPLETED';
-export type PurchaseOrderStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'REJECTED' | 'APPROVED' | 'SENT_TO_SHOP' | 'RECEIVED' | 'CANCELLED';
+export type PurchaseOrderStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'REJECTED'
+  | 'APPROVED'
+  | 'SENT_TO_SHOP'
+  | 'PARTIALLY_RECEIVED'
+  | 'RECEIVED'
+  | 'CANCELLED';
 export const PURCHASE_ORDER_STATUS_LABEL: Record<PurchaseOrderStatus, string> = {
   DRAFT: 'Draft',
   PENDING_APPROVAL: 'Pending Approval',
   REJECTED: 'Rejected',
   APPROVED: 'Approved',
   SENT_TO_SHOP: 'Sent to Shop',
+  PARTIALLY_RECEIVED: 'Partially Received',
   RECEIVED: 'Received',
   CANCELLED: 'Cancelled',
 };
@@ -505,9 +514,24 @@ export interface RawMaterialDetail extends RawMaterial {
 export interface PurchaseOrderItem {
   id: string;
   rawMaterialId: string;
-  rawMaterial?: { id: string; name: string; unit: string };
+  rawMaterial?: { id: string; name: string; unit: string; measurementKind?: MaterialMeasurementKind };
+  // Ordered amount - for a BOARD_FEET material this is the server-computed
+  // Total Board Feet, not whatever was typed in.
   quantity: number;
   unitPrice: number;
+  // Running total received so far across every receive() event.
+  // quantity - receivedQuantity = remaining still owed.
+  receivedQuantity: number;
+  thicknessIn?: number | null;
+  widthIn?: number | null;
+  lengthIn?: number | null;
+  pieces?: number | null;
+}
+
+export interface PurchaseReceivingEvent {
+  date: string;
+  receivedBy?: string;
+  items: { rawMaterial: { id: string; name: string; unit: string }; quantity: number }[];
 }
 
 export interface PurchaseOrder {
@@ -523,6 +547,7 @@ export interface PurchaseOrder {
   sentToShopAt?: string | null;
   items: PurchaseOrderItem[];
   totalValue: number;
+  receivingHistory: PurchaseReceivingEvent[];
   createdBy?: { name: string };
   approvedBy?: { name: string } | null;
   createdAt: string;

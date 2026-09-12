@@ -4,6 +4,7 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { RejectPurchaseOrderDto } from './dto/reject-purchase-order.dto';
+import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -74,8 +75,8 @@ export class PurchaseOrdersController {
   }
 
   @Post(':id/receive')
-  receive(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.receive(id, user.userId);
+  receive(@Param('id') id: string, @Body() dto: ReceivePurchaseOrderDto, @CurrentUser() user: AuthUser) {
+    return this.service.receive(id, dto, user.userId);
   }
 
   @Post(':id/cancel')

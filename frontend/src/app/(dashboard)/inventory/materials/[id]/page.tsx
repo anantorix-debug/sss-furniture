@@ -151,11 +151,11 @@ export default function MaterialDetailPage() {
             <div className="card p-5">
               <h2 className="font-semibold text-brand-900 mb-3">Record a Purchase</h2>
               <p className="text-xs text-brand-400 mb-3">
-                Purchases are recorded from the Suppliers ledger - supplier, price, and this material&apos;s stock update together in
-                one step.
+                Purchases are recorded from a Purchase Order - supplier, price, and this material&apos;s stock update together once
+                it&apos;s received.
               </p>
-              <button className="btn-primary w-full" onClick={() => router.push(`/suppliers?materialId=${id}`)}>
-                Record a purchase for this material &rarr; Suppliers
+              <button className="btn-primary w-full" onClick={() => router.push(`/purchase-orders?materialId=${id}`)}>
+                Record a purchase for this material &rarr; Purchase Orders
               </button>
             </div>
           )}

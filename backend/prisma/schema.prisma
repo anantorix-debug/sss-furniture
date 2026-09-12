@@ -53,6 +53,7 @@ enum PurchaseOrderStatus {
   REJECTED
   APPROVED
   SENT_TO_SHOP
+  PARTIALLY_RECEIVED
   RECEIVED
   CANCELLED
 }
@@ -911,6 +912,13 @@ model StockMovement {
   purchaseOrderId String?
   purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
 
+  // Groups every StockMovement created by one PurchaseOrdersService.receive()
+  // call - since a PO can be received in multiple partial deliveries, this
+  // reconstructs "receiving history" as discrete events (date/who/which
+  // lines/how much) without a separate model. Null for movements from any
+  // other path (stock-in, issue, adjustment).
+  receiptBatchId String?
+
   // Mirrors purchaseOrderId above - links a material-linked Suppliers
   // purchase to its paired stock-in movement so edit/delete can find and
   // reverse it. Null for movements from PO receive(), stock-in, issue, and
@@ -964,8 +972,23 @@ model PurchaseOrderItem {
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   rawMaterialId   String
   rawMaterial     RawMaterial   @relation(fields: [rawMaterialId], references: [id])
+  // Ordered amount - never mutated after create/edit. For a BOARD_FEET
+  // material this is the server-computed Total Board Feet, not whatever
+  // the client sent (see PurchaseOrdersService).
   quantity        Decimal       @db.Decimal(12, 2)
   unitPrice       Decimal       @db.Decimal(12, 2)
+  // Running total received so far across every receive() event - lets a PO
+  // be received in multiple partial deliveries. quantity - receivedQuantity
+  // = remaining still owed.
+  receivedQuantity Decimal      @default(0) @db.Decimal(12, 2)
+
+  // Original wood dimensions (inches) - populated only when rawMaterial's
+  // measurementKind is BOARD_FEET, kept purely so they stay visible/
+  // editable later, same pattern as SupplierPurchase's identical fields.
+  thicknessIn Decimal? @db.Decimal(8, 3)
+  widthIn     Decimal? @db.Decimal(8, 3)
+  lengthIn    Decimal? @db.Decimal(8, 3)
+  pieces      Int?
 
   @@map("purchase_order_items")
 }

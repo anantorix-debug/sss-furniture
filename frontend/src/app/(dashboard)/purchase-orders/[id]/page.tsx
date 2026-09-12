@@ -15,6 +15,7 @@ import { formatCurrency, formatDate } from '@/lib/format';
 import { PURCHASE_ORDER_STATUS_LABEL } from '@/types';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
+import { ReceivePurchaseOrderModal } from '@/components/ReceivePurchaseOrderModal';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import type { PurchaseOrder, PurchaseOrderStatus } from '@/types';
 
@@ -24,6 +25,7 @@ const STATUS_CHIP: Record<PurchaseOrderStatus, ChipColor> = {
   REJECTED: 'red',
   APPROVED: 'blue',
   SENT_TO_SHOP: 'amber',
+  PARTIALLY_RECEIVED: 'amber',
   RECEIVED: 'green',
   CANCELLED: 'red',
 };
@@ -32,7 +34,6 @@ const ACTION_ENDPOINT = {
   submit: 'submit',
   approve: 'approve',
   sendToShop: 'send-to-shop',
-  receive: 'receive',
   cancel: 'cancel',
 } as const;
 
@@ -48,6 +49,7 @@ function PurchaseOrderDetailContent() {
   const [acting, setActing] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [receiveOpen, setReceiveOpen] = useState(false);
   const {
     showModal,
     whatsappOptions,
@@ -123,8 +125,9 @@ Expected by: ${formatDate(po.expectedDate)}`,
 
   const cancelled = po.status === 'CANCELLED';
   const rejected = po.status === 'REJECTED';
-  const pastApproval = po.status === 'APPROVED' || po.status === 'SENT_TO_SHOP' || po.status === 'RECEIVED';
-  const pastSendToShop = po.status === 'SENT_TO_SHOP' || po.status === 'RECEIVED';
+  const pastApproval = po.status === 'APPROVED' || po.status === 'SENT_TO_SHOP' || po.status === 'PARTIALLY_RECEIVED' || po.status === 'RECEIVED';
+  const pastSendToShop = po.status === 'SENT_TO_SHOP' || po.status === 'PARTIALLY_RECEIVED' || po.status === 'RECEIVED';
+  const canReceive = po.status === 'APPROVED' || po.status === 'SENT_TO_SHOP' || po.status === 'PARTIALLY_RECEIVED';
   const blocked = cancelled || rejected;
   const steps: FlowStep[] = [
     { key: 'raised', label: 'Raised by Admin', sub: po.createdBy?.name, state: 'done' },
@@ -147,8 +150,8 @@ Expected by: ${formatDate(po.expectedDate)}`,
     },
     {
       key: 'received',
-      label: 'Received into Stock',
-      state: blocked ? 'blocked' : po.status === 'RECEIVED' ? 'done' : pastSendToShop ? 'current' : 'upcoming',
+      label: po.status === 'PARTIALLY_RECEIVED' ? 'Partially Received' : 'Received into Stock',
+      state: blocked ? 'blocked' : po.status === 'RECEIVED' ? 'done' : canReceive ? 'current' : 'upcoming',
     },
   ];
 
@@ -220,8 +223,8 @@ Expected by: ${formatDate(po.expectedDate)}`,
             Send to Shop
           </button>
         )}
-        {po.status === 'SENT_TO_SHOP' && (
-          <button className="btn-primary bg-emerald-600 hover:bg-emerald-700" disabled={acting} onClick={() => runAction('receive')}>
+        {canReceive && (
+          <button className="btn-primary bg-emerald-600 hover:bg-emerald-700" disabled={acting} onClick={() => setReceiveOpen(true)}>
             Receive into Stock
           </button>
         )}
@@ -276,26 +279,44 @@ Expected by: ${formatDate(po.expectedDate)}`,
           <thead>
             <tr>
               <th>Material</th>
-              <th>Qty</th>
-              <th>Unit</th>
+              <th>Ordered</th>
+              <th>Received</th>
+              <th>Remaining</th>
               <th>Unit Price</th>
               <th>Line Total</th>
             </tr>
           </thead>
           <tbody>
-            {po.items.map((item) => (
-              <tr key={item.id}>
-                <td className="font-medium">{item.rawMaterial?.name}</td>
-                <td>{item.quantity}</td>
-                <td>{item.rawMaterial?.unit ?? '-'}</td>
-                <td>{formatCurrency(item.unitPrice)}</td>
-                <td className="font-medium">{formatCurrency(item.quantity * item.unitPrice)}</td>
-              </tr>
-            ))}
+            {po.items.map((item) => {
+              const remaining = Math.max(0, item.quantity - item.receivedQuantity);
+              return (
+                <tr key={item.id}>
+                  <td className="font-medium">
+                    {item.rawMaterial?.name}
+                    {item.pieces != null && (
+                      <span className="block text-[11px] text-brand-400">
+                        {item.thicknessIn}&quot; &times; {item.widthIn}&quot; &times; {item.lengthIn}&quot;, {item.pieces} pcs
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {item.quantity} {item.rawMaterial?.unit}
+                  </td>
+                  <td className="text-brand-500">
+                    {item.receivedQuantity} {item.rawMaterial?.unit}
+                  </td>
+                  <td className={remaining === 0 ? 'text-emerald-600' : 'text-amber-700'}>
+                    {remaining} {item.rawMaterial?.unit}
+                  </td>
+                  <td>{formatCurrency(item.unitPrice)}</td>
+                  <td className="font-medium">{formatCurrency(item.quantity * item.unitPrice)}</td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={4} className="text-right font-semibold text-ink">
+              <td colSpan={5} className="text-right font-semibold text-ink">
                 Total
               </td>
               <td className="font-semibold text-ink">{formatCurrency(po.totalValue)}</td>
@@ -303,6 +324,29 @@ Expected by: ${formatDate(po.expectedDate)}`,
           </tfoot>
         </table>
       </div>
+
+      {po.receivingHistory.length > 0 && (
+        <div className="card p-5">
+          <h2 className="font-semibold text-brand-900 mb-3">Receiving History</h2>
+          <div className="space-y-3">
+            {po.receivingHistory.map((event, idx) => (
+              <div key={idx} className="border border-brand-100 rounded-lg p-3">
+                <p className="text-xs text-brand-500 mb-1">
+                  {formatDate(event.date)}
+                  {event.receivedBy && ` · Received by ${event.receivedBy}`}
+                </p>
+                <ul className="text-sm text-ink space-y-0.5">
+                  {event.items.map((i, itemIdx) => (
+                    <li key={itemIdx}>
+                      {i.rawMaterial.name}: <span className="font-medium">{i.quantity} {i.rawMaterial.unit}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {po.notes && (
         <div className="card p-5">
@@ -320,6 +364,17 @@ Expected by: ${formatDate(po.expectedDate)}`,
           }}
           defaultMessage={whatsappOptions.defaultMessage}
           onSuccess={() => mutate()}
+        />
+      )}
+
+      {receiveOpen && (
+        <ReceivePurchaseOrderModal
+          po={po}
+          onClose={() => setReceiveOpen(false)}
+          onReceived={() => {
+            setReceiveOpen(false);
+            mutate();
+          }}
         />
       )}
     </div>

@@ -2,7 +2,6 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
-import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -48,27 +47,10 @@ export class SuppliersController {
     return this.service.remove(id);
   }
 
-  @Post(':id/purchases')
-  addPurchase(@Param('id') id: string, @Body() dto: CreatePurchaseDto, @CurrentUser() user: AuthUser) {
-    return this.service.addPurchase(id, dto, user.userId);
-  }
-
-  @Roles(Role.ADMIN)
-  @Patch(':id/purchases/:purchaseId')
-  updatePurchase(
-    @Param('id') id: string,
-    @Param('purchaseId') purchaseId: string,
-    @Body() dto: CreatePurchaseDto,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.service.updatePurchase(id, purchaseId, dto, user.userId);
-  }
-
-  @Roles(Role.ADMIN)
-  @Delete(':id/purchases/:purchaseId')
-  removePurchase(@Param('id') id: string, @Param('purchaseId') purchaseId: string) {
-    return this.service.removePurchase(id, purchaseId);
-  }
+  // No purchase-mutation routes here by design - every supplier purchase
+  // must go through Purchase Orders (create -> approve -> receive), which
+  // is what creates SupplierPurchase rows now. See
+  // PurchaseOrdersController for the actual purchasing flow.
 
   @Roles(Role.ADMIN)
   @Post(':id/payments')

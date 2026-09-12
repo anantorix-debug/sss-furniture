@@ -1,11 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { PdfService } from '../../pdf/pdf.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { RejectPurchaseOrderDto } from './dto/reject-purchase-order.dto';
+import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
+import { computeBoardFeet } from '../../../common/utils/board-feet.util';
 
 function generatePoNumber(): string {
   return `PO-${Date.now().toString(36).toUpperCase()}`;
@@ -26,6 +29,39 @@ export class PurchaseOrdersService {
   private withTotal<T extends { items: { quantity: any; unitPrice: any }[] }>(po: T) {
     const totalValue = po.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
     return { ...po, totalValue };
+  }
+
+  // Resolves each line's RawMaterial (one batch query, not N) and, for a
+  // BOARD_FEET material, overrides the stored quantity with the server-
+  // computed Total Board Feet from the four dimension fields - the client's
+  // quantity is never trusted for those lines. Shared by create/update so a
+  // PO's items always mean the same thing regardless of which call built them.
+  private async resolveItemsInput(items: CreatePurchaseOrderDto['items']) {
+    const materials = await this.prisma.rawMaterial.findMany({
+      where: { id: { in: items.map((i) => i.rawMaterialId) } },
+      select: { id: true, measurementKind: true },
+    });
+    const byId = new Map(materials.map((m) => [m.id, m]));
+
+    return items.map((item) => {
+      const material = byId.get(item.rawMaterialId);
+      if (!material) throw new NotFoundException(`Raw material ${item.rawMaterialId} not found`);
+
+      const isBoardFeet = material.measurementKind === 'BOARD_FEET';
+      const quantity = isBoardFeet
+        ? computeBoardFeet({ thicknessIn: item.thicknessIn, widthIn: item.widthIn, lengthIn: item.lengthIn, pieces: item.pieces })
+        : item.quantity;
+
+      return {
+        rawMaterialId: item.rawMaterialId,
+        quantity,
+        unitPrice: item.unitPrice,
+        thicknessIn: isBoardFeet ? item.thicknessIn : undefined,
+        widthIn: isBoardFeet ? item.widthIn : undefined,
+        lengthIn: isBoardFeet ? item.lengthIn : undefined,
+        pieces: isBoardFeet ? item.pieces : undefined,
+      };
+    });
   }
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
@@ -55,13 +91,34 @@ export class PurchaseOrdersService {
         supplier: true,
         createdBy: { select: { name: true } },
         approvedBy: { select: { name: true } },
+        stockMovements: {
+          where: { receiptBatchId: { not: null } },
+          include: { rawMaterial: { select: { id: true, name: true, unit: true } }, createdBy: { select: { name: true } } },
+          orderBy: { date: 'asc' },
+        },
       },
     });
     if (!po) throw new NotFoundException('Purchase order not found');
-    return this.withTotal(po);
+
+    // Reconstructs "receiving history" as discrete events by grouping this
+    // PO's stock movements by the batch id one receive() call shares across
+    // every movement it creates - no separate model needed for this.
+    const batches = new Map<string, { date: Date; receivedBy?: string; items: { rawMaterial: { id: string; name: string; unit: string }; quantity: number }[] }>();
+    for (const m of po.stockMovements) {
+      if (!m.receiptBatchId) continue;
+      if (!batches.has(m.receiptBatchId)) {
+        batches.set(m.receiptBatchId, { date: m.date, receivedBy: m.createdBy?.name, items: [] });
+      }
+      batches.get(m.receiptBatchId)!.items.push({ rawMaterial: m.rawMaterial, quantity: Number(m.quantity) });
+    }
+    const receivingHistory = [...batches.values()].sort((a, b) => a.date.getTime() - b.date.getTime());
+    const { stockMovements, ...rest } = po;
+
+    return this.withTotal({ ...rest, receivingHistory });
   }
 
   async create(dto: CreatePurchaseOrderDto, userId: string) {
+    const items = await this.resolveItemsInput(dto.items);
     const po = await this.prisma.purchaseOrder.create({
       data: {
         poNumber: generatePoNumber(),
@@ -70,7 +127,7 @@ export class PurchaseOrdersService {
         expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : undefined,
         notes: dto.notes,
         createdById: userId,
-        items: { create: dto.items.map((i) => ({ rawMaterialId: i.rawMaterialId, quantity: i.quantity, unitPrice: i.unitPrice })) },
+        items: { create: items },
       },
       include: { items: true },
     });
@@ -86,6 +143,7 @@ export class PurchaseOrdersService {
     if (dto.items) {
       await this.prisma.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: id } });
     }
+    const items = dto.items ? await this.resolveItemsInput(dto.items) : undefined;
 
     const po = await this.prisma.purchaseOrder.update({
       where: { id },
@@ -98,9 +156,7 @@ export class PurchaseOrdersService {
         // the approval gate again rather than silently staying REJECTED.
         status: existing.status === 'REJECTED' ? 'DRAFT' : undefined,
         rejectionReason: existing.status === 'REJECTED' ? null : undefined,
-        items: dto.items
-          ? { create: dto.items.map((i) => ({ rawMaterialId: i.rawMaterialId, quantity: i.quantity, unitPrice: i.unitPrice })) }
-          : undefined,
+        items: items ? { create: items } : undefined,
       },
       include: { items: true },
     });
@@ -201,46 +257,79 @@ export class PurchaseOrdersService {
   }
 
   /**
-   * Receiving books it against inventory and finance in one step: a stock
-   * IN movement per line item, plus a single SupplierPurchase ledger entry
-   * for the total value (keeping the existing supplier payment ledger as
-   * the one financial source of truth). Allowed from SENT_TO_SHOP (the
-   * normal path) or APPROVED (grandfathers orders approved before the
-   * send-to-shop step existed / lets stock be received without a supplier
-   * phone number to notify).
+   * Receiving books it against inventory and finance in one step, and
+   * supports partial deliveries: a receiving event names exactly which
+   * lines and how much of each (dto.items), so a PO can be received across
+   * several calls before every line is fully in. Allowed from APPROVED,
+   * SENT_TO_SHOP, or PARTIALLY_RECEIVED (a second/third partial receive
+   * must stay reachable) - not from RECEIVED (nothing left to receive) or
+   * any earlier/terminal status.
    */
-  async receive(id: string, userId: string) {
+  async receive(id: string, dto: ReceivePurchaseOrderDto, userId: string) {
     const po = await this.findOne(id);
-    if (po.status !== 'SENT_TO_SHOP' && po.status !== 'APPROVED') {
-      throw new BadRequestException('Only an approved or sent-to-shop purchase order can be received');
+    if (!['APPROVED', 'SENT_TO_SHOP', 'PARTIALLY_RECEIVED'].includes(po.status)) {
+      throw new BadRequestException(`Cannot receive a purchase order with status ${po.status}`);
     }
+
+    const itemsById = new Map(po.items.map((i) => [i.id, i]));
+    const resolved = dto.items.map((entry) => {
+      const item = itemsById.get(entry.purchaseOrderItemId);
+      if (!item) throw new NotFoundException(`Purchase order item ${entry.purchaseOrderItemId} not found on this PO`);
+      const remaining = Number(item.quantity) - Number(item.receivedQuantity);
+      if (entry.receivedQuantity > remaining) {
+        throw new ConflictException(
+          `Cannot receive ${entry.receivedQuantity} ${item.rawMaterial.unit} of ${item.rawMaterial.name} - only ${remaining} ${item.rawMaterial.unit} remaining on this PO.`,
+        );
+      }
+      return { item, receivedQuantity: entry.receivedQuantity };
+    });
+
+    const receiptBatchId = randomUUID();
+    const now = new Date();
 
     await this.prisma.$transaction(async (tx) => {
       await tx.stockMovement.createMany({
-        data: po.items.map((item) => ({
+        data: resolved.map(({ item, receivedQuantity }) => ({
           rawMaterialId: item.rawMaterialId,
           type: 'IN' as const,
-          quantity: item.quantity,
+          quantity: receivedQuantity,
           unitCost: item.unitPrice,
           reason: `Received from PO ${po.poNumber}`,
           purchaseOrderId: po.id,
-          date: new Date(),
+          receiptBatchId,
+          date: now,
           createdById: userId,
         })),
       });
 
-      const particulars = po.items.map((i) => i.rawMaterial.name).join(', ');
+      for (const { item, receivedQuantity } of resolved) {
+        await tx.purchaseOrderItem.update({
+          where: { id: item.id },
+          data: { receivedQuantity: { increment: receivedQuantity } },
+        });
+      }
+
+      const eventValue = resolved.reduce((sum, { item, receivedQuantity }) => sum + receivedQuantity * Number(item.unitPrice), 0);
+      const particulars = resolved.map(({ item, receivedQuantity }) => `${item.rawMaterial.name} (${receivedQuantity} ${item.rawMaterial.unit})`).join(', ');
       await tx.supplierPurchase.create({
         data: {
           supplierId: po.supplierId,
-          date: new Date(),
-          particulars: `PO ${po.poNumber}: ${particulars}`,
-          value: po.totalValue,
+          date: now,
+          particulars: `PO ${po.poNumber} receipt: ${particulars}`,
+          value: eventValue,
           createdById: userId,
         },
       });
 
-      await tx.purchaseOrder.update({ where: { id }, data: { status: 'RECEIVED' } });
+      // Recompute status from the post-update items, not just this event's
+      // lines - a fully-received PO needs every line done, including ones
+      // untouched by this particular receive() call.
+      const updatedItems = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: id } });
+      const fullyReceived = updatedItems.every((i) => Number(i.receivedQuantity) >= Number(i.quantity));
+      await tx.purchaseOrder.update({
+        where: { id },
+        data: { status: fullyReceived ? 'RECEIVED' : 'PARTIALLY_RECEIVED' },
+      });
     });
 
     return this.findOne(id);

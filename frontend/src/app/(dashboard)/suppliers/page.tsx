@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -14,18 +13,12 @@ import { BalanceBadge } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
 import { downloadCsv } from '@/lib/csv';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
-import type { SupplierSummary, RawMaterial } from '@/types';
+import type { SupplierSummary } from '@/types';
 
 const emptySupplierForm = { name: '', phone: '', address: '' };
 
 function SuppliersContent() {
   const { hasRole } = useAuth();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  // Deep-linked from a raw material's "Record a Purchase" button - pick (or
-  // create) a supplier below to continue recording a purchase for it.
-  const materialId = searchParams.get('materialId');
-  const { data: linkedMaterial } = useSWR<RawMaterial>(materialId ? `/raw-materials/${materialId}` : null, fetcher);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const { data: result, isLoading, mutate } = useSWR<PaginatedResult<SupplierSummary>>(
@@ -68,15 +61,11 @@ function SuppliersContent() {
       const payload = { name: form.name, phone: form.phone || undefined, address: form.address || undefined };
       if (editing) {
         await api.patch(`/suppliers/${editing.id}`, payload);
-        setFormOpen(false);
-        mutate();
       } else {
-        const created = await api.post<SupplierSummary>('/suppliers', payload);
-        setFormOpen(false);
-        // Creating a supplier on the fly shouldn't lose the pre-selected
-        // material - carry it straight through to the new supplier's page.
-        router.push(materialId ? `/suppliers/${created.id}?materialId=${materialId}` : `/suppliers/${created.id}`);
+        await api.post('/suppliers', payload);
       }
+      setFormOpen(false);
+      mutate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save supplier');
     } finally {
@@ -133,18 +122,6 @@ function SuppliersContent() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {materialId && (
-        <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
-          <span>
-            Recording a purchase for <strong>{linkedMaterial?.name ?? '...'}</strong> - pick a supplier below, or create one, to
-            continue.
-          </span>
-          <button className="text-amber-700 hover:underline text-xs shrink-0" onClick={() => router.push('/suppliers')}>
-            Cancel
-          </button>
-        </div>
-      )}
-
       <input
         className="input max-w-xs"
         placeholder="Search supplier name..."
@@ -155,11 +132,7 @@ function SuppliersContent() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {isLoading && <p className="text-brand-400 text-sm">Loading suppliers...</p>}
         {data?.map((s) => (
-          <Link
-            key={s.id}
-            href={materialId ? `/suppliers/${s.id}?materialId=${materialId}` : `/suppliers/${s.id}`}
-            className="card p-5 hover:shadow-md transition-shadow block"
-          >
+          <Link key={s.id} href={`/suppliers/${s.id}`} className="card p-5 hover:shadow-md transition-shadow block">
             <div className="flex items-start justify-between">
               <div>
                 <p className="font-semibold text-brand-900">{s.name}</p>
