@@ -173,6 +173,7 @@ model User {
   expensesUpdated              Expense[]              @relation("ExpenseUpdatedBy")
   expenseAuditLogs             ExpenseAuditLog[]
   whatsappGroupSettingsUpdated WhatsappGroupSetting[]
+  productionTeamsHeaded        ProductionTeam[]       @relation("ProductionTeamHead")
 
   customerOrdersAssigned        CustomerOrder[]        @relation("CustomerOrderAssignedEmployee")
   customerOrdersAssignedBy      CustomerOrder[]        @relation("CustomerOrderAssignedBy")
@@ -559,7 +560,8 @@ model Carpenter {
 model ProductionTeam {
   id         String     @id @default(cuid())
   name       String
-  headName   String?
+  headUserId String?
+  headUser   User?      @relation("ProductionTeamHead", fields: [headUserId], references: [id], onDelete: SetNull)
   workerType WorkerType
   groupId    String?
   groupName  String?

@@ -181,7 +181,10 @@ export class CarpenterService {
   async findAllTeams(params: { workerType?: string } = {}) {
     return this.prisma.productionTeam.findMany({
       where: { workerType: params.workerType as any },
-      include: { workers: { select: { id: true, name: true } } },
+      include: {
+        workers: { select: { id: true, name: true } },
+        headUser: { select: { id: true, name: true, role: true } },
+      },
       orderBy: [{ workerType: 'asc' }, { name: 'asc' }],
     });
   }
@@ -189,7 +192,10 @@ export class CarpenterService {
   async findOneTeam(id: string) {
     const team = await this.prisma.productionTeam.findUnique({
       where: { id },
-      include: { workers: { select: { id: true, name: true, phone: true } } },
+      include: {
+        workers: { select: { id: true, name: true, phone: true } },
+        headUser: { select: { id: true, name: true, role: true } },
+      },
     });
     if (!team) throw new NotFoundException('Team not found');
     return team;
@@ -198,7 +204,10 @@ export class CarpenterService {
   async createTeam(dto: CreateProductionTeamDto) {
     const existing = await this.prisma.productionTeam.findFirst({ where: { name: dto.name, workerType: dto.workerType } });
     if (existing) throw new ConflictException(`A ${dto.workerType} team named "${dto.name}" already exists`);
-    return this.prisma.productionTeam.create({ data: dto });
+    return this.prisma.productionTeam.create({
+      data: dto,
+      include: { headUser: { select: { id: true, name: true, role: true } } },
+    });
   }
 
   async updateTeam(id: string, dto: UpdateProductionTeamDto) {
@@ -209,7 +218,11 @@ export class CarpenterService {
       });
       if (clash) throw new ConflictException(`A ${dto.workerType ?? existing.workerType} team named "${dto.name ?? existing.name}" already exists`);
     }
-    return this.prisma.productionTeam.update({ where: { id }, data: dto });
+    return this.prisma.productionTeam.update({
+      where: { id },
+      data: dto,
+      include: { headUser: { select: { id: true, name: true, role: true } } },
+    });
   }
 
   async removeTeam(id: string) {

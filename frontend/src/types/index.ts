@@ -251,7 +251,8 @@ export interface CarpenterSummary {
 export interface ProductionTeam {
   id: string;
   name: string;
-  headName?: string | null;
+  headUserId?: string | null;
+  headUser?: { id: string; name: string; role: string } | null;
   workerType: WorkerType;
   groupId?: string | null;
   groupName?: string | null;
