@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
 
 export enum WorkerTypeDto {
   CARPENTER = 'CARPENTER',
@@ -34,4 +34,11 @@ export class CreateCarpenterDto {
   @IsString()
   @IsOptional()
   teamId?: string | null;
+
+  // Deactivate/reactivate a worker - the alternative to deletion when they
+  // have real work item/payment history (see removeCarpenter). Not part of
+  // the create form; only ever sent via update.
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }

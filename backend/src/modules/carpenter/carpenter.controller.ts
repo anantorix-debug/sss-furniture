@@ -25,12 +25,14 @@ export class CarpenterController {
   @Get('carpenters')
   findAllCarpenters(
     @Query('workerType') workerType?: string,
+    @Query('includeInactive') includeInactive?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
   ) {
     return this.service.findAllCarpenters({
       workerType,
+      includeInactive: includeInactive === 'true',
       viewerRole: user?.role as Role,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,

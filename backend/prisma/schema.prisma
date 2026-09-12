@@ -525,6 +525,11 @@ model Carpenter {
   name       String     @unique
   phone      String?
   workerType WorkerType @default(CARPENTER)
+  // Deactivated workers are hidden from the active worker list and can't
+  // be assigned new work, but every past CarpenterWorkItem/CarpenterPayment
+  // stays intact - the alternative to deleting someone who has real
+  // history (deletion itself stays blocked for those, see removeCarpenter).
+  isActive   Boolean    @default(true)
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 

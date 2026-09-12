@@ -45,8 +45,14 @@ export default function CarpentersPage() {
   // orders of their own), so it must not show for them just because
   // hasRole() always returns true for Super Admin.
   const isProductionEmployee = user?.role === 'CARPENTER' || user?.role === 'CARVER' || user?.role === 'POLISHER';
+  const [showInactive, setShowInactive] = useState(false);
   const { data: result, isLoading, mutate } = useSWR<PaginatedResult<CarpenterSummary>>(
-    `/carpenters?${new URLSearchParams({ ...(tab ? { workerType: tab } : {}), page: String(page), limit: '20' })}`,
+    `/carpenters?${new URLSearchParams({
+      ...(tab ? { workerType: tab } : {}),
+      ...(showInactive ? { includeInactive: 'true' } : {}),
+      page: String(page),
+      limit: '20',
+    })}`,
     fetcher,
   );
   const data = result?.data;
@@ -60,6 +66,10 @@ export default function CarpentersPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CarpenterSummary | null>(null);
+  // Set once a delete attempt comes back 409 (real work item/payment
+  // history) - switches the confirm dialog to offer Deactivate instead of
+  // just failing with a raw error message.
+  const [deleteConflict, setDeleteConflict] = useState(false);
   const { data: loginUsers } = useSWR<User[]>(formOpen && hasRole('SUPERADMIN') ? '/users' : null, fetcher);
   const productionLogins = (loginUsers ?? []).filter((u) => u.role === 'CARPENTER' || u.role === 'CARVER' || u.role === 'POLISHER');
   const { data: teams, mutate: mutateTeams } = useSWR<ProductionTeam[]>(formOpen ? `/production-teams?workerType=${form.workerType}` : null, fetcher);
@@ -177,10 +187,42 @@ export default function CarpentersPage() {
     try {
       await api.delete(`/carpenters/${deleteTarget.id}`);
       setDeleteTarget(null);
+      setDeleteConflict(false);
       mutate();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete worker');
+      if (err instanceof ApiError && err.status === 409) {
+        // Real work item/payment history - offer Deactivate instead of a
+        // dead end, without closing the dialog.
+        setDeleteConflict(true);
+      } else {
+        setError(err instanceof ApiError ? err.message : 'Failed to delete worker');
+        setDeleteTarget(null);
+      }
+    }
+  }
+
+  async function handleDeactivateWorker() {
+    if (!deleteTarget) return;
+    setError(null);
+    try {
+      await api.patch(`/carpenters/${deleteTarget.id}`, { isActive: false });
       setDeleteTarget(null);
+      setDeleteConflict(false);
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to deactivate worker');
+      setDeleteTarget(null);
+      setDeleteConflict(false);
+    }
+  }
+
+  async function handleReactivateWorker(w: CarpenterSummary) {
+    setError(null);
+    try {
+      await api.patch(`/carpenters/${w.id}`, { isActive: true });
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to reactivate worker');
     }
   }
 
@@ -208,18 +250,33 @@ export default function CarpentersPage() {
         <MyAssignedOrders />
       ) : (
         <>
-      <div className="flex gap-1 border-b border-brand-200">
-        {TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => updateTab(t.value)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.value ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-200">
+        <div className="flex gap-1">
+          {TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => updateTab(t.value)}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === t.value ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {hasRole('ADMIN') && (
+          <label className="flex items-center gap-1.5 text-xs text-brand-500 pb-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => {
+                setShowInactive(e.target.checked);
+                setPage(1);
+              }}
+            />
+            Show deactivated workers
+          </label>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -229,7 +286,7 @@ export default function CarpentersPage() {
           <Link
             key={c.id}
             href={`/carpenters/${c.id}`}
-            className="card p-5 block hover:shadow-md transition-shadow"
+            className={`card p-5 block hover:shadow-md transition-shadow ${!c.isActive ? 'opacity-60' : ''}`}
           >
             <div className="flex items-start justify-between">
               <div>
@@ -240,6 +297,7 @@ export default function CarpentersPage() {
             </div>
             <div className="mt-2 flex items-center gap-2 flex-wrap">
               <Chip color={WORKER_TYPE_CHIP[c.workerType]} label={WORKER_TYPE_LABEL[c.workerType]} />
+              {!c.isActive && <Chip color="red" label="Inactive" />}
               {c.team && <span className="text-xs text-brand-500">{c.team.name}</span>}
             </div>
             <div className="grid grid-cols-2 gap-2 mt-4 text-sm">
@@ -272,11 +330,24 @@ export default function CarpentersPage() {
                 >
                   Edit
                 </button>
+                {!c.isActive && (
+                  <button
+                    className="text-emerald-600 hover:underline text-xs"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleReactivateWorker(c);
+                    }}
+                  >
+                    Reactivate
+                  </button>
+                )}
                 <button
                   className="text-red-500 hover:underline text-xs"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    setDeleteConflict(false);
                     setDeleteTarget(c);
                   }}
                 >
@@ -425,12 +496,19 @@ export default function CarpentersPage() {
 
       {deleteTarget && (
         <ConfirmDialog
-          title="Delete Worker"
-          message={`Delete "${deleteTarget.name}"? This cannot be undone.`}
-          confirmLabel="Delete"
-          danger
-          onConfirm={handleDeleteWorker}
-          onCancel={() => setDeleteTarget(null)}
+          title={deleteConflict ? 'Deactivate Worker Instead' : 'Delete Worker'}
+          message={
+            deleteConflict
+              ? `"${deleteTarget.name}" has work items or payment history and can't be deleted. Deactivate instead? They'll disappear from the active worker list and can't be assigned new work, but all their past history stays intact.`
+              : `Delete "${deleteTarget.name}"? This cannot be undone.`
+          }
+          confirmLabel={deleteConflict ? 'Deactivate' : 'Delete'}
+          danger={!deleteConflict}
+          onConfirm={deleteConflict ? handleDeactivateWorker : handleDeleteWorker}
+          onCancel={() => {
+            setDeleteTarget(null);
+            setDeleteConflict(false);
+          }}
         />
       )}
     </div>

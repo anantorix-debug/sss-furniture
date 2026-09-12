@@ -53,12 +53,15 @@ export class CarpenterService {
   // --- Carpenters ------------------------------------------------------
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
-  async findAllCarpenters(params: { workerType?: string; viewerRole?: Role; page?: number; limit?: number } = {}) {
+  async findAllCarpenters(params: { workerType?: string; includeInactive?: boolean; viewerRole?: Role; page?: number; limit?: number } = {}) {
     const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
     const paginated = params.page != null;
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
-    const where = { workerType: params.workerType as any };
+    // Deactivated workers are hidden by default - same idea as isActive on
+    // User/ProductionTeam elsewhere. Pass includeInactive to see them (e.g.
+    // an "Inactive" filter), otherwise the active worker list stays clean.
+    const where = { workerType: params.workerType as any, ...(params.includeInactive ? {} : { isActive: true }) };
     const [carpenters, total] = await Promise.all([
       this.prisma.carpenter.findMany({
         where,
@@ -81,6 +84,7 @@ export class CarpenterService {
         name: c.name,
         phone: c.phone,
         workerType: c.workerType,
+        isActive: c.isActive,
         workItemCount: c.workItems.length,
         user: c.user,
         team: c.team,
@@ -545,7 +549,7 @@ export class CarpenterService {
   // Production Control still works) when no worker of that type exists.
   private async pickLeastBusyWorker(workerType: WorkerType) {
     const candidates = await this.prisma.carpenter.findMany({
-      where: { workerType },
+      where: { workerType, isActive: true },
       include: { workItems: { where: { status: { in: ['ASSIGNED', 'IN_PROGRESS'] } }, select: { id: true } } },
     });
     if (candidates.length === 0) return null;

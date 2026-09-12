@@ -233,6 +233,10 @@ export interface CarpenterSummary {
   name: string;
   phone?: string | null;
   workerType: WorkerType;
+  // Deactivated workers are hidden from the active list and can't be
+  // assigned new work, but their past work items/payments stay intact -
+  // the alternative to deletion for a worker with real history.
+  isActive: boolean;
   // The login (Carpenter/Carver/Polisher role User) this payee profile is
   // linked to, if any - lets that user's "My Work" page find their own jobs.
   user?: { id: string; name: string; role: Role } | null;
