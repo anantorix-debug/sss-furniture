@@ -15,6 +15,11 @@ export interface AllocateParams {
   color?: string;
   source: AllocateSource;
   sourceCustomerOrderId?: string;
+  // Which specific line of a multi-product Customer Order this is for -
+  // sourceCustomerOrderId alone can't distinguish two lines of the same
+  // order, which is what let "Assign to Production" grab the wrong line's
+  // placeholder. See the identical note in schema.prisma.
+  sourceCustomerOrderItemId?: string;
   sourcePartyOrderItemId?: string;
   // Job/reference number the resulting FinishedStockItem is filed under -
   // this is what the existing Dispatch Pipeline already searches/displays
@@ -87,6 +92,7 @@ export class StockAllocationService {
                 status: 'AVAILABLE',
                 productId: params.productId,
                 sourceCustomerOrderId: params.sourceCustomerOrderId,
+                sourceCustomerOrderItemId: params.sourceCustomerOrderItemId,
                 sourcePartyOrderItemId: params.sourcePartyOrderItemId,
               },
             });
@@ -119,6 +125,7 @@ export class StockAllocationService {
             total: 0,
             source: params.source,
             sourceCustomerOrderId: params.sourceCustomerOrderId,
+            sourceCustomerOrderItemId: params.sourceCustomerOrderItemId,
             sourcePartyOrderItemId: params.sourcePartyOrderItemId,
             productId: params.productId,
             createdById: params.userId,

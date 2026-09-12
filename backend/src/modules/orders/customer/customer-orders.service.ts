@@ -232,6 +232,7 @@ export class CustomerOrdersService {
         color: item.color ?? undefined,
         source: 'CUSTOMER_ORDER',
         sourceCustomerOrderId: orderId,
+        sourceCustomerOrderItemId: item.id,
         jobNumberForStock,
         userId,
       });
@@ -410,6 +411,57 @@ export class CustomerOrdersService {
         extra,
         quantity,
         total,
+        notes: dto.notes,
+        notifyWhatsapp: dto.notifyWhatsapp,
+        color: dto.color,
+      },
+      userId,
+      viewerRole,
+    );
+  }
+
+  // Unified "Assign to Production" for one line of a multi-product Customer
+  // Order - same shape as PartyOrdersService.assignItemProduction, scoped to
+  // this line's own placeholder (sourceCustomerOrderItemId) so a multi-line
+  // order can have each product assigned separately instead of the
+  // order-level assignProduction() above grabbing whichever line's
+  // placeholder happened to be created first.
+  async assignItemProduction(orderId: string, itemId: string, dto: AssignProductionDto, userId: string, viewerRole?: Role) {
+    const item = await this.prisma.customerOrderItem.findUnique({ where: { id: itemId } });
+    if (!item || item.orderId !== orderId) throw new NotFoundException('Customer order line not found');
+    const order = await this.findOne(orderId);
+
+    if (dto.employeeUserId) {
+      const employee = await this.prisma.user.findUnique({ where: { id: dto.employeeUserId } });
+      if (!employee || (employee.role !== Role.CARPENTER && employee.role !== Role.CARVER && employee.role !== Role.POLISHER)) {
+        throw new BadRequestException('Employee must be an active Carpenter, Carving or Polish team user');
+      }
+      await this.prisma.customerOrder.update({
+        where: { id: orderId },
+        data: { assignedEmployeeId: employee.id, assignedAt: new Date(), assignedById: userId },
+      });
+    }
+
+    const quantity = dto.quantity ?? item.productionQty ?? 1;
+    const extra = dto.extra ?? 0;
+    const total = dto.price * quantity + extra;
+
+    return this.carpenter.assignSourceProduction(
+      { source: 'CUSTOMER_ORDER', sourceCustomerOrderId: orderId, sourceCustomerOrderItemId: itemId, assignedById: userId },
+      {
+        carpenterId: dto.carpenterId,
+        stage: dto.stage as any,
+        workDate: dto.workDate,
+        modelNo: order.jobNumber ?? order.orderId,
+        productName: item.productName,
+        category: dto.category ?? item.category ?? undefined,
+        size: dto.size ?? item.size ?? undefined,
+        sizeUnit: dto.sizeUnit ?? item.sizeUnit ?? undefined,
+        price: dto.price,
+        extra,
+        quantity,
+        total,
+        productId: item.productId ?? undefined,
         notes: dto.notes,
         notifyWhatsapp: dto.notifyWhatsapp,
         color: dto.color,

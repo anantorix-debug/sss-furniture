@@ -302,6 +302,9 @@ model CustomerOrderItem {
   stockReservedQty Int @default(0)
   productionQty    Int @default(0)
 
+  workItems          CarpenterWorkItem[]
+  finishedStockItems FinishedStockItem[]
+
   @@map("customer_order_items")
 }
 
@@ -588,9 +591,17 @@ model CarpenterWorkItem {
   // creates a FinishedStockItem for that job instead, so order-bound
   // production is never double-counted as free stock. See
   // CarpenterService.updateWorkStatus.
-  source                 ProductionSource @default(STOCK)
+  source                 ProductionSource   @default(STOCK)
   sourceCustomerOrderId  String?
-  sourceCustomerOrder    CustomerOrder?   @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
+  sourceCustomerOrder    CustomerOrder?     @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
+  // Which specific line of a multi-product Customer Order this is for -
+  // sourceCustomerOrderId alone can't tell two lines of the same order
+  // apart, which used to make "Assign to Production" claim whichever
+  // line's placeholder happened to be oldest, regardless of which one was
+  // actually picked. Mirrors sourcePartyOrderItemId below, which Party
+  // Orders already had from the start.
+  sourceCustomerOrderItemId String?
+  sourceCustomerOrderItem   CustomerOrderItem? @relation(fields: [sourceCustomerOrderItemId], references: [id], onDelete: SetNull)
   sourcePartyOrderItemId String?
   sourcePartyOrderItem   PartyOrderItem?  @relation(fields: [sourcePartyOrderItemId], references: [id], onDelete: SetNull)
   // Which Godown SKU this item's completed output feeds (STOCK source) or
@@ -965,6 +976,10 @@ model FinishedStockItem {
   product                Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
   sourceCustomerOrderId  String?
   sourceCustomerOrder    CustomerOrder?  @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
+  // Which specific line of a multi-product Customer Order this stock-fed
+  // unit is for - see the identical note on CarpenterWorkItem.
+  sourceCustomerOrderItemId String?
+  sourceCustomerOrderItem   CustomerOrderItem? @relation(fields: [sourceCustomerOrderItemId], references: [id], onDelete: SetNull)
   sourcePartyOrderItemId String?
   sourcePartyOrderItem   PartyOrderItem? @relation(fields: [sourcePartyOrderItemId], references: [id], onDelete: SetNull)
 

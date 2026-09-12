@@ -24,7 +24,7 @@ import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
-import type { CustomerOrder, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
+import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -125,7 +125,11 @@ function CustomerOrdersContent() {
 
   const [paymentsOrder, setPaymentsOrder] = useState<CustomerOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomerOrder | null>(null);
+  // Multi-product orders open the picker (list every line, pick which one to
+  // assign) instead of jumping straight to the assign form - a single order
+  // can have several products, each needing its own worker/stage/price.
   const [assignTarget, setAssignTarget] = useState<CustomerOrder | null>(null);
+  const [assignItemTarget, setAssignItemTarget] = useState<{ order: CustomerOrder; item: CustomerOrderItem } | null>(null);
   const [viewTarget, setViewTarget] = useState<CustomerOrder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedGalleryImages, setSelectedGalleryImages] = useState<GalleryImage[]>([]);
@@ -688,7 +692,52 @@ function CustomerOrdersContent() {
         />
       )}
 
-      {assignTarget && (
+      {assignTarget && (assignTarget.items?.length ?? 0) > 0 && (
+        <AssignProductionPickerModal
+          order={assignTarget}
+          onClose={() => setAssignTarget(null)}
+          onPickItem={(item) => {
+            setAssignItemTarget({ order: assignTarget, item });
+            setAssignTarget(null);
+          }}
+        />
+      )}
+
+      {assignItemTarget && (
+        <AssignProductionModal
+          productName={assignItemTarget.item.productName}
+          initialCategory={assignItemTarget.item.category ?? undefined}
+          initialSize={assignItemTarget.item.size ?? undefined}
+          initialSizeUnit={assignItemTarget.item.sizeUnit ?? undefined}
+          initialColor={assignItemTarget.item.color ?? undefined}
+          initialQuantity={assignItemTarget.item.productionQty}
+          onOpenWhatsAppPicker={
+            hasRole('SUPERADMIN')
+              ? () =>
+                  openWhatsApp({
+                    recipientName: assignItemTarget.item.productName,
+                    defaultMessage: `New work assigned - ${assignItemTarget.item.productName} for order ${assignItemTarget.order.orderId} (${assignItemTarget.order.customerName}).`,
+                  })
+              : undefined
+          }
+          onClose={() => setAssignItemTarget(null)}
+          onSubmit={async (payload: AssignProductionPayload) => {
+            const result = await api.post<{ whatsapp?: { sent: boolean; reason?: string; group?: { sent: boolean; reason?: string } } }>(
+              `/customer-orders/${assignItemTarget.order.id}/items/${assignItemTarget.item.id}/assign-production`,
+              payload,
+            );
+            const w = result.whatsapp;
+            const whatsappNote = w?.sent || w?.group?.sent
+              ? ` WhatsApp sent${w?.sent ? ' to worker' : ''}${w?.group?.sent ? (w?.sent ? ' and team group' : ' to team group') : ''}.`
+              : '';
+            setNotice(`Work assigned for ${assignItemTarget.item.productName}.${whatsappNote}`);
+            setAssignItemTarget(null);
+            mutate();
+          }}
+        />
+      )}
+
+      {assignTarget && (assignTarget.items?.length ?? 0) === 0 && (
         <AssignProductionModal
           productName={assignTarget.product}
           onClose={() => setAssignTarget(null)}
@@ -759,6 +808,70 @@ const STATUS_CHIP: Record<string, ChipColor> = {
   REWORK: 'red',
   COMPLETED: 'green',
 };
+
+// "Assign to Production" on a multi-product order can't just open one form
+// for "the order" - each line is its own product, possibly going to a
+// different worker/stage/price. This lists every line (pulled straight from
+// what was already entered on the order form - never asks again) and shows
+// each one's current production status, or an Assign button if it doesn't
+// have one yet.
+function AssignProductionPickerModal({
+  order,
+  onClose,
+  onPickItem,
+}: {
+  order: CustomerOrder;
+  onClose: () => void;
+  onPickItem: (item: CustomerOrderItem) => void;
+}) {
+  const { data: workItems } = useSWR<CarpenterWorkItem[]>(`/carpenter-work-items?sourceCustomerOrderId=${order.id}`, fetcher);
+  const items = order.items ?? [];
+
+  return (
+    <Modal title={`Assign to Production - ${order.orderId}`} onClose={onClose} wide>
+      <div className="space-y-3">
+        <p className="text-xs text-brand-400">Pick which product to assign - already-entered details carry over, so nothing needs retyping.</p>
+        {items.map((item) => {
+          const existing = (workItems ?? []).filter((w) => w.sourceCustomerOrderItemId === item.id);
+          const needsProduction = (item.productionQty ?? 0) > 0;
+          return (
+            <div key={item.id} className="border border-brand-100 rounded-lg p-3 space-y-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-sm">
+                <ViewField label="Product" value={item.productName} />
+                <ViewField label="Category" value={item.category ?? '-'} />
+                <ViewField label="Size" value={[item.size, item.sizeUnit].filter(Boolean).join(' ') || '-'} />
+                <ViewField label="Qty" value={String(item.quantity)} />
+              </div>
+              {!needsProduction && <p className="text-xs text-emerald-700">Fully fulfilled from Godown Stock - no production needed.</p>}
+              {needsProduction && existing.length === 0 && (
+                <button type="button" className="btn-primary text-xs" onClick={() => onPickItem(item)}>
+                  Assign to Production
+                </button>
+              )}
+              {existing.length > 0 && (
+                <div className="space-y-1">
+                  {existing.map((w) => (
+                    <div key={w.id} className="flex items-center gap-2 flex-wrap text-xs">
+                      <Chip color={STAGE_CHIP[w.stage] ?? 'gray'} label={w.stage} />
+                      <span className="text-brand-600">{w.carpenter?.name ?? 'Unassigned'}</span>
+                      <span className="text-brand-400">Qty {w.quantity}</span>
+                      <Chip color={STATUS_CHIP[w.status] ?? 'gray'} label={w.status.replace('_', ' ')} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div className="flex justify-end pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 // "Who's actually making this" - the order list only shows who's
 // responsible for entering the Model No (a separate, optional field), which

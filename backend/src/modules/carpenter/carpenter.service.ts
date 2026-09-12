@@ -206,6 +206,7 @@ export class CarpenterService {
     sourceInfo?: {
       source?: 'CUSTOMER_ORDER' | 'PARTY_ORDER';
       sourceCustomerOrderId?: string;
+      sourceCustomerOrderItemId?: string;
       sourcePartyOrderItemId?: string;
       assignedById?: string;
     },
@@ -258,6 +259,7 @@ export class CarpenterService {
         assignedById: sourceInfo?.assignedById ?? (isWorkerSelfEntry ? undefined : userId),
         source: sourceInfo?.source,
         sourceCustomerOrderId: sourceInfo?.sourceCustomerOrderId,
+        sourceCustomerOrderItemId: sourceInfo?.sourceCustomerOrderItemId,
         sourcePartyOrderItemId: sourceInfo?.sourcePartyOrderItemId,
         createdById: userId,
       },
@@ -287,14 +289,26 @@ export class CarpenterService {
   // placeholder exists (e.g. it was already claimed/completed before, and
   // this is a genuinely new stage/run).
   async assignSourceProduction(
-    sourceInfo: { source: 'CUSTOMER_ORDER' | 'PARTY_ORDER'; sourceCustomerOrderId?: string; sourcePartyOrderItemId?: string; assignedById: string },
+    sourceInfo: {
+      source: 'CUSTOMER_ORDER' | 'PARTY_ORDER';
+      sourceCustomerOrderId?: string;
+      sourceCustomerOrderItemId?: string;
+      sourcePartyOrderItemId?: string;
+      assignedById: string;
+    },
     dto: CreateWorkItemDto,
     userId: string,
     viewerRole?: Role,
   ) {
+    // sourceCustomerOrderItemId narrows to one line of a multi-product
+    // Customer Order - without it, every line shares the same
+    // sourceCustomerOrderId and this would just grab whichever placeholder
+    // happened to be created first, regardless of which product was
+    // actually picked in "Assign to Production".
     const placeholder = await this.prisma.carpenterWorkItem.findFirst({
       where: {
         sourceCustomerOrderId: sourceInfo.sourceCustomerOrderId,
+        sourceCustomerOrderItemId: sourceInfo.sourceCustomerOrderItemId,
         sourcePartyOrderItemId: sourceInfo.sourcePartyOrderItemId,
         carpenterId: null,
         status: 'ASSIGNED',
@@ -312,6 +326,7 @@ export class CarpenterService {
       const alreadyAssigned = await this.prisma.carpenterWorkItem.findFirst({
         where: {
           sourceCustomerOrderId: sourceInfo.sourceCustomerOrderId,
+          sourceCustomerOrderItemId: sourceInfo.sourceCustomerOrderItemId,
           sourcePartyOrderItemId: sourceInfo.sourcePartyOrderItemId,
         },
       });

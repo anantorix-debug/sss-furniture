@@ -29,11 +29,32 @@ export interface AssignProductionPayload {
 export function AssignProductionModal({
   productName,
   currentStage,
+  // Already known from the order/item this is being assigned for - shown
+  // pre-filled instead of asking the Admin to retype what was already
+  // entered on the New Order form. Still editable in case this stage needs
+  // something different (e.g. a Category correction discovered during
+  // production).
+  initialCategory,
+  initialSize,
+  initialSizeUnit,
+  initialColor,
+  initialQuantity,
+  // Opens a full WhatsApp chat/group picker (e.g. the shared WhatsAppModal)
+  // for a one-off manual notification, in addition to the automatic
+  // worker+team-group send below - the caller owns that modal since it
+  // needs page-level WhatsApp context this component doesn't have.
+  onOpenWhatsAppPicker,
   onClose,
   onSubmit,
 }: {
   productName: string;
   currentStage?: 'CARPENTER' | 'CARVING' | 'POLISH';
+  initialCategory?: string;
+  initialSize?: string;
+  initialSizeUnit?: string;
+  initialColor?: string;
+  initialQuantity?: number;
+  onOpenWhatsAppPicker?: () => void;
   onClose: () => void;
   onSubmit: (payload: AssignProductionPayload) => Promise<void>;
 }) {
@@ -41,13 +62,13 @@ export function AssignProductionModal({
   const [stage, setStage] = useState<'CARPENTER' | 'CARVING' | 'POLISH'>(currentStage ?? 'CARPENTER');
   const [carpenterId, setCarpenterId] = useState('');
   const [workDate, setWorkDate] = useState(new Date().toISOString().slice(0, 10));
-  const [category, setCategory] = useState('');
-  const [size, setSize] = useState('');
-  const [sizeUnit, setSizeUnit] = useState('');
+  const [category, setCategory] = useState(initialCategory ?? '');
+  const [size, setSize] = useState(initialSize ?? '');
+  const [sizeUnit, setSizeUnit] = useState(initialSizeUnit ?? '');
   const [price, setPrice] = useState('');
   const [extra, setExtra] = useState('');
-  const [quantity, setQuantity] = useState('1');
-  const [color, setColor] = useState('');
+  const [quantity, setQuantity] = useState(initialQuantity ? String(initialQuantity) : '1');
+  const [color, setColor] = useState(initialColor ?? '');
   const [notes, setNotes] = useState('');
   const [notify, setNotify] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -160,6 +181,11 @@ export function AssignProductionModal({
           <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
           Notify via WhatsApp (worker + team group, if configured)
         </label>
+        {onOpenWhatsAppPicker && (
+          <button type="button" className="text-brand-600 text-xs hover:underline -mt-1" onClick={onOpenWhatsAppPicker}>
+            Or choose a specific WhatsApp chat/group to notify...
+          </button>
+        )}
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>

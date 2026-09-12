@@ -79,6 +79,19 @@ export class CustomerOrdersController {
     return this.service.assignProduction(id, dto, user.userId, user.role as Role);
   }
 
+  // Per-line assignment for the multi-product flow - see the note on
+  // CustomerOrdersService.assignItemProduction.
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Post(':id/items/:itemId/assign-production')
+  assignItemProduction(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: AssignProductionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.assignItemProduction(id, itemId, dto, user.userId, user.role as Role);
+  }
+
   @Roles(Role.SUPERADMIN)
   @Post(':id/assign-employee')
   assignEmployee(@Param('id') id: string, @Body() dto: AssignEmployeeDto, @CurrentUser() user: AuthUser) {

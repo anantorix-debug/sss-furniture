@@ -276,6 +276,7 @@ export interface CarpenterWorkItem {
   // FinishedStockItem. See CarpenterService.updateWorkStatus.
   source?: ProductionSource;
   sourceCustomerOrderId?: string | null;
+  sourceCustomerOrderItemId?: string | null;
   sourcePartyOrderItemId?: string | null;
   productId?: string | null;
   // Sequential Carpenter -> Carving -> Polish engine fields. batchId ties

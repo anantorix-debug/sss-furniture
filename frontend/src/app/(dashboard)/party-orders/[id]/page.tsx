@@ -247,6 +247,19 @@ function PartyOrderDetailContent() {
       {assignProductionItem && (
         <AssignProductionModal
           productName={assignProductionItem.productName}
+          initialSize={assignProductionItem.size ?? undefined}
+          initialSizeUnit={assignProductionItem.sizeUnit ?? undefined}
+          initialColor={assignProductionItem.color ?? undefined}
+          initialQuantity={assignProductionItem.productionQty}
+          onOpenWhatsAppPicker={
+            hasRole('SUPERADMIN')
+              ? () =>
+                  openWhatsApp({
+                    recipientName: assignProductionItem.productName,
+                    defaultMessage: `New work assigned - ${assignProductionItem.productName} for order ${order.jobNumber ?? ''} (${order.shopName}).`,
+                  })
+              : undefined
+          }
           onClose={() => setAssignProductionItem(null)}
           onSubmit={async (payload: AssignProductionPayload) => {
             await api.post(`/party-orders/${order.id}/items/${assignProductionItem.id}/assign-production`, payload);
