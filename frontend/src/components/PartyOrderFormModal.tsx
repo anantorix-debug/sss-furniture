@@ -8,15 +8,12 @@ import { formatCurrency, toDateInputValue } from '@/lib/format';
 import { Modal } from './Modal';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import { ModelNoPicker } from './ModelNoPicker';
-import { UnitSelect } from './UnitSelect';
 import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product } from '@/types';
 
 interface ItemForm {
   productId?: string;
   productName: string;
   finish: string;
-  size: string;
-  sizeUnit: string;
   color: string;
   pattern: string;
   details: string;
@@ -29,8 +26,6 @@ interface ItemForm {
 const emptyItem: ItemForm = {
   productName: '',
   finish: '',
-  size: '',
-  sizeUnit: '',
   color: '',
   pattern: '',
   details: '',
@@ -52,8 +47,6 @@ function itemFromExisting(i: PartyOrderItem): ItemForm {
     productId: i.productId ?? undefined,
     productName: i.productName,
     finish: i.finish ?? '',
-    size: i.size ?? '',
-    sizeUnit: i.sizeUnit ?? '',
     color: i.color ?? '',
     pattern: i.pattern ?? '',
     details: i.details ?? '',
@@ -104,8 +97,6 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
       productId: product.id,
       productName: product.name,
       finish: product.materialFinish ?? '',
-      size: product.modelSize ?? '',
-      sizeUnit: product.sizeUnit ?? '',
       pattern: product.pattern ?? '',
       details: product.details ?? '',
       unitPrice: String(product.retailPrice ?? 0),
@@ -137,8 +128,6 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
           productId: i.productId,
           productName: i.productName,
           finish: i.finish || undefined,
-          size: i.size || undefined,
-          sizeUnit: i.sizeUnit || undefined,
           color: i.color || undefined,
           pattern: i.pattern || undefined,
           details: i.details || undefined,
@@ -221,10 +210,8 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
                   </button>
                 </div>
                 {item.productId && <p className="text-[11px] text-emerald-700">From Godown Stock - In Stock</p>}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <input className="input text-sm" placeholder="Finish" value={item.finish} onChange={(e) => updateItem(idx, { finish: e.target.value })} />
-                  <input className="input text-sm" placeholder="Size" value={item.size} onChange={(e) => updateItem(idx, { size: e.target.value })} />
-                  <UnitSelect id={`item-size-unit-${idx}`} value={item.sizeUnit} onChange={(v) => updateItem(idx, { sizeUnit: v })} />
                   <input className="input text-sm" placeholder="Pattern" value={item.pattern} onChange={(e) => updateItem(idx, { pattern: e.target.value })} />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
