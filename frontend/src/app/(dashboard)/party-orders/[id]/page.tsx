@@ -19,6 +19,7 @@ import { RoleGate } from '@/components/RoleGate';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { sharePdf } from '@/lib/sharePdf';
 import type { PartyOrder, PartyOrderItem, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -110,6 +111,24 @@ function PartyOrderDetailContent() {
     }
   }
 
+  // Separate from both the standalone send above and the in-popup attach -
+  // hands the PDF to the device's native share sheet, which doesn't depend
+  // on the backend's own WhatsApp connection being up.
+  async function shareOrderPdf() {
+    if (!order) return;
+    setNotice(null);
+    try {
+      const result = await sharePdf(
+        `/party-orders/${order.id}/pdf`,
+        `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`,
+        `Order Confirmation - ${order.jobNumber ?? order.id}`,
+      );
+      if (result === 'downloaded') setNotice('Sharing is not supported on this browser - the PDF was downloaded instead.');
+    } catch {
+      setNotice('Failed to share the PDF');
+    }
+  }
+
   async function handleDelete() {
     if (!order) return;
     try {
@@ -158,6 +177,9 @@ function PartyOrderDetailContent() {
             </button>
             <button className="btn-secondary" disabled={sendingPdf} onClick={sendOrderPdfViaWhatsApp}>
               {sendingPdf ? 'Sending...' : 'Send PDF via WhatsApp'}
+            </button>
+            <button className="btn-secondary" onClick={shareOrderPdf}>
+              Share PDF
             </button>
             <button className="btn-secondary" onClick={() => setEditOpen(true)}>
               Edit

@@ -24,6 +24,7 @@ import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { sharePdf } from '@/lib/sharePdf';
 import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -333,6 +334,25 @@ function CustomerOrdersContent() {
     }
   }
 
+  // Separate from both the standalone send above and the in-popup attach -
+  // hands the PDF to the device's native share sheet (WhatsApp, email,
+  // anything installed), which doesn't depend on the backend's own
+  // WhatsApp connection being up. Falls back to a normal download on
+  // browsers with no file-sharing support.
+  async function shareOrderPdf(order: CustomerOrder) {
+    setNotice(null);
+    try {
+      const result = await sharePdf(
+        `/customer-orders/${order.id}/pdf`,
+        `Order Confirmation - ${order.orderId}.pdf`,
+        `Order Confirmation - ${order.orderId}`,
+      );
+      if (result === 'downloaded') setNotice('Sharing is not supported on this browser - the PDF was downloaded instead.');
+    } catch {
+      setNotice('Failed to share the PDF');
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -469,6 +489,7 @@ function CustomerOrdersContent() {
                           label: sendingPdfId === order.id ? 'Sending PDF...' : 'Send PDF via WhatsApp',
                           onClick: () => sendOrderPdfViaWhatsApp(order),
                         },
+                        { label: 'Share PDF', onClick: () => shareOrderPdf(order) },
                         {
                           label: 'Assign to Production',
                           onClick: () => setAssignTarget(order),
