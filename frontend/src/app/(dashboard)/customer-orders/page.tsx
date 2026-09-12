@@ -833,6 +833,14 @@ function AssignProductionPickerModal({
         <p className="text-xs text-brand-400">Pick which product to assign - already-entered details carry over, so nothing needs retyping.</p>
         {items.map((item) => {
           const existing = (workItems ?? []).filter((w) => w.sourceCustomerOrderItemId === item.id);
+          // A placeholder work item exists for every line the moment the
+          // order is created (that's what makes it show up as "Waiting" on
+          // Production Control before anyone's touched it) - so "a work
+          // item exists" is not the same as "this line has actually been
+          // assigned a worker". Only a claimed (carpenterId set) row means
+          // that; an unclaimed one still needs the Assign button.
+          const claimed = existing.filter((w) => w.carpenterId);
+          const canAssign = existing.length === 0 || claimed.length < existing.length;
           const needsProduction = (item.productionQty ?? 0) > 0;
           return (
             <div key={item.id} className="border border-brand-100 rounded-lg p-3 space-y-2">
@@ -843,22 +851,22 @@ function AssignProductionPickerModal({
                 <ViewField label="Qty" value={String(item.quantity)} />
               </div>
               {!needsProduction && <p className="text-xs text-emerald-700">Fully fulfilled from Godown Stock - no production needed.</p>}
-              {needsProduction && existing.length === 0 && (
-                <button type="button" className="btn-primary text-xs" onClick={() => onPickItem(item)}>
-                  Assign to Production
-                </button>
-              )}
-              {existing.length > 0 && (
+              {claimed.length > 0 && (
                 <div className="space-y-1">
-                  {existing.map((w) => (
+                  {claimed.map((w) => (
                     <div key={w.id} className="flex items-center gap-2 flex-wrap text-xs">
                       <Chip color={STAGE_CHIP[w.stage] ?? 'gray'} label={w.stage} />
-                      <span className="text-brand-600">{w.carpenter?.name ?? 'Unassigned'}</span>
+                      <span className="text-brand-600">{w.carpenter?.name}</span>
                       <span className="text-brand-400">Qty {w.quantity}</span>
                       <Chip color={STATUS_CHIP[w.status] ?? 'gray'} label={w.status.replace('_', ' ')} />
                     </div>
                   ))}
                 </div>
+              )}
+              {needsProduction && canAssign && (
+                <button type="button" className="btn-primary text-xs" onClick={() => onPickItem(item)}>
+                  Assign to Production
+                </button>
               )}
             </div>
           );
