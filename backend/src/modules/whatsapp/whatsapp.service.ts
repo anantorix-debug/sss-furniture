@@ -45,17 +45,6 @@ export interface WhatsappSendResult {
   group?: { sent: boolean; reason?: string };
 }
 
-export interface PurchaseOrderMessage {
-  supplierName: string;
-  phone: string;
-  poNumber: string;
-  orderDate: Date;
-  expectedDate?: Date | null;
-  items: { materialName: string; quantity: number; unit: string; unitPrice: number }[];
-  totalValue: number;
-  notes?: string | null;
-}
-
 @Injectable()
 export class WhatsappService implements OnModuleInit {
   private readonly logger = new Logger(WhatsappService.name);
@@ -118,30 +107,6 @@ export class WhatsappService implements OnModuleInit {
     return { ...individual, group };
   }
 
-  private buildPurchaseOrderText(msg: PurchaseOrderMessage): string {
-    const dateStr = msg.orderDate.toLocaleDateString('en-IN');
-    const lines = [
-      `*Purchase Order - SSS Company*`,
-      ``,
-      `PO Number: ${msg.poNumber}`,
-      `Supplier: ${msg.supplierName}`,
-      `Order Date: ${dateStr}`,
-      msg.expectedDate ? `Expected By: ${msg.expectedDate.toLocaleDateString('en-IN')}` : null,
-      ``,
-      `Items:`,
-      ...msg.items.map((i) => `- ${i.materialName}: ${i.quantity} ${i.unit} x ₹${i.unitPrice}`),
-      ``,
-      `*Total: ₹${msg.totalValue}*`,
-      msg.notes ? `Notes: ${msg.notes}` : null,
-      ``,
-      `This order has been approved. Please confirm and dispatch.`,
-    ].filter(Boolean);
-    return lines.join('\n');
-  }
-
-  async sendPurchaseOrder(msg: PurchaseOrderMessage): Promise<WhatsappSendResult> {
-    return this.send(msg.phone, this.buildPurchaseOrderText(msg));
-  }
 
   async send(rawPhone: string, message: string): Promise<WhatsappSendResult> {
     return this.dispatch(rawPhone, { kind: 'text', text: message });

@@ -122,7 +122,6 @@ function PartyOrdersContent() {
   const [editing, setEditing] = useState<PartyOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PartyOrder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [sendingPdfId, setSendingPdfId] = useState<string | null>(null);
 
   function openCreate() {
     setEditing(null);
@@ -163,28 +162,7 @@ function PartyOrdersContent() {
     URL.revokeObjectURL(url);
   }
 
-  // Standalone quick-send, separate from the picker-based flow in
-  // handleSendWhatsApp below - goes straight to the shop's own phone
-  // number on file, no chat selection needed.
-  async function sendOrderPdfViaWhatsApp(order: PartyOrder) {
-    if (sendingPdfId) return;
-    setSendingPdfId(order.id);
-    setNotice(null);
-    try {
-      const result = await api.post<{ sent: boolean; reason?: string }>(`/party-orders/${order.id}/send-whatsapp`);
-      setNotice(
-        result.sent
-          ? `PDF sent to ${order.shopName} via WhatsApp.`
-          : `Could not send PDF: ${result.reason === 'no_shop_phone' ? 'no phone number on file for this shop.' : (result.reason ?? 'unknown error')}`,
-      );
-    } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : 'Failed to send PDF via WhatsApp');
-    } finally {
-      setSendingPdfId(null);
-    }
-  }
-
-  // Separate from both the standalone send above and the in-popup attach -
+  // Separate from the in-popup attach flow -
   // hands the PDF to the device's native share sheet, which doesn't depend
   // on the backend's own WhatsApp connection being up.
   async function shareOrderPdf(order: PartyOrder) {
@@ -211,6 +189,21 @@ function PartyOrdersContent() {
       // same chat-picker popup.
       pdfUrl: `/party-orders/${order.id}/pdf`,
       pdfFilename: `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`,
+    });
+  }
+
+  // "Send PDF via WhatsApp" specifically - the PDF is the point, so it's
+  // fetched and attached automatically instead of leaving the sender to
+  // notice and click "Attach PDF" themselves - same flow as Customer Orders.
+  function handleSendPdfViaWhatsApp(order: PartyOrder) {
+    openWhatsApp({
+      recipientName: (order.shopName ?? '') || 'Shop',
+      recipientPhone: order.phone ?? undefined,
+      // No caption text - this action sends only the PDF file itself.
+      defaultMessage: '',
+      pdfUrl: `/party-orders/${order.id}/pdf`,
+      pdfFilename: `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`,
+      autoAttachPdf: true,
     });
   }
 
@@ -342,14 +335,13 @@ function PartyOrdersContent() {
                 </button>
                 <button
                   className="text-brand-600 hover:underline text-xs"
-                  disabled={sendingPdfId === order.id}
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    sendOrderPdfViaWhatsApp(order);
+                    handleSendPdfViaWhatsApp(order);
                   }}
                 >
-                  {sendingPdfId === order.id ? 'Sending...' : 'Send PDF'}
+                  Send PDF
                 </button>
                 <button
                   className="text-brand-600 hover:underline text-xs"

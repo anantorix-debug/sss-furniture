@@ -30,7 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/party-orders', label: 'Party Orders', icon: '◉', minRole: 'ADMIN' },
   { href: '/inventory', label: 'Inventory', icon: '▤' },
   { href: '/suppliers', label: 'Purchasing', icon: '⇩', minRole: 'ADMIN', alsoActiveOn: ['/purchase-orders'] },
-  { href: '/carpenters', label: 'Production', icon: '✦' },
+  { href: '/carpenters', label: 'Production', icon: '✦', minRole: 'ADMIN' },
   { href: '/production-control', label: 'Production Control', icon: '⏻', minRole: 'ADMIN' },
   { href: '/payments', label: 'Payments', icon: '▣', minRole: 'ADMIN' },
   { href: '/expenses', label: 'Expenses', icon: '⛁', minRole: 'SUPERADMIN' },

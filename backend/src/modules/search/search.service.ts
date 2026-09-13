@@ -71,7 +71,7 @@ export class SearchService {
     const purchaseHistory = materialIds.length
       ? await this.prisma.stockMovement.findMany({
           where: { rawMaterialId: { in: materialIds }, type: 'IN' },
-          include: { purchaseOrder: { include: { supplier: { select: { name: true, phone: true } } } } },
+          include: { purchase: { include: { supplier: { select: { name: true, phone: true } } } } },
           orderBy: { date: 'desc' },
         })
       : [];
@@ -205,9 +205,9 @@ export class SearchService {
           purchaseHistory: (historyByMaterial.get(m.rawMaterialId) ?? []).map((h) => ({
             date: h.date,
             quantity: Number(h.quantity),
-            poNumber: h.purchaseOrder?.poNumber ?? null,
-            supplierName: h.purchaseOrder?.supplier?.name ?? null,
-            supplierPhone: h.purchaseOrder?.supplier?.phone ?? null,
+            purchaseNumber: h.purchase?.purchaseNumber ?? null,
+            supplierName: h.purchase?.supplier?.name ?? null,
+            supplierPhone: h.purchase?.supplier?.phone ?? null,
             ...(hideFinancials ? {} : { unitCost: h.unitCost ? Number(h.unitCost) : null }),
           })),
         })),

@@ -45,6 +45,13 @@ export class CustomerOrderItemDto {
   @IsNumber()
   @Min(0)
   unitPrice: number;
+
+  // Optional "this line looks like this" photo picked from the existing
+  // Gallery - purely a visual reference, independent of the order-wide
+  // gallery images used for the customer-facing WhatsApp confirmation.
+  @IsString()
+  @IsOptional()
+  referenceImageId?: string;
 }
 
 export class CreateCustomerOrderDto {

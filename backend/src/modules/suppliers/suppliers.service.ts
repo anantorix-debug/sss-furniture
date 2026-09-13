@@ -101,14 +101,14 @@ export class SuppliersService {
     const supplier = await this.findOne(id);
     // MySQL FK constraints aren't guaranteed to have actually been created
     // by `prisma db push` on every table (confirmed missing on at least one
-    // other relation in this project, including PurchaseOrder.supplierId -
-    // hit live as an orphaned-row crash) - blocking instead of relying on
-    // the schema's onDelete/Restrict semantics avoids silently orphaning
-    // purchase/payment/PO rows.
-    const purchaseOrderCount = await this.prisma.purchaseOrder.count({ where: { supplierId: id } });
-    if (supplier.purchases.length > 0 || supplier.payments.length > 0 || purchaseOrderCount > 0) {
+    // other relation in this project, including Purchase.supplierId - hit
+    // live as an orphaned-row crash) - blocking instead of relying on the
+    // schema's onDelete/Restrict semantics avoids silently orphaning
+    // purchase/payment rows.
+    const purchaseCount = await this.prisma.purchase.count({ where: { supplierId: id } });
+    if (supplier.purchases.length > 0 || supplier.payments.length > 0 || purchaseCount > 0) {
       throw new ConflictException(
-        'This supplier has purchase orders or payment history and cannot be deleted. Remove those entries first if you really need to delete the supplier.',
+        'This supplier has purchases or payment history and cannot be deleted. Remove those entries first if you really need to delete the supplier.',
       );
     }
     await this.prisma.supplier.delete({ where: { id } });
@@ -194,24 +194,24 @@ export class SuppliersService {
   }
 
   // Supplier detail PDF - this one supplier only: its info, its own
-  // Purchase Orders, its own Payment Ledger, never another supplier's data.
+  // Purchases, its own Payment Ledger, never another supplier's data.
   async generateDetailPdf(id: string): Promise<Buffer> {
     const supplier = await this.findOne(id);
-    const purchaseOrders = await this.prisma.purchaseOrder.findMany({
+    const purchases = await this.prisma.purchase.findMany({
       where: { supplierId: id },
       include: { items: true },
-      orderBy: { orderDate: 'desc' },
+      orderBy: { purchaseDate: 'desc' },
     });
 
-    const poRows = purchaseOrders
-      .map((po) => {
-        const total = po.items.reduce((s, i) => s + Number(i.quantity) * Number(i.unitPrice), 0);
+    const poRows = purchases
+      .map((p) => {
+        const total = p.items.reduce((s, i) => s + Number(i.quantity) * Number(i.unitPrice), 0);
         return `<tr>
-          <td>${escapeHtml(po.poNumber)}</td>
-          <td>${po.orderDate.toLocaleDateString('en-IN')}</td>
-          <td>${po.items.length}</td>
+          <td>${escapeHtml(p.purchaseNumber)}</td>
+          <td>${p.purchaseDate.toLocaleDateString('en-IN')}</td>
+          <td>${p.items.length}</td>
           <td style="text-align:right">₹${total.toLocaleString('en-IN')}</td>
-          <td>${escapeHtml(po.status.replace(/_/g, ' '))}</td>
+          <td>${escapeHtml(p.status)}</td>
         </tr>`;
       })
       .join('');
@@ -240,17 +240,17 @@ export class SuppliersService {
       <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">₹${supplier.totalPaid.toLocaleString('en-IN')}</div></div>
       <div><div class="label">Balance Payable</div><div class="value" style="color:#b91c1c">₹${supplier.balance.toLocaleString('en-IN')}</div></div>
     </div>
-    <h3 style="font-size:13px;margin:18px 0 8px">Purchase Orders</h3>
+    <h3 style="font-size:13px;margin:18px 0 8px">Purchases</h3>
     <table>
-      <thead><tr><th>PO Number</th><th>Date</th><th>Items</th><th style="text-align:right">Total</th><th>Status</th></tr></thead>
-      <tbody>${poRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No purchase orders</td></tr>'}</tbody>
+      <thead><tr><th>Purchase No</th><th>Date</th><th>Items</th><th style="text-align:right">Total</th><th>Status</th></tr></thead>
+      <tbody>${poRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No purchases</td></tr>'}</tbody>
     </table>
     <h3 style="font-size:13px;margin:18px 0 8px">Payment Ledger</h3>
     <table>
       <thead><tr><th>Date</th><th>Voucher No</th><th style="text-align:right">Amount</th><th style="text-align:right">Balance</th><th>Mode</th></tr></thead>
       <tbody>${paymentRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No payments</td></tr>'}</tbody>
     </table>
-    ${renderGeneratedFooter(purchaseOrders.length, 'purchase order')}
+    ${renderGeneratedFooter(purchases.length, 'purchase')}
   </div>
 </body></html>`;
     return this.pdf.renderHtmlToPdf(html);

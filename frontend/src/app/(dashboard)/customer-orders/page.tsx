@@ -133,7 +133,6 @@ function CustomerOrdersContent() {
   const [assignItemTarget, setAssignItemTarget] = useState<{ order: CustomerOrder; item: CustomerOrderItem } | null>(null);
   const [viewTarget, setViewTarget] = useState<CustomerOrder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [sendingPdfId, setSendingPdfId] = useState<string | null>(null);
   const [selectedGalleryImages, setSelectedGalleryImages] = useState<GalleryImage[]>([]);
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
 
@@ -313,28 +312,24 @@ function CustomerOrdersContent() {
     });
   }
 
-  // Standalone quick-send, separate from the picker-based flow above -
-  // goes straight to the customer's own phone number on file, no chat
-  // selection needed.
-  async function sendOrderPdfViaWhatsApp(order: CustomerOrder) {
-    if (sendingPdfId) return;
-    setSendingPdfId(order.id);
-    setNotice(null);
-    try {
-      const result = await api.post<{ sent: boolean; reason?: string }>(`/customer-orders/${order.id}/send-whatsapp`);
-      setNotice(
-        result.sent
-          ? `PDF sent to ${order.customerName} via WhatsApp.`
-          : `Could not send PDF: ${result.reason === 'no_customer_phone' ? 'no phone number on file for this customer.' : (result.reason ?? 'unknown error')}`,
-      );
-    } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : 'Failed to send PDF via WhatsApp');
-    } finally {
-      setSendingPdfId(null);
-    }
+  // "Send PDF via WhatsApp" specifically - lets the sender pick which chat
+  // or group to send to (same picker popup), with the PDF fetched and
+  // attached automatically (autoAttachPdf) instead of making them notice
+  // and click "Attach PDF" themselves - sending itself still only happens
+  // when they click Send Message inside the popup.
+  function handleSendPdfViaWhatsApp(order: CustomerOrder) {
+    openWhatsApp({
+      recipientName: (order.customerName ?? '') || 'Customer',
+      recipientPhone: order.phone ?? undefined,
+      // No caption text - this action sends only the PDF file itself.
+      defaultMessage: '',
+      pdfUrl: `/customer-orders/${order.id}/pdf`,
+      pdfFilename: `Order Confirmation - ${order.orderId}.pdf`,
+      autoAttachPdf: true,
+    });
   }
 
-  // Separate from both the standalone send above and the in-popup attach -
+  // Separate from the in-popup attach flow below -
   // hands the PDF to the device's native share sheet (WhatsApp, email,
   // anything installed), which doesn't depend on the backend's own
   // WhatsApp connection being up. Falls back to a normal download on
@@ -486,8 +481,8 @@ function CustomerOrdersContent() {
                         { label: 'Edit', onClick: () => openEdit(order) },
                         { label: 'Download PDF', onClick: () => downloadOrderPdf(order) },
                         {
-                          label: sendingPdfId === order.id ? 'Sending PDF...' : 'Send PDF via WhatsApp',
-                          onClick: () => sendOrderPdfViaWhatsApp(order),
+                          label: 'Send PDF via WhatsApp',
+                          onClick: () => handleSendPdfViaWhatsApp(order),
                         },
                         { label: 'Share PDF', onClick: () => shareOrderPdf(order) },
                         {

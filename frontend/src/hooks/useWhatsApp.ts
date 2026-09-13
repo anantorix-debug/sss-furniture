@@ -12,6 +12,7 @@ interface UseWhatsAppOptions {
   // instead of it going out automatically to the order's own phone number.
   pdfUrl?: string;
   pdfFilename?: string;
+  autoAttachPdf?: boolean;
 }
 
 export function useWhatsApp() {

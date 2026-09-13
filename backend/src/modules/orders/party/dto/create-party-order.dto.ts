@@ -57,6 +57,12 @@ export class PartyOrderItemDto {
   @IsString()
   @IsOptional()
   modelNo?: string;
+
+  // Optional "this line looks like this" photo picked from the existing
+  // Gallery - same purpose as CustomerOrderItemDto.referenceImageId.
+  @IsString()
+  @IsOptional()
+  referenceImageId?: string;
 }
 
 export class CreatePartyOrderDto {

@@ -6,7 +6,7 @@ import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import type { AppNotification, AuditLogEntry, CarpenterWorkItem, PurchaseOrder, RawMaterial } from '@/types';
+import type { AppNotification, AuditLogEntry, CarpenterWorkItem, RawMaterial } from '@/types';
 
 function meta(a: AuditLogEntry, key: string): string {
   const value = a.metadata?.[key];
@@ -174,9 +174,6 @@ export function NotificationBell() {
 
   const { data: lowStock } = useSWR<RawMaterial[]>('/raw-materials?lowStockOnly=true', fetcher, { refreshInterval: 60000 });
   const { data: workItems } = useSWR<CarpenterWorkItem[]>('/carpenter-work-items', fetcher, { refreshInterval: 60000 });
-  const { data: purchaseOrders } = useSWR<PurchaseOrder[]>(hasRole('ADMIN') ? '/purchase-orders?status=PENDING_APPROVAL' : null, fetcher, {
-    refreshInterval: 60000,
-  });
   const { data: employeeActivity } = useSWR<AuditLogEntry[]>(hasRole('ADMIN') ? '/audit-logs/employee-activity' : null, fetcher, {
     refreshInterval: 60000,
   });
@@ -218,14 +215,6 @@ export function NotificationBell() {
             tone: 'info',
           }),
         ),
-      ...(purchaseOrders ?? []).map(
-        (po): NotificationItem => ({
-          id: `po-${po.id}`,
-          label: `Purchase order ${po.poNumber} needs approval`,
-          href: '/purchase-orders',
-          tone: 'info',
-        }),
-      ),
       ...(employeeActivity ?? []).map(
         (a): NotificationItem => ({
           id: `activity-${a.id}`,
@@ -253,7 +242,7 @@ export function NotificationBell() {
         }),
       ),
     ],
-    [lowStock, workItems, purchaseOrders, employeeActivity, serverNotifications],
+    [lowStock, workItems, employeeActivity, serverNotifications],
   );
 
   const serverUnreadIds = useMemo(() => new Set((serverNotifications ?? []).filter((n) => !n.isRead).map((n) => n.id)), [serverNotifications]);

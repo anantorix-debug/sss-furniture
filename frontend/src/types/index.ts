@@ -1,23 +1,9 @@
 export type Role = 'SUPERADMIN' | 'ADMIN' | 'CARPENTER' | 'CARVER' | 'POLISHER';
 export type DeliveryStatus = 'PENDING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'DELIVERY_FAILED' | 'CANCELLED';
 export type WorkStatus = 'ASSIGNED' | 'IN_PROGRESS' | 'QUALITY_CHECK' | 'REWORK' | 'COMPLETED';
-export type PurchaseOrderStatus =
-  | 'DRAFT'
-  | 'PENDING_APPROVAL'
-  | 'REJECTED'
-  | 'APPROVED'
-  | 'SENT_TO_SHOP'
-  | 'PARTIALLY_RECEIVED'
-  | 'RECEIVED'
-  | 'CANCELLED';
-export const PURCHASE_ORDER_STATUS_LABEL: Record<PurchaseOrderStatus, string> = {
-  DRAFT: 'Draft',
-  PENDING_APPROVAL: 'Pending Approval',
-  REJECTED: 'Rejected',
-  APPROVED: 'Approved',
-  SENT_TO_SHOP: 'Sent to Shop',
-  PARTIALLY_RECEIVED: 'Partially Received',
-  RECEIVED: 'Received',
+export type PurchaseStatus = 'RECORDED' | 'CANCELLED';
+export const PURCHASE_STATUS_LABEL: Record<PurchaseStatus, string> = {
+  RECORDED: 'Recorded',
   CANCELLED: 'Cancelled',
 };
 export type StockMovementType = 'IN' | 'OUT' | 'ADJUSTMENT';
@@ -197,7 +183,7 @@ export interface SupplierPurchase {
   rawMaterial?: { id: string; name: string; unit: string; measurementKind: MaterialMeasurementKind } | null;
   thicknessIn?: number | null;
   widthIn?: number | null;
-  lengthIn?: number | null;
+  lengthFt?: number | null;
   pieces?: number | null;
 }
 
@@ -488,6 +474,10 @@ export interface RawMaterial {
   totalPurchased: number;
   totalConsumed: number;
   totalAdjusted: number;
+  // For a BOARD_FEET material - the plank size from its most recent
+  // Purchase, so Issue Material can auto-fill dimensions and only ask for
+  // Pieces. Null if no dimensioned purchase has been recorded yet.
+  lastPieceDimensions?: { thicknessIn: number; widthIn: number; lengthFt: number } | null;
 }
 
 export interface StockMovement {
@@ -500,8 +490,8 @@ export interface StockMovement {
   reason?: string | null;
   workItemId?: string | null;
   workItem?: { id: string; productName: string; carpenter?: { name: string; workerType?: WorkerType } | null } | null;
-  purchaseOrderId?: string | null;
-  purchaseOrder?: { id: string; poNumber: string } | null;
+  purchaseId?: string | null;
+  purchase?: { id: string; purchaseNumber: string; supplier?: { name: string } | null } | null;
   date: string;
   createdBy?: { name: string };
 }
@@ -512,47 +502,33 @@ export interface RawMaterialDetail extends RawMaterial {
 
 // --- Purchase Orders --------------------------------------------------------
 
-export interface PurchaseOrderItem {
+export interface PurchaseItem {
   id: string;
   rawMaterialId: string;
   rawMaterial?: { id: string; name: string; unit: string; measurementKind?: MaterialMeasurementKind };
-  // Ordered amount - for a BOARD_FEET material this is the server-computed
-  // Total Board Feet, not whatever was typed in.
+  // Purchased amount - for a BOARD_FEET material this is the server-computed
+  // Total Board Feet, not whatever was typed in. Immediately what enters
+  // stock - there is no separate receiving step.
   quantity: number;
   unitPrice: number;
-  // Running total received so far across every receive() event.
-  // quantity - receivedQuantity = remaining still owed.
-  receivedQuantity: number;
   thicknessIn?: number | null;
   widthIn?: number | null;
-  lengthIn?: number | null;
+  lengthFt?: number | null;
   pieces?: number | null;
 }
 
-export interface PurchaseReceivingEvent {
-  date: string;
-  receivedBy?: string;
-  items: { rawMaterial: { id: string; name: string; unit: string }; quantity: number }[];
-}
-
-export interface PurchaseOrder {
+export interface Purchase {
   id: string;
-  poNumber: string;
+  purchaseNumber: string;
   supplierId: string;
   supplier?: { id: string; name: string; phone?: string | null };
-  status: PurchaseOrderStatus;
-  orderDate: string;
-  expectedDate?: string | null;
+  status: PurchaseStatus;
+  purchaseDate: string;
   notes?: string | null;
-  rejectionReason?: string | null;
-  sentToShopAt?: string | null;
-  items: PurchaseOrderItem[];
+  items: PurchaseItem[];
   totalValue: number;
-  receivingHistory: PurchaseReceivingEvent[];
   createdBy?: { name: string };
-  approvedBy?: { name: string } | null;
   createdAt: string;
-  whatsapp?: { sent: boolean; reason?: string };
 }
 
 // --- Unified payments & reports ---------------------------------------------
@@ -609,7 +585,7 @@ export interface ProfitAndLoss {
 export interface TrackMaterialPurchase {
   date: string;
   quantity: number;
-  poNumber?: string | null;
+  purchaseNumber?: string | null;
   supplierName?: string | null;
   supplierPhone?: string | null;
   unitCost?: number | null;

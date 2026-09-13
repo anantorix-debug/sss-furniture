@@ -274,7 +274,7 @@ async function main() {
       particulars: string;
       qty: number;
       price: number;
-      dims?: { thicknessIn: number; widthIn: number; lengthIn: number; pieces: number };
+      dims?: { thicknessIn: number; widthIn: number; lengthFt: number; pieces: number };
     }) => {
       let material = await prisma.rawMaterial.findUnique({ where: { name: opts.materialName } });
       if (!material) {
@@ -300,7 +300,7 @@ async function main() {
           rawMaterialId: material.id,
           thicknessIn: opts.dims?.thicknessIn,
           widthIn: opts.dims?.widthIn,
-          lengthIn: opts.dims?.lengthIn,
+          lengthFt: opts.dims?.lengthFt,
           pieces: opts.dims?.pieces,
           createdById: adminUser!.id,
         },
@@ -320,16 +320,16 @@ async function main() {
       });
     };
 
-    // The spec's own worked example: 2" x 6" x 120", 5 pieces, Rs.500/BF -> 50 Board Feet, Rs.25,000
+    // The spec's own worked example: 2" x 6" x 10', 5 pieces, Rs.500/BF -> 50 Board Feet, Rs.25,000
     await seedConnectedPurchase({
       materialName: 'Teak Wood (Raw)',
       materialType: 'Timber',
       materialGroup: 'WOOD',
       measurementKind: 'BOARD_FEET',
-      particulars: 'Teak Wood (Raw) - 2x6x120 boards',
+      particulars: 'Teak Wood (Raw) - 2x6x10ft boards',
       qty: 50,
       price: 500,
-      dims: { thicknessIn: 2, widthIn: 6, lengthIn: 120, pieces: 5 },
+      dims: { thicknessIn: 2, widthIn: 6, lengthFt: 10, pieces: 5 },
     });
 
     await seedConnectedPurchase({

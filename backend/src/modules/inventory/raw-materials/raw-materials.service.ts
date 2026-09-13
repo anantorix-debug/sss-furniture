@@ -12,9 +12,10 @@ import { UpdateRawMaterialDto } from './dto/update-raw-material.dto';
 import { StockInDto } from './dto/stock-in.dto';
 import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
 import { IssueMaterialDto } from './dto/issue-material.dto';
+import { computeBoardFeet } from '../../../common/utils/board-feet.util';
 
 const REFERENCE_LABEL: Record<string, string> = {
-  PURCHASE_ORDER: 'Purchase Order',
+  PURCHASE: 'Purchase',
   PRODUCTION: 'Production',
   ADJUSTMENT: 'Adjustment',
 };
@@ -51,8 +52,14 @@ export class RawMaterialsService {
   ) {}
 
   private summarize(material: { stockMovements: { quantity: any; unitCost: any; type: string; date: Date }[] }) {
-    const byType = (t: string) => sumAmounts(material.stockMovements.filter((m) => m.type === t).map((m) => ({ amount: m.quantity })));
-    const inStock = sumAmounts(material.stockMovements.map((m) => ({ amount: m.quantity })));
+    // Board-feet quantities are routinely fractional (e.g. 116.67), and
+    // summing many of them in floating point drifts to results like
+    // 166.67000000000002 - round every summed figure to 2 decimals, same
+    // convention as computeBalance's balanceAmount, so the UI never shows
+    // raw floating-point noise.
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const byType = (t: string) => round2(sumAmounts(material.stockMovements.filter((m) => m.type === t).map((m) => ({ amount: m.quantity }))));
+    const inStock = round2(sumAmounts(material.stockMovements.map((m) => ({ amount: m.quantity }))));
     // OUT movements are stored as negative quantities - Math.abs turns
     // "consumed" into a plain positive amount for display.
     const totalPurchased = byType('IN');
@@ -62,7 +69,43 @@ export class RawMaterialsService {
       .filter((m) => m.unitCost != null)
       .sort((a, b) => b.date.getTime() - a.date.getTime())[0];
     const purchaseRate = lastCostMovement ? Number(lastCostMovement.unitCost) : 0;
-    return { inStock, purchaseRate, stockValue: inStock * purchaseRate, totalPurchased, totalConsumed, totalAdjusted };
+    return { inStock, purchaseRate, stockValue: round2(inStock * purchaseRate), totalPurchased, totalConsumed, totalAdjusted };
+  }
+
+  // For a BOARD_FEET material, employees issuing stock shouldn't have to
+  // re-type the plank size every time - it's fixed by what was actually
+  // bought. Looks up the most recent Purchase that recorded a dimensioned
+  // item for each material, so Issue Material can auto-fill Thickness/
+  // Width/Length and only ask the employee for Pieces.
+  private async lastPieceDimensionsMap(
+    materialIds: string[],
+  ): Promise<Map<string, { thicknessIn: number; widthIn: number; lengthFt: number }>> {
+    const map = new Map<string, { thicknessIn: number; widthIn: number; lengthFt: number }>();
+    if (materialIds.length === 0) return map;
+    const items = await this.prisma.purchaseItem.findMany({
+      where: { rawMaterialId: { in: materialIds }, thicknessIn: { not: null }, widthIn: { not: null }, lengthFt: { not: null } },
+      select: { rawMaterialId: true, thicknessIn: true, widthIn: true, lengthFt: true, purchaseId: true },
+    });
+    if (items.length === 0) return map;
+    // Not `include: { purchase: ... }` - a required-relation include throws
+    // if any row's FK has gone orphaned (seen in this DB before, see the
+    // "Fix orphaned rows" cleanup). Looking dates up separately degrades to
+    // just skipping that row instead of 500ing the whole materials list.
+    const purchases = await this.prisma.purchase.findMany({
+      where: { id: { in: [...new Set(items.map((i) => i.purchaseId))] } },
+      select: { id: true, purchaseDate: true },
+    });
+    const dateById = new Map(purchases.map((p) => [p.id, p.purchaseDate]));
+    const sorted = items
+      .map((i) => ({ ...i, purchaseDate: dateById.get(i.purchaseId) }))
+      .filter((i): i is typeof i & { purchaseDate: Date } => i.purchaseDate != null)
+      .sort((a, b) => b.purchaseDate.getTime() - a.purchaseDate.getTime());
+    for (const item of sorted) {
+      if (!map.has(item.rawMaterialId)) {
+        map.set(item.rawMaterialId, { thicknessIn: Number(item.thicknessIn), widthIn: Number(item.widthIn), lengthFt: Number(item.lengthFt) });
+      }
+    }
+    return map;
   }
 
   // Opt-in pagination, applied in JS rather than at the DB level: isLow is
@@ -82,11 +125,13 @@ export class RawMaterialsService {
       orderBy: { name: 'asc' },
     });
 
+    const dimMap = await this.lastPieceDimensionsMap(materials.filter((m) => m.measurementKind === 'BOARD_FEET').map((m) => m.id));
+
     const summarized = materials.map((m) => {
       const { stockMovements, ...rest } = m;
       const summary = this.summarize(m);
       const isLow = m.reorderLevel != null && summary.inStock < Number(m.reorderLevel);
-      return stripFinancials({ ...rest, ...summary, isLow }, params.viewerRole);
+      return stripFinancials({ ...rest, ...summary, isLow, lastPieceDimensions: dimMap.get(m.id) ?? null }, params.viewerRole);
     });
 
     const filtered = params.lowStockOnly ? summarized.filter((m) => (m as any).isLow) : summarized;
@@ -106,7 +151,7 @@ export class RawMaterialsService {
           orderBy: { date: 'desc' },
           include: {
             workItem: { select: { id: true, productName: true, carpenter: { select: { name: true } } } },
-            purchaseOrder: { select: { id: true, poNumber: true } },
+            purchase: { select: { id: true, purchaseNumber: true, supplier: { select: { name: true } } } },
             createdBy: { select: { name: true } },
           },
         },
@@ -116,7 +161,9 @@ export class RawMaterialsService {
 
     const summary = this.summarize(material);
     const stockMovements = material.stockMovements.map((m) => stripFinancials(m, viewerRole));
-    return stripFinancials({ ...material, stockMovements, ...summary }, viewerRole);
+    const lastPieceDimensions =
+      material.measurementKind === 'BOARD_FEET' ? (await this.lastPieceDimensionsMap([material.id])).get(material.id) ?? null : null;
+    return stripFinancials({ ...material, stockMovements, ...summary, lastPieceDimensions }, viewerRole);
   }
 
   // Locks the unit for every measurementKind except OTHER, so a material's
@@ -162,12 +209,12 @@ export class RawMaterialsService {
     // real stock/purchase history orphans those rows' rawMaterialId,
     // which then breaks any query that includes the (required) rawMaterial
     // relation on StockMovement.
-    const [movementCount, purchaseOrderItemCount, supplierPurchaseCount] = await Promise.all([
+    const [movementCount, purchaseItemCount, supplierPurchaseCount] = await Promise.all([
       this.prisma.stockMovement.count({ where: { rawMaterialId: id } }),
-      this.prisma.purchaseOrderItem.count({ where: { rawMaterialId: id } }),
+      this.prisma.purchaseItem.count({ where: { rawMaterialId: id } }),
       this.prisma.supplierPurchase.count({ where: { rawMaterialId: id } }),
     ]);
-    if (movementCount > 0 || purchaseOrderItemCount > 0 || supplierPurchaseCount > 0) {
+    if (movementCount > 0 || purchaseItemCount > 0 || supplierPurchaseCount > 0) {
       throw new ConflictException(
         'This material has stock movement or purchase history and cannot be deleted. Remove those entries first if you really need to delete it.',
       );
@@ -232,11 +279,20 @@ export class RawMaterialsService {
           include: { stockMovements: { select: { quantity: true, unitCost: true, type: true, date: true } } },
         });
         if (!material) throw new NotFoundException(`Raw material ${item.rawMaterialId} not found`);
+
+        // For a BOARD_FEET material the actual quantity issued is server-
+        // computed from the dimension fields, never trusted from the
+        // client - same override pattern as Purchases' resolveItemsInput.
+        const isBoardFeet = material.measurementKind === 'BOARD_FEET';
+        const quantity = isBoardFeet
+          ? computeBoardFeet({ thicknessIn: item.thicknessIn, widthIn: item.widthIn, lengthFt: item.lengthFt, pieces: item.pieces })
+          : item.quantity;
+
         const { inStock, purchaseRate } = this.summarize(material);
-        if (inStock < item.quantity) {
-          throw new ConflictException(`Not enough ${material.name} in stock - available ${inStock} ${material.unit}, requested ${item.quantity}.`);
+        if (inStock < quantity) {
+          throw new ConflictException(`Not enough ${material.name} in stock - available ${inStock} ${material.unit}, requested ${quantity}.`);
         }
-        return { material, requested: item.quantity, purchaseRate };
+        return { material, requested: quantity, purchaseRate };
       }),
     );
 
@@ -244,7 +300,7 @@ export class RawMaterialsService {
       data: dto.items.map((item, idx) => ({
         rawMaterialId: item.rawMaterialId,
         type: 'OUT' as const,
-        quantity: -Math.abs(item.quantity),
+        quantity: -Math.abs(materials[idx].requested),
         // Snapshot the material's purchase rate at the moment of issue, so
         // "actual material cost" per employee/day stays accurate even if
         // future purchases change the rate.
@@ -311,10 +367,10 @@ export class RawMaterialsService {
     dateFrom?: string;
     dateTo?: string;
     // A friendlier alias over `type`/the FK columns for the common ledger's
-    // "Reference" filter - PURCHASE_ORDER/PRODUCTION map to "this movement
-    // has that FK set", ADJUSTMENT is just the existing type value. No new
+    // "Reference" filter - PURCHASE/PRODUCTION map to "this movement has
+    // that FK set", ADJUSTMENT is just the existing type value. No new
     // column - purely a different way to query what's already there.
-    reference?: 'PURCHASE_ORDER' | 'PRODUCTION' | 'ADJUSTMENT';
+    reference?: 'PURCHASE' | 'PRODUCTION' | 'ADJUSTMENT';
     viewerRole?: Role;
     page?: number;
     limit?: number;
@@ -328,21 +384,21 @@ export class RawMaterialsService {
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
     const referenceWhere =
-      params.reference === 'PURCHASE_ORDER'
-        ? { purchaseOrderId: { not: null } }
+      params.reference === 'PURCHASE'
+        ? { purchaseId: { not: null } }
         : params.reference === 'PRODUCTION'
           ? { workItemId: { not: null } }
           : params.reference === 'ADJUSTMENT'
             ? { type: 'ADJUSTMENT' as const }
             : {};
     const where = {
-      rawMaterialId: params.rawMaterialId,
-      type: params.type as any,
-      workItemId: params.workItemId,
+      rawMaterialId: params.rawMaterialId || undefined,
+      type: (params.type || undefined) as any,
+      workItemId: params.workItemId || undefined,
       workItem:
         params.workerType || params.carpenterId
           ? {
-              carpenterId: params.carpenterId,
+              carpenterId: params.carpenterId || undefined,
               carpenter: params.workerType ? { workerType: params.workerType as any } : undefined,
             }
           : undefined,
@@ -360,7 +416,7 @@ export class RawMaterialsService {
         include: {
           rawMaterial: { select: { id: true, name: true, unit: true } },
           workItem: { select: { id: true, productName: true, carpenter: { select: { name: true, workerType: true } } } },
-          purchaseOrder: { select: { id: true, poNumber: true } },
+          purchase: { select: { id: true, purchaseNumber: true, supplier: { select: { name: true } } } },
           createdBy: { select: { name: true } },
         },
         orderBy: { date: 'desc' },
@@ -380,14 +436,14 @@ export class RawMaterialsService {
     const movements = (await this.findAllMovements({ ...params, forExport: true, page: undefined, limit: undefined })) as any[];
     const rows = movements
       .map((m) => {
-        const employee = m.workItem?.carpenter?.name ?? '-';
+        const supplierOrEmployee = m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-';
         const role = m.workItem?.carpenter?.workerType ?? '-';
-        const reference = m.purchaseOrder ? `PO ${m.purchaseOrder.poNumber}` : m.workItem ? `Production: ${m.workItem.productName}` : m.type === 'ADJUSTMENT' ? 'Adjustment' : '-';
+        const reference = m.purchase ? m.purchase.purchaseNumber : m.workItem ? `Production: ${m.workItem.productName}` : m.type === 'ADJUSTMENT' ? 'Adjustment' : '-';
         return `<tr>
           <td>${new Date(m.date).toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(m.type)}</td>
           <td style="text-align:right">${Number(m.quantity) > 0 ? '+' : ''}${Number(m.quantity)}</td>
-          <td>${escapeHtml(employee)}</td>
+          <td>${escapeHtml(supplierOrEmployee)}</td>
           <td>${escapeHtml(role)}</td>
           <td>${escapeHtml(reference)}</td>
           <td>${escapeHtml(m.reason ?? '-')}</td>
@@ -418,7 +474,7 @@ export class RawMaterialsService {
       <div><div class="label">Net Movement</div><div class="value">${netMovement > 0 ? '+' : ''}${netMovement}</div></div>
     </div>
     <table>
-      <thead><tr><th>Date</th><th>Type</th><th style="text-align:right">Qty</th><th>Employee</th><th>Role</th><th>Reference</th><th>Reason</th><th>By</th></tr></thead>
+      <thead><tr><th>Date</th><th>Type</th><th style="text-align:right">Qty</th><th>Supplier / Employee</th><th>Role</th><th>Reference</th><th>Reason</th><th>By</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px">No movements found</td></tr>'}</tbody>
     </table>
     ${renderGeneratedFooter(movements.length, 'movement')}`;

@@ -56,7 +56,7 @@ function UsersPageContent() {
     formOpen && !editing && PRODUCTION_ROLES.includes(role) ? `/carpenters?workerType=${role}` : null,
     fetcher,
   );
-  const unlinkedCarpenters = (carpentersForRole ?? []).filter((c) => !c.user);
+  const allCarpentersForRole = carpentersForRole ?? [];
 
   function openCreate() {
     setEditing(null);
@@ -259,20 +259,22 @@ function UsersPageContent() {
                   onChange={(e) => {
                     const id = e.target.value;
                     setLinkCarpenterId(id);
-                    const worker = unlinkedCarpenters.find((c) => c.id === id);
+                    const worker = allCarpentersForRole.find((c) => c.id === id);
                     if (worker) setName(worker.name);
                   }}
                 >
                   <option value="">Not now - link later from Production</option>
-                  {unlinkedCarpenters.map((c) => (
-                    <option key={c.id} value={c.id}>
+                  {allCarpentersForRole.map((c) => (
+                    <option key={c.id} value={c.id} disabled={Boolean(c.user)}>
                       {c.name} {c.phone ? `(${c.phone})` : ''}
+                      {c.user ? ' - already linked' : ''}
                     </option>
                   ))}
                 </select>
                 <p className="text-xs text-brand-400 mt-1">
-                  Ties this login to their existing worker profile so their jobs show up on their My Work page. Only unlinked{' '}
-                  {ROLE_LABEL[role]} workers are listed - create the worker profile first in Production if it doesn&apos;t exist yet.
+                  Ties this login to their existing worker profile so their jobs show up on their My Work page. Every{' '}
+                  {ROLE_LABEL[role]} worker is shown - one already linked to another login can&apos;t be picked again; create the
+                  worker profile first in Production if it doesn&apos;t exist yet.
                 </p>
               </div>
             )}

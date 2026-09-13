@@ -143,6 +143,36 @@ export class UsersService {
       await this.assertNotLastSuperadmin(target);
     }
 
+    // Same defensive check as Carpenter/Supplier removal: don't rely on the
+    // schema's onDelete behavior alone (MySQL FK constraints aren't
+    // guaranteed to have actually been created by every `prisma db push` in
+    // this project's history) - block deletion when this login has created
+    // real history instead of risking an orphaned row that later crashes any
+    // query joining that record's required `createdBy`/`uploadedBy`/etc.
+    // relation. Deactivate (isActive: false via PATCH) is the alternative.
+    const historyCounts = await Promise.all([
+      this.prisma.customerOrder.count({ where: { createdById: id } }),
+      this.prisma.customerOrderPayment.count({ where: { createdById: id } }),
+      this.prisma.partyOrder.count({ where: { createdById: id } }),
+      this.prisma.partyOrderPayment.count({ where: { createdById: id } }),
+      this.prisma.supplierPurchase.count({ where: { createdById: id } }),
+      this.prisma.supplierPayment.count({ where: { createdById: id } }),
+      this.prisma.carpenterWorkItem.count({ where: { createdById: id } }),
+      this.prisma.carpenterPayment.count({ where: { createdById: id } }),
+      this.prisma.productStockMovement.count({ where: { createdById: id } }),
+      this.prisma.galleryImage.count({ where: { uploadedById: id } }),
+      this.prisma.stockMovement.count({ where: { createdById: id } }),
+      this.prisma.purchase.count({ where: { createdById: id } }),
+      this.prisma.qualityCheck.count({ where: { inspectedById: id } }),
+      this.prisma.dispatchRecord.count({ where: { dispatchedById: id } }),
+      this.prisma.expense.count({ where: { createdById: id } }),
+    ]);
+    if (historyCounts.some((count) => count > 0)) {
+      throw new ConflictException(
+        'This user has created orders, payments, stock movements, or other records and cannot be deleted. Deactivate the account instead.',
+      );
+    }
+
     await this.prisma.user.delete({ where: { id } });
     await this.audit.log({ userId: actingUserId, action: 'USER_DELETED', targetType: 'User', targetId: id, metadata: { targetEmail: target.email } });
     return { success: true };

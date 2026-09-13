@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // supplier totals) with nothing relevant to a production employee -
       // Carpenter/Carver/Polisher land on their own workspace instead.
       const isProductionEmployee = res.user.role === 'CARPENTER' || res.user.role === 'CARVER' || res.user.role === 'POLISHER';
-      router.push(isProductionEmployee ? '/carpenters' : '/dashboard');
+      router.push(isProductionEmployee ? '/my-work' : '/dashboard');
     },
     [router],
   );

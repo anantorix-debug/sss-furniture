@@ -47,14 +47,11 @@ enum WorkStatus {
   COMPLETED
 }
 
-enum PurchaseOrderStatus {
-  DRAFT
-  PENDING_APPROVAL
-  REJECTED
-  APPROVED
-  SENT_TO_SHOP
-  PARTIALLY_RECEIVED
-  RECEIVED
+// Direct-purchase model: recording a purchase immediately books stock +
+// supplier payable, so there's no approval/receiving pipeline to track -
+// just whether it's still in effect or was cancelled.
+enum PurchaseStatus {
+  RECORDED
   CANCELLED
 }
 
@@ -174,11 +171,10 @@ model User {
   carpenterWorkItems           CarpenterWorkItem[]
   workItemsAssigned            CarpenterWorkItem[]    @relation("WorkItemAssignedBy")
   notifications                Notification[]
-  carpenterProfile              Carpenter?
+  carpenterProfile             Carpenter?
   carpenterPayments            CarpenterPayment[]
   stockMovements               StockMovement[]
-  purchaseOrdersCreated        PurchaseOrder[]        @relation("PurchaseOrderCreatedBy")
-  purchaseOrdersApproved       PurchaseOrder[]        @relation("PurchaseOrderApprovedBy")
+  purchasesCreated             Purchase[]
   auditLogs                    AuditLog[]
   qualityChecks                QualityCheck[]
   dispatchRecords              DispatchRecord[]
@@ -274,13 +270,13 @@ model CustomerOrder {
   catalogueStatus     CatalogueStatus @default(NOT_SENT)
   catalogueShareToken String?         @unique
 
-  createdById String
-  createdBy   User                   @relation(fields: [createdById], references: [id])
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
-  payments    CustomerOrderPayment[]
-  items       CustomerOrderItem[]
-  workItems   CarpenterWorkItem[]
+  createdById        String
+  createdBy          User                   @relation(fields: [createdById], references: [id])
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  payments           CustomerOrderPayment[]
+  items              CustomerOrderItem[]
+  workItems          CarpenterWorkItem[]
   finishedStockItems FinishedStockItem[]
 
   @@map("customer_orders")
@@ -320,6 +316,13 @@ model CustomerOrderItem {
 
   workItems          CarpenterWorkItem[]
   finishedStockItems FinishedStockItem[]
+
+  // Optional "this line looks like this" photo picked from the existing
+  // Gallery - purely a visual reference for internal use, separate from
+  // CustomerOrder's own order-wide gallery images (which drive the
+  // customer-facing WhatsApp confirmation instead).
+  referenceImageId String?
+  referenceImage   GalleryImage? @relation("CustomerOrderItemReferenceImage", fields: [referenceImageId], references: [id], onDelete: SetNull)
 
   @@map("customer_order_items")
 }
@@ -450,6 +453,11 @@ model PartyOrderItem {
   workItems          CarpenterWorkItem[]
   finishedStockItems FinishedStockItem[]
 
+  // Optional "this line looks like this" photo picked from the existing
+  // Gallery - same purpose as CustomerOrderItem.referenceImage.
+  referenceImageId String?
+  referenceImage   GalleryImage? @relation("PartyOrderItemReferenceImage", fields: [referenceImageId], references: [id], onDelete: SetNull)
+
   @@map("party_order_items")
 }
 
@@ -482,9 +490,9 @@ model Supplier {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  purchases      SupplierPurchase[]
-  payments       SupplierPayment[]
-  purchaseOrders PurchaseOrder[]
+  purchases       SupplierPurchase[]
+  payments        SupplierPayment[]
+  purchaseRecords Purchase[]
 
   @@map("suppliers")
 }
@@ -514,13 +522,15 @@ model SupplierPurchase {
   rawMaterialId String?
   rawMaterial   RawMaterial? @relation(fields: [rawMaterialId], references: [id], onDelete: SetNull)
 
-  // Original wood dimensions (inches) - populated only when rawMaterial's
+  // Original wood dimensions - populated only when rawMaterial's
   // measurementKind is BOARD_FEET, kept purely so they stay visible/
   // editable later. qty (=Total Board Feet) and price (=rate/BF) above are
   // the authoritative, server-recomputed values - these four are not.
+  // Thickness/width are in inches, length is in feet (the way timber is
+  // actually quoted) - see computeBoardFeet for the formula this implies.
   thicknessIn Decimal? @db.Decimal(8, 3)
   widthIn     Decimal? @db.Decimal(8, 3)
-  lengthIn    Decimal? @db.Decimal(8, 3)
+  lengthFt    Decimal? @db.Decimal(8, 3)
   pieces      Int?
 
   createdById String
@@ -528,6 +538,13 @@ model SupplierPurchase {
   createdAt   DateTime @default(now())
 
   stockMovements StockMovement[]
+
+  // Links this ledger row back to the Purchase it came from (the original
+  // recording, an edit's corrected total, or a cancellation's offsetting
+  // entry) - lets edit/cancel find and update/offset the right row. Null
+  // for a manually-entered ledger line with no Purchase behind it.
+  purchaseId String?
+  purchase   Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
 
   @@map("supplier_purchases")
 }
@@ -663,9 +680,9 @@ model CarpenterWorkItem {
   // creates a FinishedStockItem for that job instead, so order-bound
   // production is never double-counted as free stock. See
   // CarpenterService.updateWorkStatus.
-  source                 ProductionSource   @default(STOCK)
-  sourceCustomerOrderId  String?
-  sourceCustomerOrder    CustomerOrder?     @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
+  source                    ProductionSource   @default(STOCK)
+  sourceCustomerOrderId     String?
+  sourceCustomerOrder       CustomerOrder?     @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
   // Which specific line of a multi-product Customer Order this is for -
   // sourceCustomerOrderId alone can't tell two lines of the same order
   // apart, which used to make "Assign to Production" claim whichever
@@ -674,12 +691,12 @@ model CarpenterWorkItem {
   // Orders already had from the start.
   sourceCustomerOrderItemId String?
   sourceCustomerOrderItem   CustomerOrderItem? @relation(fields: [sourceCustomerOrderItemId], references: [id], onDelete: SetNull)
-  sourcePartyOrderItemId String?
-  sourcePartyOrderItem   PartyOrderItem?  @relation(fields: [sourcePartyOrderItemId], references: [id], onDelete: SetNull)
+  sourcePartyOrderItemId    String?
+  sourcePartyOrderItem      PartyOrderItem?    @relation(fields: [sourcePartyOrderItemId], references: [id], onDelete: SetNull)
   // Which Godown SKU this item's completed output feeds (STOCK source) or
   // gets matched/created against once a Model No is entered.
-  productId              String?
-  product                Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId                 String?
+  product                   Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   createdById String
   createdBy   User     @relation(fields: [createdById], references: [id])
@@ -815,18 +832,24 @@ model Shop {
 // yet, and modelNo below is an optional free-text label, not a FK, so
 // uploading a photo never requires a Stock record to exist first.
 model GalleryImage {
-  id        String   @id @default(cuid())
-  url       String
-  fileName  String
-  fileSize  Int
-  modelNo   String? // optional label only - not a Product FK, see note above
-  caption   String?
+  id       String  @id @default(cuid())
+  url      String
+  fileName String
+  fileSize Int
+  modelNo  String? // optional label only - not a Product FK, see note above
+  caption  String?
 
   uploadedById String
   uploadedBy   User     @relation(fields: [uploadedById], references: [id])
   createdAt    DateTime @default(now())
 
   customerOrders CustomerOrderGalleryImage[]
+
+  // Per-line "what this design looks like" reference, distinct from the
+  // customerOrders join above (that one drives the customer-facing
+  // WhatsApp confirmation images for the whole order, not per line).
+  customerOrderItemReferences CustomerOrderItem[] @relation("CustomerOrderItemReferenceImage")
+  partyOrderItemReferences    PartyOrderItem[]    @relation("PartyOrderItemReferenceImage")
 
   @@map("gallery_images")
 }
@@ -887,9 +910,9 @@ model RawMaterial {
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
 
-  stockMovements     StockMovement[]
-  purchaseOrderItems PurchaseOrderItem[]
-  supplierPurchases  SupplierPurchase[]
+  stockMovements    StockMovement[]
+  purchaseItems     PurchaseItem[]
+  supplierPurchases SupplierPurchase[]
 
   @@map("raw_materials")
 }
@@ -909,20 +932,17 @@ model StockMovement {
   workItemId String?
   workItem   CarpenterWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
 
-  purchaseOrderId String?
-  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  // Links this movement to the Purchase that created it - the original
+  // recording's IN movement, or an edit/cancellation's offsetting
+  // ADJUSTMENT movement. Null for movements from any other path
+  // (production issue, manual stock-in, manual adjustment).
+  purchaseId String?
+  purchase   Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
 
-  // Groups every StockMovement created by one PurchaseOrdersService.receive()
-  // call - since a PO can be received in multiple partial deliveries, this
-  // reconstructs "receiving history" as discrete events (date/who/which
-  // lines/how much) without a separate model. Null for movements from any
-  // other path (stock-in, issue, adjustment).
-  receiptBatchId String?
-
-  // Mirrors purchaseOrderId above - links a material-linked Suppliers
-  // purchase to its paired stock-in movement so edit/delete can find and
-  // reverse it. Null for movements from PO receive(), stock-in, issue, and
-  // adjustment.
+  // Mirrors purchaseId above - links a material-linked Suppliers purchase
+  // to its paired stock-in movement so edit/delete can find and reverse it.
+  // Null for movements from Purchase create/edit/cancel, stock-in, issue,
+  // and adjustment.
   supplierPurchaseId String?
   supplierPurchase   SupplierPurchase? @relation(fields: [supplierPurchaseId], references: [id], onDelete: SetNull)
 
@@ -935,62 +955,57 @@ model StockMovement {
 }
 
 // ---------------------------------------------------------------------------
-// Purchase orders (approval workflow) - receiving one creates stock IN
-// movements and a SupplierPurchase ledger entry for the financial side.
+// Purchases (direct purchase = immediate stock in) - saving one immediately
+// creates stock IN movements and a SupplierPurchase ledger entry; there is
+// no approval or receiving step. Editing/cancelling reverses those via a
+// fresh offsetting StockMovement/SupplierPurchase entry rather than
+// mutating or deleting the original ones (see PurchasesService).
 // ---------------------------------------------------------------------------
 
-model PurchaseOrder {
-  id              String              @id @default(cuid())
-  poNumber        String              @unique
-  supplierId      String
-  supplier        Supplier            @relation(fields: [supplierId], references: [id])
-  status          PurchaseOrderStatus @default(DRAFT)
-  orderDate       DateTime
-  expectedDate    DateTime?
-  notes           String?
-  rejectionReason String?
-  sentToShopAt    DateTime?
+model Purchase {
+  id             String         @id @default(cuid())
+  purchaseNumber String         @unique
+  supplierId     String
+  supplier       Supplier       @relation(fields: [supplierId], references: [id])
+  status         PurchaseStatus @default(RECORDED)
+  purchaseDate   DateTime
+  notes          String?
 
-  createdById  String
-  createdBy    User      @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
-  approvedById String?
-  approvedBy   User?     @relation("PurchaseOrderApprovedBy", fields: [approvedById], references: [id])
-  approvedAt   DateTime?
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items          PurchaseOrderItem[]
-  stockMovements StockMovement[]
+  items             PurchaseItem[]
+  stockMovements    StockMovement[]
+  supplierPurchases SupplierPurchase[]
 
-  @@map("purchase_orders")
+  @@map("purchases")
 }
 
-model PurchaseOrderItem {
-  id              String        @id @default(cuid())
-  purchaseOrderId String
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  rawMaterialId   String
-  rawMaterial     RawMaterial   @relation(fields: [rawMaterialId], references: [id])
-  // Ordered amount - never mutated after create/edit. For a BOARD_FEET
+model PurchaseItem {
+  id            String      @id @default(cuid())
+  purchaseId    String
+  purchase      Purchase    @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  rawMaterialId String
+  rawMaterial   RawMaterial @relation(fields: [rawMaterialId], references: [id])
+  // Purchased amount, immediately what enters stock. For a BOARD_FEET
   // material this is the server-computed Total Board Feet, not whatever
-  // the client sent (see PurchaseOrdersService).
-  quantity        Decimal       @db.Decimal(12, 2)
-  unitPrice       Decimal       @db.Decimal(12, 2)
-  // Running total received so far across every receive() event - lets a PO
-  // be received in multiple partial deliveries. quantity - receivedQuantity
-  // = remaining still owed.
-  receivedQuantity Decimal      @default(0) @db.Decimal(12, 2)
+  // the client sent (see PurchasesService).
+  quantity      Decimal     @db.Decimal(12, 2)
+  unitPrice     Decimal     @db.Decimal(12, 2)
 
-  // Original wood dimensions (inches) - populated only when rawMaterial's
+  // Original wood dimensions - populated only when rawMaterial's
   // measurementKind is BOARD_FEET, kept purely so they stay visible/
   // editable later, same pattern as SupplierPurchase's identical fields.
+  // Thickness/width are in inches, length is in feet - see computeBoardFeet.
   thicknessIn Decimal? @db.Decimal(8, 3)
   widthIn     Decimal? @db.Decimal(8, 3)
-  lengthIn    Decimal? @db.Decimal(8, 3)
+  lengthFt    Decimal? @db.Decimal(8, 3)
   pieces      Int?
 
-  @@map("purchase_order_items")
+  @@map("purchase_items")
 }
 
 // ---------------------------------------------------------------------------
@@ -1078,16 +1093,16 @@ model FinishedStockItem {
   // Party Order lines). All optional - manual FinishedStock entries and
   // pre-existing rows simply leave these null; Dispatch itself never reads
   // them.
-  productId              String?
-  product                Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
-  sourceCustomerOrderId  String?
-  sourceCustomerOrder    CustomerOrder?  @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
+  productId                 String?
+  product                   Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
+  sourceCustomerOrderId     String?
+  sourceCustomerOrder       CustomerOrder?     @relation(fields: [sourceCustomerOrderId], references: [id], onDelete: SetNull)
   // Which specific line of a multi-product Customer Order this stock-fed
   // unit is for - see the identical note on CarpenterWorkItem.
   sourceCustomerOrderItemId String?
   sourceCustomerOrderItem   CustomerOrderItem? @relation(fields: [sourceCustomerOrderItemId], references: [id], onDelete: SetNull)
-  sourcePartyOrderItemId String?
-  sourcePartyOrderItem   PartyOrderItem? @relation(fields: [sourcePartyOrderItemId], references: [id], onDelete: SetNull)
+  sourcePartyOrderItemId    String?
+  sourcePartyOrderItem      PartyOrderItem?    @relation(fields: [sourcePartyOrderItemId], references: [id], onDelete: SetNull)
 
   dispatchRecords DispatchRecord[]
 
@@ -1149,7 +1164,7 @@ model WeeklyLabour {
 // Expenses (Super Admin financial control center) - an independent general
 // ledger / cash-book, deliberately NOT reading from or writing to
 // SupplierPayment / CarpenterPayment. Those already track purchase and
-// wage payments tied to a specific PurchaseOrder / CarpenterWorkItem; this
+// wage payments tied to a specific Purchase / CarpenterWorkItem; this
 // module tracks the company's broader outgoing-money log (rent, fuel,
 // tolls, one-off cash expenses, personal spending) the way the reference
 // paper ledger does. Keeping the two ledgers separate - rather than

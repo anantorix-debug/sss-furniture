@@ -11,32 +11,37 @@ import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { RoleGate } from '@/components/RoleGate';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
-import { PURCHASE_ORDER_STATUS_LABEL } from '@/types';
-import type { SupplierDetail, SupplierPayment, PurchaseOrder, PurchaseOrderStatus } from '@/types';
+import { PURCHASE_STATUS_LABEL } from '@/types';
+import type { SupplierDetail, SupplierPayment, Purchase, PurchaseStatus } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptyPaymentForm = { date: new Date().toISOString().slice(0, 10), particulars: '', voucherNo: '', amount: '', mode: 'CASH' };
 
-const STATUS_CHIP: Record<PurchaseOrderStatus, ChipColor> = {
-  DRAFT: 'gray',
-  PENDING_APPROVAL: 'amber',
-  REJECTED: 'red',
-  APPROVED: 'blue',
-  SENT_TO_SHOP: 'amber',
-  PARTIALLY_RECEIVED: 'amber',
-  RECEIVED: 'green',
+const STATUS_CHIP: Record<PurchaseStatus, ChipColor> = {
+  RECORDED: 'green',
   CANCELLED: 'red',
 };
+
+// Shows material + quantity (whatever category the material is - Board
+// Feet, Sheet, Nos, Litre, ...), not just a line count - same pattern as
+// the Purchase Orders list's own items summary.
+function purchaseItemsSummary(purchase: Purchase): string {
+  if (purchase.items.length === 0) return '-';
+  const first = purchase.items[0];
+  const pieces = first.pieces != null ? `, ${first.pieces} pcs` : '';
+  const firstText = `${first.rawMaterial?.name ?? 'Material'} (${first.quantity} ${first.rawMaterial?.unit ?? ''}${pieces})`;
+  return purchase.items.length === 1 ? firstText : `${firstText} +${purchase.items.length - 1} more`;
+}
 
 function SupplierDetailContent() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { hasRole } = useAuth();
   const { data: supplier, isLoading, mutate } = useSWR<SupplierDetail>(`/suppliers/${id}`, fetcher);
-  // Every purchase for a supplier goes through a Purchase Order - this is a
-  // read-only history, not another place to enter a purchase from. See
-  // PurchaseOrdersController for the actual purchasing flow.
-  const { data: purchaseOrders } = useSWR<PurchaseOrder[]>(`/purchase-orders?supplierId=${id}`, fetcher);
+  // Every purchase for a supplier immediately books stock + the ledger -
+  // this is a read-only history, not another place to enter a purchase
+  // from. See PurchasesController for the actual purchasing flow.
+  const { data: purchases } = useSWR<Purchase[]>(`/purchase-orders?supplierId=${id}`, fetcher);
 
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
@@ -144,16 +149,16 @@ function SupplierDetailContent() {
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="card p-5">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-brand-900">Purchase Orders</h2>
+            <h2 className="font-semibold text-brand-900">Purchases</h2>
             <Link href="/purchase-orders" className="text-brand-600 hover:underline text-xs">
-              + New Purchase Order
+              + New Purchase
             </Link>
           </div>
           <div className="max-h-96 overflow-y-auto rounded-lg border border-brand-100">
             <table className="table-shell">
               <thead>
                 <tr>
-                  <th>PO Number</th>
+                  <th>Purchase No</th>
                   <th>Date</th>
                   <th>Items</th>
                   <th>Total</th>
@@ -162,24 +167,24 @@ function SupplierDetailContent() {
                 </tr>
               </thead>
               <tbody>
-                {(!purchaseOrders || purchaseOrders.length === 0) && (
+                {(!purchases || purchases.length === 0) && (
                   <tr>
                     <td colSpan={6} className="text-center text-brand-400 py-4">
-                      No purchase orders yet
+                      No purchases yet
                     </td>
                   </tr>
                 )}
-                {purchaseOrders?.map((po) => (
-                  <tr key={po.id}>
-                    <td className="font-medium">{po.poNumber}</td>
-                    <td>{formatDate(po.orderDate)}</td>
-                    <td>{po.items.length}</td>
-                    <td className="font-medium">{formatCurrency(po.totalValue)}</td>
+                {purchases?.map((p) => (
+                  <tr key={p.id}>
+                    <td className="font-medium">{p.purchaseNumber}</td>
+                    <td>{formatDate(p.purchaseDate)}</td>
+                    <td>{purchaseItemsSummary(p)}</td>
+                    <td className="font-medium">{formatCurrency(p.totalValue)}</td>
                     <td>
-                      <Chip color={STATUS_CHIP[po.status]} label={PURCHASE_ORDER_STATUS_LABEL[po.status]} />
+                      <Chip color={STATUS_CHIP[p.status]} label={PURCHASE_STATUS_LABEL[p.status]} />
                     </td>
                     <td>
-                      <Link href={`/purchase-orders/${po.id}`} className="text-brand-600 hover:underline text-xs">
+                      <Link href={`/purchase-orders/${p.id}`} className="text-brand-600 hover:underline text-xs">
                         View
                       </Link>
                     </td>

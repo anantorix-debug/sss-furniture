@@ -1,14 +1,14 @@
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsDateString, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 
-class PurchaseOrderItemDto {
+class PurchaseItemDto {
   @IsString()
   rawMaterialId: string;
 
-  // Ordered quantity - required for a non-BOARD_FEET material. For a
+  // Purchased quantity - required for a non-BOARD_FEET material. For a
   // BOARD_FEET material the service overrides this with the server-computed
   // Total Board Feet from the four dimension fields below, ignoring
-  // whatever's sent here (see PurchaseOrdersService).
+  // whatever's sent here (see PurchasesService).
   @IsNumber()
   @Min(0.01)
   quantity: number;
@@ -17,9 +17,10 @@ class PurchaseOrderItemDto {
   @Min(0)
   unitPrice: number;
 
-  // Wood dimensions (inches) - required together only when rawMaterialId
-  // points at a BOARD_FEET material; enforced in the service since that
-  // depends on a DB-looked-up value, not expressible as a DTO rule.
+  // Wood dimensions - required together only when rawMaterialId points at a
+  // BOARD_FEET material; enforced in the service since that depends on a
+  // DB-looked-up value, not expressible as a DTO rule. Thickness/width are
+  // in inches, length is in feet (see computeBoardFeet).
   @IsNumber()
   @Min(0.001)
   @IsOptional()
@@ -33,7 +34,7 @@ class PurchaseOrderItemDto {
   @IsNumber()
   @Min(0.001)
   @IsOptional()
-  lengthIn?: number;
+  lengthFt?: number;
 
   @IsInt()
   @Min(1)
@@ -41,16 +42,12 @@ class PurchaseOrderItemDto {
   pieces?: number;
 }
 
-export class CreatePurchaseOrderDto {
+export class CreatePurchaseDto {
   @IsString()
   supplierId: string;
 
   @IsDateString()
-  orderDate: string;
-
-  @IsDateString()
-  @IsOptional()
-  expectedDate?: string;
+  purchaseDate: string;
 
   @IsString()
   @IsOptional()
@@ -59,6 +56,6 @@ export class CreatePurchaseOrderDto {
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => PurchaseOrderItemDto)
-  items: PurchaseOrderItemDto[];
+  @Type(() => PurchaseItemDto)
+  items: PurchaseItemDto[];
 }

@@ -190,6 +190,7 @@ export class CustomerOrdersService {
                 color: i.color,
                 quantity: i.quantity ?? 1,
                 unitPrice: i.unitPrice,
+                referenceImageId: i.referenceImageId,
               })),
             }
           : undefined,

@@ -45,7 +45,7 @@ export class RawMaterialsController {
     @Query('carpenterId') carpenterId?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
-    @Query('reference') reference?: 'PURCHASE_ORDER' | 'PRODUCTION' | 'ADJUSTMENT',
+    @Query('reference') reference?: 'PURCHASE' | 'PRODUCTION' | 'ADJUSTMENT',
     @CurrentUser() user?: AuthUser,
   ) {
     const buffer = await this.service.generateMovementsPdf({
@@ -77,7 +77,7 @@ export class RawMaterialsController {
     @Query('carpenterId') carpenterId?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
-    @Query('reference') reference?: 'PURCHASE_ORDER' | 'PRODUCTION' | 'ADJUSTMENT',
+    @Query('reference') reference?: 'PURCHASE' | 'PRODUCTION' | 'ADJUSTMENT',
     @CurrentUser() user?: AuthUser,
   ) {
     const material = await this.service.findOne(id, user?.role as Role);
@@ -146,7 +146,7 @@ export class RawMaterialsController {
     @Query('carpenterId') carpenterId?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
-    @Query('reference') reference?: 'PURCHASE_ORDER' | 'PRODUCTION' | 'ADJUSTMENT',
+    @Query('reference') reference?: 'PURCHASE' | 'PRODUCTION' | 'ADJUSTMENT',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,

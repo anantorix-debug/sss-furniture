@@ -16,7 +16,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { CustomerOrdersModule } from './modules/orders/customer/customer-orders.module';
 import { PartyOrdersModule } from './modules/orders/party/party-orders.module';
-import { PurchaseOrdersModule } from './modules/orders/purchase/purchase-orders.module';
+import { PurchasesModule } from './modules/orders/purchase/purchases.module';
 import { ProductsModule } from './modules/inventory/products/products.module';
 import { RawMaterialsModule } from './modules/inventory/raw-materials/raw-materials.module';
 import { QualityCheckModule } from './modules/quality-check/quality-check.module';
@@ -46,7 +46,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     SuppliersModule,
     CustomerOrdersModule,
     PartyOrdersModule,
-    PurchaseOrdersModule,
+    PurchasesModule,
     ProductsModule,
     RawMaterialsModule,
     QualityCheckModule,

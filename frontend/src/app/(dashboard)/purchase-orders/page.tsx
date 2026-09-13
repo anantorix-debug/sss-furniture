@@ -6,34 +6,27 @@ import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, getAccessToken } from '@/lib/api';
-import { useAuth } from '@/context/AuthContext';
 import { RoleGate } from '@/components/RoleGate';
 import { Modal } from '@/components/Modal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
-import { ReceivePurchaseOrderModal } from '@/components/ReceivePurchaseOrderModal';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { formatCurrency, formatDate } from '@/lib/format';
-import { PURCHASE_ORDER_STATUS_LABEL } from '@/types';
-import type { PurchaseOrder, PurchaseOrderStatus, RawMaterial, SupplierSummary } from '@/types';
+import { PURCHASE_STATUS_LABEL } from '@/types';
+import type { Purchase, PurchaseStatus, RawMaterial, SupplierSummary } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
 import { PurchasingTabs } from '@/components/PurchasingTabs';
+import { boardFeetPreview } from '@/lib/boardFeet';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptyFilters: Record<string, string> = {};
-const STATUS_OPTIONS = Object.entries(PURCHASE_ORDER_STATUS_LABEL).map(([value, label]) => ({ value, label }));
+const STATUS_OPTIONS = Object.entries(PURCHASE_STATUS_LABEL).map(([value, label]) => ({ value, label }));
 
-const STATUS_CHIP: Record<PurchaseOrderStatus, ChipColor> = {
-  DRAFT: 'gray',
-  PENDING_APPROVAL: 'amber',
-  REJECTED: 'red',
-  APPROVED: 'blue',
-  SENT_TO_SHOP: 'amber',
-  PARTIALLY_RECEIVED: 'amber',
-  RECEIVED: 'green',
+const STATUS_CHIP: Record<PurchaseStatus, ChipColor> = {
+  RECORDED: 'green',
   CANCELLED: 'red',
 };
 
@@ -43,27 +36,25 @@ interface ItemRow {
   unitPrice: string;
   thicknessIn: string;
   widthIn: string;
-  lengthIn: string;
+  lengthFt: string;
   pieces: string;
 }
 
-const emptyRow: ItemRow = { rawMaterialId: '', quantity: '', unitPrice: '', thicknessIn: '', widthIn: '', lengthIn: '', pieces: '' };
+const emptyRow: ItemRow = { rawMaterialId: '', quantity: '', unitPrice: '', thicknessIn: '', widthIn: '', lengthFt: '', pieces: '' };
 
-// D x S x L / 144 per piece, x pieces - client-side preview only (the
-// server recomputes and enforces this same formula authoritatively).
-function boardFeetPreview(thicknessIn: string, widthIn: string, lengthIn: string, pieces: string) {
-  const t = parseFloat(thicknessIn);
-  const w = parseFloat(widthIn);
-  const l = parseFloat(lengthIn);
-  const p = parseFloat(pieces);
-  if (!t || !w || !l || !p) return null;
-  const perPiece = Math.round(((t * w * l) / 144) * 100) / 100;
-  const total = Math.round(perPiece * p * 100) / 100;
-  return { perPiece, total };
+
+// Shows material + quantity, not just a count, so the list is useful at a
+// glance - matching the same "name +N more" pattern already used by Party
+// Orders' list for its own multi-line summary.
+function itemsSummary(purchase: Purchase): string {
+  if (purchase.items.length === 0) return '-';
+  const first = purchase.items[0];
+  const pieces = first.pieces != null ? `, ${first.pieces} pcs` : '';
+  const firstText = `${first.rawMaterial?.name ?? 'Material'} (${first.quantity} ${first.rawMaterial?.unit ?? ''}${pieces})`;
+  return purchase.items.length === 1 ? firstText : `${firstText} +${purchase.items.length - 1} more`;
 }
 
 function PurchaseOrdersContent() {
-  const { hasRole } = useAuth();
   const searchParams = useSearchParams();
   const [page, setPage] = useState(1);
   const [values, setValues] = useState<Record<string, string>>(emptyFilters);
@@ -72,7 +63,7 @@ function PurchaseOrdersContent() {
   const { data: suppliers } = useSWR<SupplierSummary[]>('/suppliers', fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
   const queryParams = new URLSearchParams({ ...applied, page: String(page), limit: '20' });
-  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<PurchaseOrder>>(`/purchase-orders?${queryParams}`, fetcher);
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<Purchase>>(`/purchase-orders?${queryParams}`, fetcher);
   const data = result?.data;
 
   function applyFilters() {
@@ -97,7 +88,7 @@ function PurchaseOrdersContent() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `purchase-orders-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.download = `purchases-${new Date().toISOString().slice(0, 10)}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
@@ -113,31 +104,40 @@ function PurchaseOrdersContent() {
   } = useWhatsApp();
 
   const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<PurchaseOrder | null>(null);
+  const [editing, setEditing] = useState<Purchase | null>(null);
   const [supplierId, setSupplierId] = useState('');
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
-  const [expectedDate, setExpectedDate] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<ItemRow[]>([emptyRow]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<PurchaseOrder | null>(null);
-  const [receiveTarget, setReceiveTarget] = useState<PurchaseOrder | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Purchase | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const materialOf = (id: string) => materials?.find((m) => m.id === id);
   const materialUnit = (id: string) => materialOf(id)?.unit ?? '';
 
   // Deep-linked from a raw material's "Record a Purchase" button - opens
-  // the New PO form with that material pre-selected on the first line (the
-  // supplier is still left for the admin to pick, since a PO always starts
-  // with one supplier).
+  // the New Purchase form with that material pre-selected on the first
+  // line (the supplier is still left for the admin to pick).
   const materialIdParam = searchParams.get('materialId');
   const [handledMaterialParam, setHandledMaterialParam] = useState(false);
   if (materialIdParam && !handledMaterialParam && materials) {
     setHandledMaterialParam(true);
     setItems([{ ...emptyRow, rawMaterialId: materialIdParam }]);
     setFormOpen(true);
+  }
+
+  // Deep-linked from the purchase detail page's "Edit" button - opens the
+  // edit form for that one purchase, same shape as the materialId deep-link
+  // above, so the edit form only needs to exist in one place.
+  const editIdParam = searchParams.get('edit');
+  const { data: editTarget } = useSWR<Purchase>(editIdParam ? `/purchase-orders/${editIdParam}` : null, fetcher);
+  const [handledEditParam, setHandledEditParam] = useState(false);
+  if (editIdParam && !handledEditParam && editTarget) {
+    setHandledEditParam(true);
+    openEdit(editTarget);
   }
 
   function addItemRow() {
@@ -152,8 +152,7 @@ function PurchaseOrdersContent() {
 
   function resetForm() {
     setSupplierId('');
-    setOrderDate(new Date().toISOString().slice(0, 10));
-    setExpectedDate('');
+    setPurchaseDate(new Date().toISOString().slice(0, 10));
     setNotes('');
     setItems([{ ...emptyRow }]);
     setError(null);
@@ -165,20 +164,19 @@ function PurchaseOrdersContent() {
     setFormOpen(true);
   }
 
-  function openEdit(po: PurchaseOrder) {
-    setEditing(po);
-    setSupplierId(po.supplierId);
-    setOrderDate(po.orderDate.slice(0, 10));
-    setExpectedDate(po.expectedDate ? po.expectedDate.slice(0, 10) : '');
-    setNotes(po.notes ?? '');
+  function openEdit(purchase: Purchase) {
+    setEditing(purchase);
+    setSupplierId(purchase.supplierId);
+    setPurchaseDate(purchase.purchaseDate.slice(0, 10));
+    setNotes(purchase.notes ?? '');
     setItems(
-      po.items.map((i) => ({
+      purchase.items.map((i) => ({
         rawMaterialId: i.rawMaterialId,
         quantity: String(i.quantity),
         unitPrice: String(i.unitPrice),
         thicknessIn: i.thicknessIn != null ? String(i.thicknessIn) : '',
         widthIn: i.widthIn != null ? String(i.widthIn) : '',
-        lengthIn: i.lengthIn != null ? String(i.lengthIn) : '',
+        lengthFt: i.lengthFt != null ? String(i.lengthFt) : '',
         pieces: i.pieces != null ? String(i.pieces) : '',
       })),
     );
@@ -197,21 +195,20 @@ function PurchaseOrdersContent() {
     try {
       const payload = {
         supplierId,
-        orderDate,
-        expectedDate: expectedDate || undefined,
+        purchaseDate,
         notes: notes || undefined,
         items: items
-          .filter((i) => i.rawMaterialId && i.unitPrice && (rowIsBoardFeet(i) ? i.thicknessIn && i.widthIn && i.lengthIn && i.pieces : i.quantity))
+          .filter((i) => i.rawMaterialId && i.unitPrice && (rowIsBoardFeet(i) ? i.thicknessIn && i.widthIn && i.lengthFt && i.pieces : i.quantity))
           .map((i) => {
             if (rowIsBoardFeet(i)) {
-              const bf = boardFeetPreview(i.thicknessIn, i.widthIn, i.lengthIn, i.pieces);
+              const bf = boardFeetPreview(i.thicknessIn, i.widthIn, i.lengthFt, i.pieces);
               return {
                 rawMaterialId: i.rawMaterialId,
                 quantity: bf?.total ?? 0.01, // server recomputes/overrides this for BOARD_FEET lines anyway
                 unitPrice: parseFloat(i.unitPrice),
                 thicknessIn: parseFloat(i.thicknessIn),
                 widthIn: parseFloat(i.widthIn),
-                lengthIn: parseFloat(i.lengthIn),
+                lengthFt: parseFloat(i.lengthFt),
                 pieces: parseInt(i.pieces, 10),
               };
             }
@@ -227,80 +224,42 @@ function PurchaseOrdersContent() {
       resetForm();
       mutate();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to save purchase order');
+      setError(err instanceof ApiError ? err.message : 'Failed to save purchase');
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function handleDelete() {
-    if (!deleteTarget) return;
-    await api.delete(`/purchase-orders/${deleteTarget.id}`);
-    setDeleteTarget(null);
-    mutate();
-  }
-
-  type ConfirmActionKind = 'submit' | 'approve' | 'sendToShop' | 'cancel';
-  const [confirmAction, setConfirmAction] = useState<{ po: PurchaseOrder; action: ConfirmActionKind } | null>(null);
-  const [rejectTarget, setRejectTarget] = useState<PurchaseOrder | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
-  const [rejectSubmitting, setRejectSubmitting] = useState(false);
-
-  const ACTION_ENDPOINT: Record<ConfirmActionKind, string> = {
-    submit: 'submit',
-    approve: 'approve',
-    sendToShop: 'send-to-shop',
-    cancel: 'cancel',
-  };
-
-  async function runConfirmedAction() {
-    if (!confirmAction) return;
-    setNotice(null);
+  async function handleCancel() {
+    if (!cancelTarget) return;
+    setCancelling(true);
     try {
-      const endpoint = ACTION_ENDPOINT[confirmAction.action];
-      const result = await api.post<PurchaseOrder>(`/purchase-orders/${confirmAction.po.id}/${endpoint}`);
-      if (confirmAction.action === 'sendToShop') {
-        setNotice(
-          result.whatsapp?.sent
-            ? `${confirmAction.po.poNumber} sent to shop. WhatsApp sent to ${confirmAction.po.supplier?.name}.`
-            : `${confirmAction.po.poNumber} sent to shop. WhatsApp not sent (${result.whatsapp?.reason ?? 'no phone on file for supplier'}).`,
-        );
-      }
-    } finally {
-      setConfirmAction(null);
+      await api.post(`/purchase-orders/${cancelTarget.id}/cancel`);
+      setCancelTarget(null);
       mutate();
-    }
-  }
-
-  async function handleReject(e: React.FormEvent) {
-    e.preventDefault();
-    if (!rejectTarget) return;
-    setRejectSubmitting(true);
-    try {
-      await api.post(`/purchase-orders/${rejectTarget.id}/reject`, { rejectionReason: rejectReason });
-      setRejectTarget(null);
-      setRejectReason('');
-      mutate();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to cancel purchase');
+      setCancelTarget(null);
     } finally {
-      setRejectSubmitting(false);
+      setCancelling(false);
     }
   }
 
   const lineTotal = (row: ItemRow) => {
     const price = parseFloat(row.unitPrice) || 0;
     if (rowIsBoardFeet(row)) {
-      const bf = boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthIn, row.pieces);
+      const bf = boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthFt, row.pieces);
       return (bf?.total ?? 0) * price;
     }
     return (parseFloat(row.quantity) || 0) * price;
   };
   const formTotal = items.reduce((s, r) => s + lineTotal(r), 0);
 
-  function handleSendWhatsApp(po: PurchaseOrder) {
+  function handleSendWhatsApp(purchase: Purchase) {
     openWhatsApp({
-      recipientName: (po.supplier?.name ?? '') || 'Supplier',
-      recipientPhone: po.supplier?.phone ?? undefined,
-      defaultMessage: `Purchase Order ${po.poNumber}\nTotal: ₹${po.totalValue}\nExpected by: ${po.expectedDate ? formatDate(po.expectedDate) : 'TBD'}`,
+      recipientName: (purchase.supplier?.name ?? '') || 'Supplier',
+      recipientPhone: purchase.supplier?.phone ?? undefined,
+      defaultMessage: `Purchase ${purchase.purchaseNumber}\nTotal: ₹${purchase.totalValue}`,
     });
   }
 
@@ -311,23 +270,21 @@ function PurchaseOrdersContent() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-900">Purchase Orders</h1>
-          <p className="text-sm text-brand-500 mt-1">
-            Admin raises a PO and submits it, Superadmin approves or rejects it, Admin sends the approved PO to the supplier on WhatsApp, then receives it into stock.
-          </p>
+          <p className="text-sm text-brand-500 mt-1">Recording a purchase immediately updates material stock and the supplier's balance payable.</p>
         </div>
         <div className="flex gap-2">
           <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
             {downloading ? 'Preparing...' : 'Download PDF'}
           </button>
           <button className="btn-primary" onClick={openCreate}>
-            + New Purchase Order
+            + New Purchase
           </button>
         </div>
       </div>
 
       <FilterBar
         fields={[
-          { key: 'search', label: 'Search', type: 'search', placeholder: 'Search PO number / supplier...' },
+          { key: 'search', label: 'Search', type: 'search', placeholder: 'Search purchase no. / supplier...' },
           { key: 'supplierId', label: 'Supplier', type: 'select', options: (suppliers ?? []).map((s) => ({ value: s.id, label: s.name })) },
           { key: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS },
         ]}
@@ -343,11 +300,11 @@ function PurchaseOrdersContent() {
         <table className="table-shell">
           <thead>
             <tr>
-              <th>PO Number</th>
+              <th>Purchase No</th>
+              <th>Date</th>
               <th>Supplier</th>
-              <th>Order Date</th>
               <th>Items</th>
-              <th>Total Value</th>
+              <th>Total</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -356,85 +313,49 @@ function PurchaseOrdersContent() {
             {isLoading && (
               <tr>
                 <td colSpan={7} className="text-center py-8 text-brand-400">
-                  Loading purchase orders...
+                  Loading purchases...
                 </td>
               </tr>
             )}
             {!isLoading && data?.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center py-8 text-brand-400">
-                  No purchase orders yet
+                  No purchases yet
                 </td>
               </tr>
             )}
-            {data?.map((po) => (
-              <tr key={po.id}>
-                <td className="font-medium">{po.poNumber}</td>
-                <td>{po.supplier?.name}</td>
-                <td>{formatDate(po.orderDate)}</td>
-                <td>{po.items.length}</td>
-                <td className="font-medium">{formatCurrency(po.totalValue)}</td>
+            {data?.map((purchase) => (
+              <tr key={purchase.id}>
+                <td className="font-medium">{purchase.purchaseNumber}</td>
+                <td>{formatDate(purchase.purchaseDate)}</td>
+                <td>{purchase.supplier?.name}</td>
+                <td>{itemsSummary(purchase)}</td>
+                <td className="font-medium">{formatCurrency(purchase.totalValue)}</td>
                 <td>
-                  <Chip color={STATUS_CHIP[po.status]} label={PURCHASE_ORDER_STATUS_LABEL[po.status]} />
+                  <Chip color={STATUS_CHIP[purchase.status]} label={PURCHASE_STATUS_LABEL[purchase.status]} />
                 </td>
                 <td className="space-x-2 whitespace-nowrap">
-                  <Link href={`/purchase-orders/${po.id}`} className="btn-secondary h-7 px-3 text-xs inline-flex">
+                  <Link href={`/purchase-orders/${purchase.id}`} className="btn-secondary h-7 px-3 text-xs inline-flex">
                     View
                   </Link>
                   <WhatsAppActionButton
-                    recipientName={(po.supplier?.name ?? '') || 'Supplier'}
-                    recipientPhone={po.supplier?.phone ?? undefined}
-                    onClick={() => handleSendWhatsApp(po)}
+                    recipientName={(purchase.supplier?.name ?? '') || 'Supplier'}
+                    recipientPhone={purchase.supplier?.phone ?? undefined}
+                    onClick={() => handleSendWhatsApp(purchase)}
                     size="sm"
                   />
-                  {(po.status === 'DRAFT' || po.status === 'REJECTED') && (
+                  {purchase.status === 'RECORDED' && (
                     <>
-                      <button className="text-brand-600 hover:underline text-xs" onClick={() => openEdit(po)}>
+                      <button className="text-brand-600 hover:underline text-xs" onClick={() => openEdit(purchase)}>
                         Edit
                       </button>
-                      <button className="text-red-600 hover:underline text-xs" onClick={() => setDeleteTarget(po)}>
-                        Delete
-                      </button>
-                    </>
-                  )}
-                  {po.status === 'DRAFT' && (
-                    <button className="btn-secondary h-7 px-3 text-xs" onClick={() => setConfirmAction({ po, action: 'submit' })}>
-                      Submit for Approval
-                    </button>
-                  )}
-                  {(po.status === 'DRAFT' || po.status === 'PENDING_APPROVAL') && hasRole('SUPERADMIN') && (
-                    <>
-                      <button className="btn-primary h-7 px-3 text-xs" onClick={() => setConfirmAction({ po, action: 'approve' })}>
-                        Approve
-                      </button>
                       <button
-                        className="btn-secondary h-7 px-3 text-xs text-red-600 border-red-200 hover:bg-red-50"
-                        onClick={() => setRejectTarget(po)}
+                        className="text-red-600 hover:underline text-xs"
+                        onClick={() => setCancelTarget(purchase)}
                       >
-                        Reject
+                        Cancel
                       </button>
                     </>
-                  )}
-                  {po.status === 'APPROVED' && (
-                    <button className="btn-primary h-7 px-3 text-xs" onClick={() => setConfirmAction({ po, action: 'sendToShop' })}>
-                      Send to Shop
-                    </button>
-                  )}
-                  {(po.status === 'APPROVED' || po.status === 'SENT_TO_SHOP' || po.status === 'PARTIALLY_RECEIVED') && (
-                    <button
-                      className="btn-primary h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-700"
-                      onClick={() => setReceiveTarget(po)}
-                    >
-                      Receive
-                    </button>
-                  )}
-                  {po.status !== 'RECEIVED' && po.status !== 'CANCELLED' && (
-                    <button
-                      className="btn-secondary h-7 px-3 text-xs text-red-600 border-red-200 hover:bg-red-50"
-                      onClick={() => setConfirmAction({ po, action: 'cancel' })}
-                    >
-                      Cancel
-                    </button>
                   )}
                 </td>
               </tr>
@@ -447,9 +368,9 @@ function PurchaseOrdersContent() {
       </div>
 
       {formOpen && (
-        <Modal title={editing ? `Edit ${editing.poNumber}` : 'New Purchase Order'} onClose={() => setFormOpen(false)} wide>
+        <Modal title={editing ? `Edit ${editing.purchaseNumber}` : 'New Purchase'} onClose={() => setFormOpen(false)} wide>
           <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="label">Supplier</label>
                 <select className="input" required value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
@@ -462,12 +383,8 @@ function PurchaseOrdersContent() {
                 </select>
               </div>
               <div>
-                <label className="label">Order Date</label>
-                <input type="date" className="input" required value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
-              </div>
-              <div>
-                <label className="label">Expected Date</label>
-                <input type="date" className="input" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
+                <label className="label">Purchase Date</label>
+                <input type="date" className="input" required value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
               </div>
             </div>
 
@@ -476,7 +393,7 @@ function PurchaseOrdersContent() {
               <div className="space-y-2 max-h-[45vh] overflow-y-auto">
                 {items.map((row, idx) => {
                   const isBoardFeet = rowIsBoardFeet(row);
-                  const bf = isBoardFeet ? boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthIn, row.pieces) : null;
+                  const bf = isBoardFeet ? boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthFt, row.pieces) : null;
                   return (
                     <div key={idx} className="border border-brand-100 rounded-lg p-3 space-y-2">
                       <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-start">
@@ -484,7 +401,7 @@ function PurchaseOrdersContent() {
                           className="input"
                           required
                           value={row.rawMaterialId}
-                          onChange={(e) => updateItemRow(idx, { rawMaterialId: e.target.value, quantity: '', thicknessIn: '', widthIn: '', lengthIn: '', pieces: '' })}
+                          onChange={(e) => updateItemRow(idx, { rawMaterialId: e.target.value, quantity: '', thicknessIn: '', widthIn: '', lengthFt: '', pieces: '' })}
                         >
                           <option value="">Select material</option>
                           {materials?.map((m) => (
@@ -503,7 +420,7 @@ function PurchaseOrdersContent() {
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                             <input type="number" step="0.01" className="input text-sm" placeholder="Thickness (in)" required value={row.thicknessIn} onChange={(e) => updateItemRow(idx, { thicknessIn: e.target.value })} />
                             <input type="number" step="0.01" className="input text-sm" placeholder="Width (in)" required value={row.widthIn} onChange={(e) => updateItemRow(idx, { widthIn: e.target.value })} />
-                            <input type="number" step="0.01" className="input text-sm" placeholder="Length (in)" required value={row.lengthIn} onChange={(e) => updateItemRow(idx, { lengthIn: e.target.value })} />
+                            <input type="number" step="0.01" className="input text-sm" placeholder="Length (ft)" required value={row.lengthFt} onChange={(e) => updateItemRow(idx, { lengthFt: e.target.value })} />
                             <input type="number" min="1" className="input text-sm" placeholder="Pieces" required value={row.pieces} onChange={(e) => updateItemRow(idx, { pieces: e.target.value })} />
                           </div>
                           <div className="grid grid-cols-2 gap-2">
@@ -511,7 +428,7 @@ function PurchaseOrdersContent() {
                             <div className="input text-xs bg-brand-50 text-brand-700 flex flex-col justify-center leading-tight py-1">
                               {bf ? (
                                 <>
-                                  <span>{bf.perPiece} BF/pc &times; {row.pieces} = <strong>{bf.total} BF</strong></span>
+                                  <span>{bf.perPiece} BF/pc &times; {row.pieces} = <strong>{bf.total} BF</strong> ({bf.totalCft} CFT)</span>
                                   <span className="font-semibold">{formatCurrency(lineTotal(row))}</span>
                                 </>
                               ) : (
@@ -524,7 +441,7 @@ function PurchaseOrdersContent() {
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                           <input type="number" step="0.01" className="input text-sm" placeholder="Qty" required value={row.quantity} onChange={(e) => updateItemRow(idx, { quantity: e.target.value })} />
                           <div className="input text-sm flex items-center bg-brand-50 text-ink-muted justify-center">{materialUnit(row.rawMaterialId) || '-'}</div>
-                          <input type="number" step="0.01" className="input text-sm" placeholder="Unit Price" required value={row.unitPrice} onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })} />
+                          <input type="number" step="0.01" className="input text-sm" placeholder="Purchase Rate" required value={row.unitPrice} onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })} />
                           <div className="input text-sm flex items-center justify-end font-medium text-ink bg-brand-50">{formatCurrency(lineTotal(row))}</div>
                         </div>
                       )}
@@ -552,81 +469,22 @@ function PurchaseOrdersContent() {
                 Cancel
               </button>
               <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Create Purchase Order'}
+                {submitting ? 'Saving...' : 'Save Purchase'}
               </button>
             </div>
           </form>
         </Modal>
       )}
 
-      {confirmAction && (
+      {cancelTarget && (
         <ConfirmDialog
-          title={
-            {
-              submit: 'Submit for Approval',
-              approve: 'Approve Purchase Order',
-              sendToShop: 'Send to Shop',
-              cancel: 'Cancel Purchase Order',
-            }[confirmAction.action]
-          }
-          message={
-            confirmAction.action === 'submit'
-              ? `Submit ${confirmAction.po.poNumber} for Superadmin approval? You won't be able to edit it while it's pending.`
-              : confirmAction.action === 'approve'
-                ? `Approve ${confirmAction.po.poNumber}? It can then be sent to ${confirmAction.po.supplier?.name}.`
-                : confirmAction.action === 'sendToShop'
-                  ? `Send ${confirmAction.po.poNumber} to ${confirmAction.po.supplier?.name}? This notifies them on WhatsApp and lets it be received into stock.`
-                  : `Cancel ${confirmAction.po.poNumber}? This cannot be undone.`
-          }
-          confirmLabel={
-            {
-              submit: 'Submit',
-              approve: 'Approve',
-              sendToShop: 'Send to Shop',
-              cancel: 'Cancel Order',
-            }[confirmAction.action]
-          }
-          danger={confirmAction.action === 'cancel'}
-          onConfirm={runConfirmedAction}
-          onCancel={() => setConfirmAction(null)}
-        />
-      )}
-
-      {deleteTarget && (
-        <ConfirmDialog
-          title="Delete Purchase Order"
-          message={`Delete draft ${deleteTarget.poNumber}? This cannot be undone.`}
-          confirmLabel="Delete"
+          title="Cancel Purchase"
+          message={`Cancel ${cancelTarget.purchaseNumber}? This reverses its stock and supplier balance impact. This cannot be undone.`}
+          confirmLabel={cancelling ? 'Cancelling...' : 'Cancel Purchase'}
           danger
-          onConfirm={handleDelete}
-          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleCancel}
+          onCancel={() => setCancelTarget(null)}
         />
-      )}
-
-      {rejectTarget && (
-        <Modal title={`Reject ${rejectTarget.poNumber}`} onClose={() => setRejectTarget(null)}>
-          <form onSubmit={handleReject} className="space-y-3">
-            <div>
-              <label className="label">Reason for rejection</label>
-              <textarea
-                className="input min-h-[90px]"
-                required
-                minLength={1}
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Explain why this purchase order is being rejected..."
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="btn-secondary" onClick={() => setRejectTarget(null)}>
-                Cancel
-              </button>
-              <button type="submit" disabled={rejectSubmitting} className="btn-primary bg-red-600 hover:bg-red-700">
-                {rejectSubmitting ? 'Rejecting...' : 'Reject Purchase Order'}
-              </button>
-            </div>
-          </form>
-        </Modal>
       )}
 
       {showModal && whatsappOptions && (
@@ -638,17 +496,6 @@ function PurchaseOrdersContent() {
           }}
           defaultMessage={whatsappOptions.defaultMessage}
           onSuccess={() => mutate()}
-        />
-      )}
-
-      {receiveTarget && (
-        <ReceivePurchaseOrderModal
-          po={receiveTarget}
-          onClose={() => setReceiveTarget(null)}
-          onReceived={() => {
-            setReceiveTarget(null);
-            mutate();
-          }}
         />
       )}
     </div>

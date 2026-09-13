@@ -46,6 +46,11 @@ interface WhatsAppModalProps {
   // attached in place of any image default, once the sender picks a chat.
   pdfUrl?: string;
   pdfFilename?: string;
+  // For a "Send PDF via WhatsApp" action specifically (as opposed to the
+  // general WhatsApp button) - the PDF is the whole point of opening this
+  // popup, so it's fetched and attached the moment the modal opens instead
+  // of waiting for the sender to notice and click "Attach PDF" themselves.
+  autoAttachPdf?: boolean;
 }
 
 export function WhatsAppModal({
@@ -57,6 +62,7 @@ export function WhatsAppModal({
   defaultImageUrls,
   pdfUrl,
   pdfFilename,
+  autoAttachPdf,
 }: WhatsAppModalProps) {
   const router = useRouter();
   const [selectedChat, setSelectedChat] = useState<WhatsappChat | null>(null);
@@ -79,17 +85,25 @@ export function WhatsAppModal({
       const token = getAccessToken();
       const res = await fetch(`${API_BASE_URL}${pdfUrl}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
       });
-      if (!res.ok) throw new Error('Failed to fetch PDF');
+      if (!res.ok) throw new Error(`Failed to fetch PDF (${res.status})`);
       const blob = await res.blob();
       setMediaFile(new File([blob], pdfFilename || 'Order Confirmation.pdf', { type: 'application/pdf' }));
       setExtraMediaFiles([]);
-    } catch {
+    } catch (err) {
+      console.error('attachOrderPdf failed:', err);
       setError('Failed to attach the PDF - please try again.');
     } finally {
       setAttachingPdf(false);
     }
   }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
+  // fires once on mount only, matching autoAttachPdf/pdfUrl's initial value.
+  useEffect(() => {
+    if (autoAttachPdf && pdfUrl) attachOrderPdf();
+  }, []);
 
   function applyFormat(wrap: string) {
     const el = textareaRef.current;

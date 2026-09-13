@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
@@ -19,7 +20,7 @@ import { GalleryGrid } from '@/components/GalleryGrid';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { FilterBar } from '@/components/FilterBar';
-import type { CarpenterSummary, GalleryImage, MaterialGroup, Product, ProductStockMovement, RawMaterial, StockMovement, WorkerType } from '@/types';
+import type { CarpenterSummary, GalleryImage, MaterialGroup, MaterialMeasurementKind, Product, ProductStockMovement, RawMaterial, StockMovement, WorkerType } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -70,6 +71,18 @@ const MATERIAL_GROUP_LABEL: Record<MaterialGroup, string> = {
   OTHER: 'Other / Shared',
 };
 
+const emptyMaterialForm = { name: '', type: '', unit: '', reorderLevel: '', materialGroup: 'WOOD' as MaterialGroup, measurementKind: 'OTHER' as MaterialMeasurementKind };
+
+// Locks the unit shown/submitted for every measurementKind except OTHER and
+// LIQUID, matching the backend's own resolveUnit lock - so a material's
+// physical unit and the quantities recorded against it (via PO items,
+// issues, adjustments) can never disagree.
+const LOCKED_MEASUREMENT_UNIT: Partial<Record<MaterialMeasurementKind, string>> = {
+  BOARD_FEET: 'Board Feet',
+  SHEET: 'Sheet',
+  COUNT: 'Nos',
+};
+
 const ALL_TABS: [Tab, string, boolean][] = [
   // [key, label, hideForEmployee] - Stock Management (Godown) and Gallery
   // are Super Admin/Admin business data (pricing, customer-facing images),
@@ -83,10 +96,31 @@ const ALL_TABS: [Tab, string, boolean][] = [
 ];
 
 export default function InventoryPage() {
+  return (
+    <Suspense fallback={<p className="text-brand-400 text-sm">Loading inventory...</p>}>
+      <InventoryPageContent />
+    </Suspense>
+  );
+}
+
+function InventoryPageContent() {
   const { user, hasRole } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const isEmployee = user?.role === 'CARPENTER' || user?.role === 'CARVER' || user?.role === 'POLISHER';
   const visibleTabs = ALL_TABS.filter(([, , hideForEmployee]) => !isEmployee || !hideForEmployee);
-  const [tab, setTab] = useState<Tab>('products');
+  const tabFromUrl = searchParams.get('tab') as Tab | null;
+  const initialTab = tabFromUrl && ALL_TABS.some(([key]) => key === tabFromUrl) ? tabFromUrl : 'products';
+  const [tab, setTabState] = useState<Tab>(initialTab);
+
+  // Keeps the selected tab in the URL (via replace, so switching tabs
+  // doesn't pile up history entries) so that navigating into a material's
+  // detail page and back returns to the same tab instead of always
+  // resetting to Stock Management.
+  function setTab(next: Tab) {
+    setTabState(next);
+    router.replace(`/inventory?tab=${next}`, { scroll: false });
+  }
 
   useEffect(() => {
     if (isEmployee && !visibleTabs.some(([key]) => key === tab)) {
@@ -118,7 +152,7 @@ export default function InventoryPage() {
 
       {tab === 'products' && <ProductsTab canEdit={hasRole('ADMIN')} />}
       {tab === 'gallery' && <GalleryTab canEdit={hasRole('SUPERADMIN')} />}
-      {tab === 'materials' && <MaterialsTab />}
+      {tab === 'materials' && <MaterialsTab canEdit={hasRole('ADMIN')} />}
       {tab === 'movements' && <MovementsTab />}
       {tab === 'stock-movements' && <StockMovementsTab />}
     </div>
@@ -786,10 +820,10 @@ function GalleryTab({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-function MaterialsTab() {
+function MaterialsTab({ canEdit }: { canEdit: boolean }) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const { data: result, isLoading } = useSWR<PaginatedResult<RawMaterial>>(
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<RawMaterial>>(
     `/raw-materials?${new URLSearchParams({ ...(search ? { search } : {}), page: String(page), limit: '20' })}`,
     fetcher,
   );
@@ -797,6 +831,75 @@ function MaterialsTab() {
   function updateSearch(value: string) {
     setSearch(value);
     setPage(1);
+  }
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState(emptyMaterialForm);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [editTarget, setEditTarget] = useState<RawMaterial | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<RawMaterial | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  function openAdd() {
+    setEditTarget(null);
+    setForm(emptyMaterialForm);
+    setError(null);
+    setFormOpen(true);
+  }
+  function openEdit(m: RawMaterial) {
+    setEditTarget(m);
+    setForm({
+      name: m.name,
+      type: m.type ?? '',
+      unit: m.unit,
+      reorderLevel: m.reorderLevel != null ? String(m.reorderLevel) : '',
+      materialGroup: m.materialGroup,
+      measurementKind: m.measurementKind,
+    });
+    setError(null);
+    setFormOpen(true);
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleteError(null);
+    try {
+      await api.delete(`/raw-materials/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      mutate();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete material');
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const payload = {
+        name: form.name,
+        type: form.type || undefined,
+        unit: form.measurementKind === 'OTHER' || form.measurementKind === 'LIQUID' ? form.unit : undefined,
+        reorderLevel: form.reorderLevel ? parseFloat(form.reorderLevel) : undefined,
+        materialGroup: form.materialGroup,
+        measurementKind: form.measurementKind,
+      };
+      if (editTarget) {
+        await api.patch(`/raw-materials/${editTarget.id}`, payload);
+      } else {
+        await api.post('/raw-materials', payload);
+      }
+      setFormOpen(false);
+      setEditTarget(null);
+      setForm(emptyMaterialForm);
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Failed to ${editTarget ? 'update' : 'add'} material`);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const stockValue = data?.reduce((s, m) => s + m.stockValue, 0) ?? 0;
@@ -832,6 +935,11 @@ function MaterialsTab() {
           >
             Export Excel
           </button>
+          {canEdit && (
+            <button className="btn-primary" onClick={openAdd}>
+              + Add Material
+            </button>
+          )}
         </div>
       </div>
 
@@ -886,9 +994,21 @@ function MaterialsTab() {
                   )}
                 </td>
                 <td>
-                  <Link href={`/inventory/materials/${m.id}`} className="text-brand-600 hover:underline text-xs">
-                    Manage
-                  </Link>
+                  <div className="flex items-center gap-2.5 whitespace-nowrap">
+                    <Link href={`/inventory/materials/${m.id}`} className="text-brand-600 hover:underline text-xs">
+                      Manage
+                    </Link>
+                    {canEdit && (
+                      <>
+                        <button className="text-brand-600 hover:underline text-xs" onClick={() => openEdit(m)}>
+                          Edit
+                        </button>
+                        <button className="text-red-600 hover:underline text-xs" onClick={() => setDeleteTarget(m)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -899,10 +1019,90 @@ function MaterialsTab() {
         )}
       </div>
 
+      {formOpen && (
+        <Modal title={editTarget ? `Edit ${editTarget.name}` : 'Add Raw Material'} onClose={() => setFormOpen(false)}>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="label">Name</label>
+              <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Plywood 19mm" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Type</label>
+                <input className="input" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))} placeholder="Plywood / Timber / Mica" />
+              </div>
+              <div>
+                <label className="label">Measurement Type</label>
+                <select
+                  className="input"
+                  value={form.measurementKind}
+                  onChange={(e) => setForm((f) => ({ ...f, measurementKind: e.target.value as MaterialMeasurementKind, unit: '' }))}
+                >
+                  <option value="OTHER">Other (choose a unit below)</option>
+                  <option value="BOARD_FEET">Wood / Timber - Board Feet</option>
+                  <option value="SHEET">Plywood / Sheet material</option>
+                  <option value="LIQUID">Polish / Liquid</option>
+                  <option value="COUNT">Tools / Hardware - Nos</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="label">Unit</label>
+              {LOCKED_MEASUREMENT_UNIT[form.measurementKind] ? (
+                <div className="input bg-brand-50 text-brand-700">{LOCKED_MEASUREMENT_UNIT[form.measurementKind]}</div>
+              ) : form.measurementKind === 'LIQUID' ? (
+                <select className="input" required value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}>
+                  <option value="">Select unit...</option>
+                  <option value="Litre">Litre</option>
+                  <option value="Kg">Kg</option>
+                  <option value="Gram">Gram</option>
+                </select>
+              ) : (
+                <UnitSelect id="material-unit" required value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} />
+              )}
+            </div>
+            <div>
+              <label className="label">Team (which employees can use this material)</label>
+              <select className="input" value={form.materialGroup} onChange={(e) => setForm((f) => ({ ...f, materialGroup: e.target.value as MaterialGroup }))}>
+                <option value="WOOD">Carpenter Team</option>
+                <option value="CARVING">Carving Team</option>
+                <option value="POLISH">Polish Team</option>
+                <option value="OTHER">Other / Shared</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Reorder Level (minimum stock)</label>
+              <input type="number" min="0" step="0.01" className="input" value={form.reorderLevel} onChange={(e) => setForm((f) => ({ ...f, reorderLevel: e.target.value }))} />
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" disabled={submitting} className="btn-primary">
+                {submitting ? 'Saving...' : editTarget ? 'Save Changes' : 'Add Material'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete Raw Material"
+          message={deleteError ?? `Delete ${deleteTarget.name}? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }}
+        />
+      )}
     </div>
   );
 }
-
 
 const MOVEMENT_TYPE_OPTIONS = [
   { value: 'IN', label: 'Stock In' },
@@ -915,7 +1115,7 @@ const MOVEMENT_ROLE_OPTIONS: { value: WorkerType; label: string }[] = [
   { value: 'POLISHER', label: 'Polisher' },
 ];
 const MOVEMENT_REFERENCE_OPTIONS = [
-  { value: 'PURCHASE_ORDER', label: 'Purchase Order' },
+  { value: 'PURCHASE', label: 'Purchase' },
   { value: 'PRODUCTION', label: 'Production' },
   { value: 'ADJUSTMENT', label: 'Adjustment' },
 ];
@@ -999,9 +1199,9 @@ function MovementsTab() {
             <th>Material</th>
             <th>Type</th>
             <th>Qty</th>
-            <th>Employee</th>
+            <th>Amount</th>
+            <th>Supplier / Employee</th>
             <th>Role</th>
-            <th>Reference</th>
             <th>Reason</th>
             <th>By</th>
           </tr>
@@ -1030,11 +1230,9 @@ function MovementsTab() {
                 {m.quantity > 0 ? '+' : ''}
                 {m.quantity} {m.rawMaterial?.unit}
               </td>
-              <td className="text-brand-500">{m.workItem?.carpenter?.name ?? '-'}</td>
+              <td className="text-brand-500">{m.unitCost != null ? formatCurrency(Math.abs(m.quantity) * m.unitCost) : '-'}</td>
+              <td className="text-brand-500">{m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-'}</td>
               <td className="text-brand-500">{m.workItem?.carpenter?.workerType ?? '-'}</td>
-              <td className="text-brand-500">
-                {m.purchaseOrder ? `PO ${m.purchaseOrder.poNumber}` : m.workItem ? `Production: ${m.workItem.productName}` : m.type === 'ADJUSTMENT' ? 'Adjustment' : '-'}
-              </td>
               <td className="text-brand-500">{m.reason ?? '-'}</td>
               <td>{m.createdBy?.name ?? '-'}</td>
             </tr>

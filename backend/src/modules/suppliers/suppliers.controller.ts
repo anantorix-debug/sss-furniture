@@ -73,9 +73,9 @@ export class SuppliersController {
   }
 
   // No purchase-mutation routes here by design - every supplier purchase
-  // must go through Purchase Orders (create -> approve -> receive), which
-  // is what creates SupplierPurchase rows now. See
-  // PurchaseOrdersController for the actual purchasing flow.
+  // must go through Purchasing (recording one immediately books stock +
+  // the ledger), which is what creates SupplierPurchase rows now. See
+  // PurchasesController for the actual purchasing flow.
 
   @Roles(Role.ADMIN)
   @Post(':id/payments')

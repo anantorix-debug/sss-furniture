@@ -8,3 +8,4 @@ coverage/
 .wwebjs_auth/
 .wwebjs_cache/
 *.tsbuildinfo
+backend/uploads/

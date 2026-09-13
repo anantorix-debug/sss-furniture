@@ -73,7 +73,6 @@ function PartyOrderDetailContent() {
   const [assignProductionItem, setAssignProductionItem] = useState<PartyOrderItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sendingPdf, setSendingPdf] = useState(false);
 
   async function downloadOrderPdf() {
     if (!order) return;
@@ -91,27 +90,23 @@ function PartyOrderDetailContent() {
     URL.revokeObjectURL(url);
   }
 
-  // Standalone quick-send, separate from the picker-based flow above - goes
-  // straight to the shop's own phone number on file, no chat selection needed.
-  async function sendOrderPdfViaWhatsApp() {
-    if (!order || sendingPdf) return;
-    setSendingPdf(true);
-    setNotice(null);
-    try {
-      const result = await api.post<{ sent: boolean; reason?: string }>(`/party-orders/${order.id}/send-whatsapp`);
-      setNotice(
-        result.sent
-          ? `PDF sent to ${order.shopName} via WhatsApp.`
-          : `Could not send PDF: ${result.reason === 'no_shop_phone' ? 'no phone number on file for this shop.' : (result.reason ?? 'unknown error')}`,
-      );
-    } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : 'Failed to send PDF via WhatsApp');
-    } finally {
-      setSendingPdf(false);
-    }
+  // "Send PDF via WhatsApp" specifically - the PDF is the point, so it's
+  // fetched and attached automatically instead of leaving the sender to
+  // notice and click "Attach PDF" themselves - same flow as Customer Orders.
+  function handleSendPdfViaWhatsApp() {
+    if (!order) return;
+    openWhatsApp({
+      recipientName: order.shopName || 'Shop',
+      recipientPhone: order.phone ?? undefined,
+      // No caption text - this action sends only the PDF file itself.
+      defaultMessage: '',
+      pdfUrl: `/party-orders/${order.id}/pdf`,
+      pdfFilename: `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`,
+      autoAttachPdf: true,
+    });
   }
 
-  // Separate from both the standalone send above and the in-popup attach -
+  // Separate from both the send above and the in-popup attach -
   // hands the PDF to the device's native share sheet, which doesn't depend
   // on the backend's own WhatsApp connection being up.
   async function shareOrderPdf() {
@@ -175,8 +170,8 @@ function PartyOrderDetailContent() {
             <button className="btn-secondary" onClick={downloadOrderPdf}>
               Download PDF
             </button>
-            <button className="btn-secondary" disabled={sendingPdf} onClick={sendOrderPdfViaWhatsApp}>
-              {sendingPdf ? 'Sending...' : 'Send PDF via WhatsApp'}
+            <button className="btn-secondary" onClick={handleSendPdfViaWhatsApp}>
+              Send PDF via WhatsApp
             </button>
             <button className="btn-secondary" onClick={shareOrderPdf}>
               Share PDF
@@ -220,79 +215,83 @@ function PartyOrderDetailContent() {
         )}
       </div>
 
-      <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3">Products ({order.items.length})</h2>
-        <div className="space-y-3">
-          {order.items.length === 0 && <p className="text-sm text-brand-400">{order.model ?? 'No line items'}</p>}
-          {order.items.map((item) => (
-            <div key={item.id} className="border border-brand-100 rounded-lg p-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
-                <ViewField label="Model No" value={item.modelNo ?? 'Not Updated'} />
-                <ViewField label="Product" value={item.productName} />
-                <ViewField label="Finish" value={item.finish ?? '-'} />
-                <ViewField label="Size" value={[item.size, item.sizeUnit].filter(Boolean).join(' ') || '-'} />
-                {item.color && <ViewField label="Polish Colour" value={item.color} />}
-                <ViewField label="Pattern" value={item.pattern ?? '-'} />
-                <ViewField label="Qty" value={String(item.qty)} />
-                <ViewField label="Unit Price" value={item.unitPrice != null ? formatCurrency(item.unitPrice) : '-'} />
-                <ViewField label="Line Total" value={item.totalValue != null ? formatCurrency(item.totalValue) : '-'} />
-                <ViewField label="From Stock" value={String(item.stockReservedQty ?? 0)} />
-                <ViewField label="From Production" value={String(item.productionQty ?? 0)} />
-                <div className="col-span-2">
-                  <ViewField label="Details" value={item.details ?? '-'} />
+      <div className="grid lg:grid-cols-2 gap-6">
+        <div className="card p-5">
+          <h2 className="font-semibold text-brand-900 mb-3">Products ({order.items.length})</h2>
+          <div className="space-y-3 max-h-[32rem] overflow-y-auto pr-1">
+            {order.items.length === 0 && <p className="text-sm text-brand-400">{order.model ?? 'No line items'}</p>}
+            {order.items.map((item) => (
+              <div key={item.id} className="border border-brand-100 rounded-lg p-3">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                  <ViewField label="Model No" value={item.modelNo ?? 'Not Updated'} />
+                  <ViewField label="Product" value={item.productName} />
+                  <ViewField label="Finish" value={item.finish ?? '-'} />
+                  <ViewField label="Size" value={[item.size, item.sizeUnit].filter(Boolean).join(' ') || '-'} />
+                  {item.color && <ViewField label="Polish Colour" value={item.color} />}
+                  <ViewField label="Pattern" value={item.pattern ?? '-'} />
+                  <ViewField label="Qty" value={String(item.qty)} />
+                  <ViewField label="Unit Price" value={item.unitPrice != null ? formatCurrency(item.unitPrice) : '-'} />
+                  <ViewField label="Line Total" value={item.totalValue != null ? formatCurrency(item.totalValue) : '-'} />
+                  <ViewField label="From Stock" value={String(item.stockReservedQty ?? 0)} />
+                  <ViewField label="From Production" value={String(item.productionQty ?? 0)} />
+                  <div className="col-span-2">
+                    <ViewField label="Details" value={item.details ?? '-'} />
+                  </div>
                 </div>
+                {(item.productionQty ?? 0) > 0 && (
+                  <div className="pt-2 mt-2 border-t border-brand-100">
+                    <PartyLineProduction itemId={item.id} />
+                    {hasRole('ADMIN') && order.deliveryStatus !== 'DELIVERED' && (
+                      <button className="btn-secondary text-xs mt-2" onClick={() => setAssignProductionItem(item)}>
+                        Assign to Production
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              {(item.productionQty ?? 0) > 0 && (
-                <div className="pt-2 mt-2 border-t border-brand-100">
-                  <PartyLineProduction itemId={item.id} />
-                  {hasRole('ADMIN') && order.deliveryStatus !== 'DELIVERED' && (
-                    <button className="btn-secondary text-xs mt-2" onClick={() => setAssignProductionItem(item)}>
-                      Assign to Production
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
 
-      <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3">Payments</h2>
-        <PaymentsPanel
-          totalAmount={order.totalAmount ?? 0}
-          totalReceived={order.receivedAmount ?? 0}
-          balanceAmount={order.balanceAmount ?? 0}
-          payments={order.payments ?? []}
-          canDelete={hasRole('ADMIN')}
-          canAdd={hasRole('ADMIN')}
-          onSendWhatsApp={(message) =>
-            openWhatsApp({
-              recipientName: order.shopName || 'Shop',
-              recipientPhone: order.phone ?? undefined,
-              defaultMessage: message,
-              defaultImageUrl: '/wa-template.jpeg',
-            })
-          }
-          onAddPayment={async (payload) => {
-            await api.post(`/party-orders/${order.id}/payments`, payload);
-            mutate();
-          }}
-          onDeletePayment={async (paymentId) => {
-            await api.delete(`/party-orders/${order.id}/payments/${paymentId}`);
-            mutate();
-          }}
-        />
-      </div>
+        <div className="space-y-6">
+          <div className="card p-5">
+            <h2 className="font-semibold text-brand-900 mb-3">Payments</h2>
+            <PaymentsPanel
+              totalAmount={order.totalAmount ?? 0}
+              totalReceived={order.receivedAmount ?? 0}
+              balanceAmount={order.balanceAmount ?? 0}
+              payments={order.payments ?? []}
+              canDelete={hasRole('ADMIN')}
+              canAdd={hasRole('ADMIN')}
+              onSendWhatsApp={(message) =>
+                openWhatsApp({
+                  recipientName: order.shopName || 'Shop',
+                  recipientPhone: order.phone ?? undefined,
+                  defaultMessage: message,
+                  defaultImageUrl: '/wa-template.jpeg',
+                })
+              }
+              onAddPayment={async (payload) => {
+                await api.post(`/party-orders/${order.id}/payments`, payload);
+                mutate();
+              }}
+              onDeletePayment={async (paymentId) => {
+                await api.delete(`/party-orders/${order.id}/payments/${paymentId}`);
+                mutate();
+              }}
+            />
+          </div>
 
-      <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3">Delivery</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 text-sm">
-          <ViewField label="Vehicle Number" value={order.courierTrack ?? '-'} />
-          <ViewField label="Actual Delivery Date" value={order.actualDeliveryDate ? formatDate(order.actualDeliveryDate) : '-'} />
-          <div>
-            <p className="text-xs text-brand-400 mb-1">Delivery Status</p>
-            <StatusBadge status={order.deliveryStatus} />
+          <div className="card p-5">
+            <h2 className="font-semibold text-brand-900 mb-3">Delivery</h2>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              <ViewField label="Vehicle Number" value={order.courierTrack ?? '-'} />
+              <ViewField label="Actual Delivery Date" value={order.actualDeliveryDate ? formatDate(order.actualDeliveryDate) : '-'} />
+              <div>
+                <p className="text-xs text-brand-400 mb-1">Delivery Status</p>
+                <StatusBadge status={order.deliveryStatus} />
+              </div>
+            </div>
           </div>
         </div>
       </div>

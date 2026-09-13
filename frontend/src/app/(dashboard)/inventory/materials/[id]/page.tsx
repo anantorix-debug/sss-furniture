@@ -10,6 +10,7 @@ import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip } from '@/components/StatusBadge';
 import { FilterBar } from '@/components/FilterBar';
+import { boardFeetPreview } from '@/lib/boardFeet';
 import type { PaginatedResult } from '@/components/Pagination';
 import type { RawMaterialDetail, CarpenterWorkItem, CarpenterSummary, StockMovement, WorkerType } from '@/types';
 
@@ -49,14 +50,23 @@ export default function MaterialDetailPage() {
   const openWorkItems = (workItems ?? []).filter((w) => w.status !== 'COMPLETED');
 
   const [adjustForm, setAdjustForm] = useState({ date: new Date().toISOString().slice(0, 10), quantity: '', reason: '' });
-  const [issueForm, setIssueForm] = useState({ date: new Date().toISOString().slice(0, 10), workItemId: '', quantity: '', reason: '' });
+  const [issueForm, setIssueForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    workItemId: '',
+    quantity: '',
+    thicknessIn: '',
+    widthIn: '',
+    lengthFt: '',
+    pieces: '',
+    reason: '',
+  });
   const [error, setError] = useState<string | null>(null);
 
   const { data: carpenters } = useSWR<CarpenterSummary[]>('/carpenters', fetcher);
   const [movementValues, setMovementValues] = useState<Record<string, string>>(emptyMovementFilters);
   const [movementApplied, setMovementApplied] = useState<Record<string, string>>(emptyMovementFilters);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
-  const movementParams = new URLSearchParams({ ...movementApplied, rawMaterialId: id, limit: '200' });
+  const movementParams = new URLSearchParams({ ...movementApplied, rawMaterialId: id, page: '1', limit: '200' });
   const { data: movementsResult, mutate: mutateMovements } = useSWR<PaginatedResult<StockMovement>>(`/stock-movements?${movementParams}`, fetcher);
   const movements = movementsResult?.data ?? [];
 
@@ -88,6 +98,20 @@ export default function MaterialDetailPage() {
     }
   }
 
+  const isBoardFeet = material?.measurementKind === 'BOARD_FEET';
+  // Plank size from the most recent Purchase - when known, the employee
+  // only enters Pieces; the size itself isn't re-typed every issue.
+  const lastDims = material?.lastPieceDimensions ?? null;
+  const issueBf = isBoardFeet
+    ? lastDims
+      ? boardFeetPreview(String(lastDims.thicknessIn), String(lastDims.widthIn), String(lastDims.lengthFt), issueForm.pieces)
+      : boardFeetPreview(issueForm.thicknessIn, issueForm.widthIn, issueForm.lengthFt, issueForm.pieces)
+    : null;
+
+  function resetIssueForm() {
+    setIssueForm({ date: new Date().toISOString().slice(0, 10), workItemId: '', quantity: '', thicknessIn: '', widthIn: '', lengthFt: '', pieces: '', reason: '' });
+  }
+
   async function submitIssue(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -96,9 +120,20 @@ export default function MaterialDetailPage() {
         workItemId: issueForm.workItemId,
         date: issueForm.date,
         reason: issueForm.reason || undefined,
-        items: [{ rawMaterialId: id, quantity: parseFloat(issueForm.quantity) }],
+        items: [
+          isBoardFeet
+            ? {
+                rawMaterialId: id,
+                quantity: issueBf?.total ?? 0.01, // server recomputes/overrides this for BOARD_FEET materials anyway
+                thicknessIn: lastDims ? lastDims.thicknessIn : parseFloat(issueForm.thicknessIn),
+                widthIn: lastDims ? lastDims.widthIn : parseFloat(issueForm.widthIn),
+                lengthFt: lastDims ? lastDims.lengthFt : parseFloat(issueForm.lengthFt),
+                pieces: parseInt(issueForm.pieces, 10),
+              }
+            : { rawMaterialId: id, quantity: parseFloat(issueForm.quantity) },
+        ],
       });
-      setIssueForm({ date: new Date().toISOString().slice(0, 10), workItemId: '', quantity: '', reason: '' });
+      resetIssueForm();
       mutate();
       mutateMovements();
     } catch (err) {
@@ -129,7 +164,10 @@ export default function MaterialDetailPage() {
   return (
     <div className="space-y-6">
       <div>
-        <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.push('/inventory')}>
+        <button
+          className="text-sm text-brand-500 hover:underline mb-2"
+          onClick={() => (window.history.length > 1 ? router.back() : router.push('/inventory'))}
+        >
           &larr; All materials
         </button>
         <h1 className="text-2xl font-bold text-brand-900">{material.name}</h1>
@@ -173,16 +211,16 @@ export default function MaterialDetailPage() {
           onApply={applyMovementFilters}
           onReset={resetMovementFilters}
         />
-        <div className="max-h-80 overflow-y-auto rounded-lg border border-brand-100 mt-3">
+        <div className="max-h-80 overflow-auto rounded-lg border border-brand-100 mt-3">
           <table className="table-shell">
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Type</th>
                 <th>Qty</th>
-                <th>Employee</th>
+                <th>Amount</th>
+                <th>Supplier / Employee</th>
                 <th>Role</th>
-                <th>Reference</th>
                 <th>Reason</th>
                 <th>By</th>
               </tr>
@@ -207,11 +245,9 @@ export default function MaterialDetailPage() {
                     {m.quantity > 0 ? '+' : ''}
                     {m.quantity}
                   </td>
-                  <td className="text-brand-500">{m.workItem?.carpenter?.name ?? '-'}</td>
+                  <td className="text-brand-500">{m.unitCost != null ? formatCurrency(Math.abs(m.quantity) * m.unitCost) : '-'}</td>
+                  <td className="text-brand-500">{m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-'}</td>
                   <td className="text-brand-500">{m.workItem?.carpenter?.workerType ?? '-'}</td>
-                  <td className="text-brand-500">
-                    {m.purchaseOrder ? `PO ${m.purchaseOrder.poNumber}` : m.workItem ? `Production: ${m.workItem.productName}` : m.type === 'ADJUSTMENT' ? 'Adjustment' : '-'}
-                  </td>
                   <td className="text-brand-500">{m.reason ?? '-'}</td>
                   <td>{m.createdBy?.name ?? '-'}</td>
                 </tr>
@@ -258,8 +294,50 @@ export default function MaterialDetailPage() {
                     </option>
                   ))}
                 </select>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input type="date" className="input" required value={issueForm.date} onChange={(e) => setIssueForm((f) => ({ ...f, date: e.target.value }))} />
+                <input type="date" className="input" required value={issueForm.date} onChange={(e) => setIssueForm((f) => ({ ...f, date: e.target.value }))} />
+                {isBoardFeet ? (
+                  lastDims ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          className="input text-sm flex-1"
+                          placeholder="Pieces used"
+                          required
+                          value={issueForm.pieces}
+                          onChange={(e) => setIssueForm((f) => ({ ...f, pieces: e.target.value }))}
+                        />
+                        <span className="text-xs text-brand-400 whitespace-nowrap">
+                          {lastDims.thicknessIn}&quot; &times; {lastDims.widthIn}&quot; &times; {lastDims.lengthFt}ft each
+                        </span>
+                      </div>
+                      <div className="input text-xs bg-brand-50 text-brand-700 flex items-center justify-center">
+                        {issueBf ? (
+                          <span>{issueBf.perPiece} BF/pc &times; {issueForm.pieces} = <strong>{issueBf.total} BF</strong> ({issueBf.totalCft} CFT)</span>
+                        ) : (
+                          <span className="text-brand-400">Enter pieces used</span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <input type="number" step="0.01" className="input text-sm" placeholder="Thickness (in)" required value={issueForm.thicknessIn} onChange={(e) => setIssueForm((f) => ({ ...f, thicknessIn: e.target.value }))} />
+                        <input type="number" step="0.01" className="input text-sm" placeholder="Width (in)" required value={issueForm.widthIn} onChange={(e) => setIssueForm((f) => ({ ...f, widthIn: e.target.value }))} />
+                        <input type="number" step="0.01" className="input text-sm" placeholder="Length (ft)" required value={issueForm.lengthFt} onChange={(e) => setIssueForm((f) => ({ ...f, lengthFt: e.target.value }))} />
+                        <input type="number" min="1" className="input text-sm" placeholder="Pieces" required value={issueForm.pieces} onChange={(e) => setIssueForm((f) => ({ ...f, pieces: e.target.value }))} />
+                      </div>
+                      <div className="input text-xs bg-brand-50 text-brand-700 flex items-center justify-center">
+                        {issueBf ? (
+                          <span>{issueBf.perPiece} BF/pc &times; {issueForm.pieces} = <strong>{issueBf.total} BF</strong> ({issueBf.totalCft} CFT)</span>
+                        ) : (
+                          <span className="text-brand-400">No recorded plank size yet - enter dimensions</span>
+                        )}
+                      </div>
+                    </>
+                  )
+                ) : (
                   <input
                     type="number"
                     step="0.01"
@@ -269,7 +347,7 @@ export default function MaterialDetailPage() {
                     value={issueForm.quantity}
                     onChange={(e) => setIssueForm((f) => ({ ...f, quantity: e.target.value }))}
                   />
-                </div>
+                )}
                 <input className="input" placeholder="Reason / reference (optional)" value={issueForm.reason} onChange={(e) => setIssueForm((f) => ({ ...f, reason: e.target.value }))} />
                 <button type="submit" className="btn-primary w-full">
                   Record Issue

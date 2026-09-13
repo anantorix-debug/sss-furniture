@@ -288,7 +288,12 @@ export class CarpenterService {
     return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 
-  async createWorkItem(
+  // Creates exactly one CarpenterWorkItem row and logs its audit entry -
+  // does NOT send any notification, so callers that need to create several
+  // rows for one assignment action (see assignSourceProduction's quantity>1
+  // split) can create them all first and notify once at the end instead of
+  // once per row.
+  private async createWorkItemRow(
     dto: CreateWorkItemDto,
     userId: string,
     viewerRole?: Role,
@@ -363,6 +368,22 @@ export class CarpenterService {
       metadata: { productName: workItem.productName, carpenterName: workItem.carpenter?.name },
     });
 
+    return workItem;
+  }
+
+  async createWorkItem(
+    dto: CreateWorkItemDto,
+    userId: string,
+    viewerRole?: Role,
+    sourceInfo?: {
+      source?: 'CUSTOMER_ORDER' | 'PARTY_ORDER';
+      sourceCustomerOrderId?: string;
+      sourceCustomerOrderItemId?: string;
+      sourcePartyOrderItemId?: string;
+      assignedById?: string;
+    },
+  ) {
+    const workItem = await this.createWorkItemRow(dto, userId, viewerRole, sourceInfo);
     const whatsapp = await this.finalizeAssignment(workItem, dto.notifyWhatsapp);
     return { ...workItem, whatsapp };
   }
@@ -424,14 +445,30 @@ export class CarpenterService {
           'Production has already been assigned for this line. Manage or reassign the existing job from Production / My Work instead of assigning it again.',
         );
       }
-      return this.createWorkItem(dto, userId, viewerRole, sourceInfo);
+
+      const quantity = dto.quantity ?? 1;
+      if (quantity <= 1) {
+        const { whatsapp, ...workItem } = await this.createWorkItem(dto, userId, viewerRole, sourceInfo);
+        return { ...workItem, items: [workItem], whatsapp };
+      }
+
+      // Each physical unit gets its own work item (quantity: 1) instead of
+      // one row covering all of them, so each can later get its own Model
+      // No via the existing per-row updateWorkItemModelNo endpoint - see
+      // the plan note on why this only needs a row-count change, not a new
+      // Model No mechanism. Notify once for the whole batch, not per row.
+      const rows: Awaited<ReturnType<CarpenterService['createWorkItemRow']>>[] = [];
+      for (let i = 0; i < quantity; i++) {
+        rows.push(await this.createWorkItemRow({ ...dto, quantity: 1 }, userId, viewerRole, sourceInfo));
+      }
+      const whatsapp = await this.finalizeAssignment({ ...rows[0], quantity, total: Number(rows[0].total) * quantity }, dto.notifyWhatsapp);
+      return { ...rows[0], items: rows, whatsapp };
     }
 
     const isWorkerSelfEntry = viewerRole === Role.CARPENTER || viewerRole === Role.CARVER || viewerRole === Role.POLISHER;
     const price = isWorkerSelfEntry ? 0 : (dto.price ?? 0);
     const extra = isWorkerSelfEntry ? 0 : (dto.extra ?? 0);
     const quantity = dto.quantity ?? placeholder.quantity;
-    const total = (price + extra) * quantity;
 
     const effectiveStage = (dto.stage as unknown as Stage) ?? (placeholder.stage as Stage);
     const effectiveColor = dto.color?.trim() || placeholder.color || undefined;
@@ -439,6 +476,12 @@ export class CarpenterService {
       throw new BadRequestException('Colour is required when assigning production at the Polish stage.');
     }
 
+    // quantity 1 keeps today's exact single-row behavior. quantity > 1:
+    // the placeholder becomes unit #1 (keeps its id/history), and
+    // (quantity - 1) fresh sibling rows are created alongside it, each
+    // quantity: 1 - same reasoning as the no-placeholder branch above.
+    const perUnitTotal = price + extra;
+    const sharedBatchId = placeholder.batchId ?? randomUUID();
     const workItem = await this.prisma.carpenterWorkItem.update({
       where: { id: placeholder.id },
       data: {
@@ -451,11 +494,11 @@ export class CarpenterService {
         sizeUnit: dto.sizeUnit ?? placeholder.sizeUnit,
         price,
         extra,
-        quantity,
-        total,
+        quantity: 1,
+        total: perUnitTotal,
         notes: dto.notes,
         color: effectiveColor,
-        batchId: placeholder.batchId ?? randomUUID(),
+        batchId: sharedBatchId,
         assignedById: sourceInfo.assignedById,
       },
       include: { carpenter: { include: { team: true } } },
@@ -469,8 +512,49 @@ export class CarpenterService {
       metadata: { productName: workItem.productName, carpenterName: workItem.carpenter?.name },
     });
 
-    const whatsapp = await this.finalizeAssignment(workItem, dto.notifyWhatsapp);
-    return { ...workItem, whatsapp };
+    const siblings: (typeof workItem)[] = [];
+    for (let i = 1; i < quantity; i++) {
+      const sibling = await this.prisma.carpenterWorkItem.create({
+        data: {
+          carpenterId: dto.carpenterId,
+          stage: dto.stage ?? placeholder.stage,
+          workDate: new Date(dto.workDate),
+          modelNo: dto.modelNo ?? placeholder.modelNo,
+          productName: placeholder.productName,
+          category: dto.category,
+          size: dto.size ?? placeholder.size,
+          sizeUnit: dto.sizeUnit ?? placeholder.sizeUnit,
+          price,
+          extra,
+          quantity: 1,
+          total: perUnitTotal,
+          productId: placeholder.productId,
+          notes: dto.notes,
+          color: effectiveColor,
+          batchId: sharedBatchId,
+          assignedById: sourceInfo.assignedById,
+          source: placeholder.source,
+          sourceCustomerOrderId: placeholder.sourceCustomerOrderId,
+          sourceCustomerOrderItemId: placeholder.sourceCustomerOrderItemId,
+          sourcePartyOrderItemId: placeholder.sourcePartyOrderItemId,
+          createdById: userId,
+        },
+        include: { carpenter: { include: { team: true } } },
+      });
+      await this.audit.log({
+        userId,
+        action: 'WORK_ITEM_CREATED',
+        targetType: 'CarpenterWorkItem',
+        targetId: sibling.id,
+        metadata: { productName: sibling.productName, carpenterName: sibling.carpenter?.name },
+      });
+      siblings.push(sibling);
+    }
+
+    // Notify once for the whole batch, using the real total quantity/value
+    // rather than the per-row quantity: 1 now stored on each unit.
+    const whatsapp = await this.finalizeAssignment({ ...workItem, quantity, total: perUnitTotal * quantity }, dto.notifyWhatsapp);
+    return { ...workItem, items: [workItem, ...siblings], whatsapp };
   }
 
   private async finalizeAssignment(
@@ -965,6 +1049,21 @@ export class CarpenterService {
     });
   }
 
+  // Rebuilds a comma-joined list of every distinct Model No already entered
+  // across the work items linked to one order (Customer) or one line
+  // (Party) - used instead of a plain overwrite so that a quantity>1 line's
+  // several work items (see assignSourceProduction) can each contribute
+  // their own Model No without one unit's entry erasing another's.
+  private async combinedModelNo(where: { sourceCustomerOrderId?: string; sourcePartyOrderItemId?: string }): Promise<string> {
+    const items = await this.prisma.carpenterWorkItem.findMany({
+      where: { ...where, modelNo: { not: null } },
+      select: { modelNo: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const distinct = [...new Set(items.map((i) => i.modelNo).filter((m): m is string => Boolean(m?.trim())))];
+    return distinct.join(', ');
+  }
+
   // Narrow, non-Admin-gated Model No entry for the employee who actually
   // did the work (spec: "Production Employee can update the Model No after
   // manufacturing"). Propagates to the linked order/stock record so it's
@@ -1004,14 +1103,21 @@ export class CarpenterService {
         await this.prisma.product.update({ where: { id: workItem.productId }, data: { modelNo: trimmed } });
       }
     } else if (workItem.source === 'CUSTOMER_ORDER' && workItem.sourceCustomerOrderId) {
+      // A quantity>1 line now becomes several work items (see
+      // assignSourceProduction), each getting its own Model No via this
+      // same endpoint - rebuilding the combined list from every linked work
+      // item (rather than overwriting cotTrack with just this one value)
+      // means entering unit 2's Model No never discards unit 1's.
+      const cotTrack = await this.combinedModelNo({ sourceCustomerOrderId: workItem.sourceCustomerOrderId });
       await this.prisma.customerOrder.update({
         where: { id: workItem.sourceCustomerOrderId },
-        data: { cotTrack: trimmed, modelNoUpdatedById: userId, modelNoUpdatedAt: new Date() },
+        data: { cotTrack, modelNoUpdatedById: userId, modelNoUpdatedAt: new Date() },
       });
     } else if (workItem.source === 'PARTY_ORDER' && workItem.sourcePartyOrderItemId) {
+      const modelNo = await this.combinedModelNo({ sourcePartyOrderItemId: workItem.sourcePartyOrderItemId });
       await this.prisma.partyOrderItem.update({
         where: { id: workItem.sourcePartyOrderItemId },
-        data: { modelNo: trimmed, modelNoUpdatedById: userId, modelNoUpdatedAt: new Date() },
+        data: { modelNo, modelNoUpdatedById: userId, modelNoUpdatedAt: new Date() },
       });
     }
 
