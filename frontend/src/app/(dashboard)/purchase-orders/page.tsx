@@ -270,7 +270,7 @@ function PurchaseOrdersContent() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-900">Purchase Orders</h1>
-          <p className="text-sm text-brand-500 mt-1">Recording a purchase immediately updates material stock and the supplier's balance payable.</p>
+          <p className="text-sm text-brand-500 mt-1">Recording a purchase immediately updates material stock and the supplier&apos;s balance payable.</p>
         </div>
         <div className="flex gap-2">
           <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>

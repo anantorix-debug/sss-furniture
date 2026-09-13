@@ -99,10 +99,10 @@ export function WhatsAppModal({
     }
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
-  // fires once on mount only, matching autoAttachPdf/pdfUrl's initial value.
   useEffect(() => {
     if (autoAttachPdf && pdfUrl) attachOrderPdf();
+    // Intentionally fires once on mount only, matching autoAttachPdf/pdfUrl's initial value.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function applyFormat(wrap: string) {
