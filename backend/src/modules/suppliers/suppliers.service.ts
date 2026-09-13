@@ -1,35 +1,41 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PdfService } from '../pdf/pdf.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { paginate, toSkipTake } from '../../common/utils/pagination.util';
+import { escapeHtml, REPORT_PDF_STYLES, renderReportHeader, renderFilterSummary, renderGeneratedFooter } from '../../common/utils/pdf-report.util';
 
 @Injectable()
 export class SuppliersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private pdf: PdfService,
+  ) {}
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
-  async findAll(params: { search?: string; page?: number; limit?: number } = {}) {
+  // `status` ("DUE"/"SETTLED") is derived from balance, not a stored column -
+  // same "compute then filter/paginate in JS" pattern as RawMaterial's
+  // isLow, since paginating in SQL first would drop matching rows before
+  // the derived filter runs.
+  async findAll(params: { search?: string; status?: 'DUE' | 'SETTLED'; page?: number; limit?: number } = {}) {
     const paginated = params.page != null;
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
     const where: Prisma.SupplierWhereInput = params.search ? { name: { contains: params.search } } : {};
 
-    const [suppliers, total] = await Promise.all([
-      this.prisma.supplier.findMany({
-        where,
-        include: { purchases: true, payments: true },
-        orderBy: { name: 'asc' },
-        ...(paginated ? toSkipTake(page, limit) : {}),
-      }),
-      paginated ? this.prisma.supplier.count({ where }) : Promise.resolve(0),
-    ]);
+    const suppliers = await this.prisma.supplier.findMany({
+      where,
+      include: { purchases: true, payments: true },
+      orderBy: { name: 'asc' },
+    });
 
     const mapped = suppliers.map((s) => {
       const totalPurchaseValue = s.purchases.reduce((sum, p) => sum + Number(p.value), 0);
       const totalPaid = s.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+      const balance = totalPurchaseValue - totalPaid;
       return {
         id: s.id,
         name: s.name,
@@ -37,10 +43,15 @@ export class SuppliersService {
         address: s.address,
         totalPurchaseValue,
         totalPaid,
-        balance: totalPurchaseValue - totalPaid,
+        balance,
+        status: (balance > 0 ? 'DUE' : 'SETTLED') as 'DUE' | 'SETTLED',
       };
     });
-    return paginated ? paginate(mapped, total, page, limit) : mapped;
+    const filtered = params.status ? mapped.filter((s) => s.status === params.status) : mapped;
+
+    if (!paginated) return filtered;
+    const { skip, take } = toSkipTake(page, limit);
+    return paginate(filtered.slice(skip, skip + take), filtered.length, page, limit);
   }
 
   async findOne(id: string) {
@@ -141,5 +152,107 @@ export class SuppliersService {
     if (!payment || payment.supplierId !== supplierId) throw new NotFoundException('Payment not found');
     await this.prisma.supplierPayment.delete({ where: { id: paymentId } });
     return this.findOne(supplierId);
+  }
+
+  // Suppliers list PDF - exactly the filtered rows the list page is showing,
+  // never the whole table.
+  async generateListPdf(params: { search?: string; status?: 'DUE' | 'SETTLED' }): Promise<Buffer> {
+    const suppliers = (await this.findAll(params)) as any[];
+    const rows = suppliers
+      .map(
+        (s) => `<tr>
+          <td>${escapeHtml(s.name)}</td>
+          <td>${escapeHtml(s.phone ?? '-')}</td>
+          <td style="text-align:right">₹${s.totalPurchaseValue.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${s.totalPaid.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${s.balance.toLocaleString('en-IN')}</td>
+          <td>${s.status === 'DUE' ? 'Due' : 'Settled'}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const filterSummary = renderFilterSummary({
+      Search: params.search,
+      Status: params.status ? (params.status === 'DUE' ? 'Due' : 'Settled') : undefined,
+    });
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${renderReportHeader('Suppliers')}
+  <div class="body">
+    ${filterSummary}
+    <table>
+      <thead><tr><th>Supplier Name</th><th>Phone</th><th style="text-align:right">Total Purchases</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance Payable</th><th>Status</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:16px">No suppliers found</td></tr>'}</tbody>
+    </table>
+    ${renderGeneratedFooter(suppliers.length, 'supplier')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html);
+  }
+
+  // Supplier detail PDF - this one supplier only: its info, its own
+  // Purchase Orders, its own Payment Ledger, never another supplier's data.
+  async generateDetailPdf(id: string): Promise<Buffer> {
+    const supplier = await this.findOne(id);
+    const purchaseOrders = await this.prisma.purchaseOrder.findMany({
+      where: { supplierId: id },
+      include: { items: true },
+      orderBy: { orderDate: 'desc' },
+    });
+
+    const poRows = purchaseOrders
+      .map((po) => {
+        const total = po.items.reduce((s, i) => s + Number(i.quantity) * Number(i.unitPrice), 0);
+        return `<tr>
+          <td>${escapeHtml(po.poNumber)}</td>
+          <td>${po.orderDate.toLocaleDateString('en-IN')}</td>
+          <td>${po.items.length}</td>
+          <td style="text-align:right">₹${total.toLocaleString('en-IN')}</td>
+          <td>${escapeHtml(po.status.replace(/_/g, ' '))}</td>
+        </tr>`;
+      })
+      .join('');
+
+    const paymentRows = supplier.payments
+      .map(
+        (p: any) => `<tr>
+          <td>${new Date(p.date).toLocaleDateString('en-IN')}</td>
+          <td>${escapeHtml(p.voucherNo ?? '-')}</td>
+          <td style="text-align:right">₹${Number(p.amount).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${p.balanceAfter != null ? Number(p.balanceAfter).toLocaleString('en-IN') : '-'}</td>
+          <td>${escapeHtml(p.mode ?? '-')}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${renderReportHeader(supplier.name)}
+  <div class="body">
+    <p style="margin:0 0 14px;color:#6b7280;font-size:12px">${supplier.phone ? escapeHtml(supplier.phone) : ''}</p>
+    <div class="summary">
+      <div><div class="label">Total Purchases</div><div class="value">₹${supplier.totalPurchaseValue.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">₹${supplier.totalPaid.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Balance Payable</div><div class="value" style="color:#b91c1c">₹${supplier.balance.toLocaleString('en-IN')}</div></div>
+    </div>
+    <h3 style="font-size:13px;margin:18px 0 8px">Purchase Orders</h3>
+    <table>
+      <thead><tr><th>PO Number</th><th>Date</th><th>Items</th><th style="text-align:right">Total</th><th>Status</th></tr></thead>
+      <tbody>${poRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No purchase orders</td></tr>'}</tbody>
+    </table>
+    <h3 style="font-size:13px;margin:18px 0 8px">Payment Ledger</h3>
+    <table>
+      <thead><tr><th>Date</th><th>Voucher No</th><th style="text-align:right">Amount</th><th style="text-align:right">Balance</th><th>Mode</th></tr></thead>
+      <tbody>${paymentRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No payments</td></tr>'}</tbody>
+    </table>
+    ${renderGeneratedFooter(purchaseOrders.length, 'purchase order')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html);
   }
 }

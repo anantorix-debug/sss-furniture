@@ -4,7 +4,7 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, getAccessToken } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency } from '@/lib/format';
 import { Modal } from '@/components/Modal';
@@ -13,23 +13,58 @@ import { BalanceBadge } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
 import { downloadCsv } from '@/lib/csv';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+import { FilterBar } from '@/components/FilterBar';
+import { PurchasingTabs } from '@/components/PurchasingTabs';
 import type { SupplierSummary } from '@/types';
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptySupplierForm = { name: '', phone: '', address: '' };
+const emptyFilters: Record<string, string> = {};
+const STATUS_OPTIONS = [
+  { value: 'DUE', label: 'Due' },
+  { value: 'SETTLED', label: 'Settled' },
+];
 
 function SuppliersContent() {
   const { hasRole } = useAuth();
-  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<SupplierSummary>>(
-    `/suppliers?${new URLSearchParams({ ...(search ? { search } : {}), page: String(page), limit: '20' })}`,
-    fetcher,
-  );
+  const [values, setValues] = useState<Record<string, string>>(emptyFilters);
+  const [applied, setApplied] = useState<Record<string, string>>(emptyFilters);
+  const [downloading, setDownloading] = useState(false);
+  const queryParams = new URLSearchParams({ ...applied, page: String(page), limit: '20' });
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<SupplierSummary>>(`/suppliers?${queryParams}`, fetcher);
   const data = result?.data;
-  function updateSearch(value: string) {
-    setSearch(value);
+
+  function applyFilters() {
+    setApplied(values);
     setPage(1);
   }
+  function resetFilters() {
+    setValues(emptyFilters);
+    setApplied(emptyFilters);
+    setPage(1);
+  }
+
+  async function downloadPdf() {
+    setDownloading(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/suppliers/pdf?${new URLSearchParams(applied)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `suppliers-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SupplierSummary | null>(null);
   const [form, setForm] = useState(emptySupplierForm);
@@ -88,12 +123,17 @@ function SuppliersContent() {
 
   return (
     <div className="space-y-6">
+      <PurchasingTabs active="suppliers" />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-900">Suppliers</h1>
           <p className="text-sm text-brand-500 mt-1">Material purchase ledgers - Devi Ply Wood, Timber Hari, and more.</p>
         </div>
         <div className="flex gap-2">
+          <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
+            {downloading ? 'Preparing...' : 'Download PDF'}
+          </button>
           <button
             className="btn-secondary"
             onClick={() =>
@@ -122,11 +162,15 @@ function SuppliersContent() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <input
-        className="input max-w-xs"
-        placeholder="Search supplier name..."
-        value={search}
-        onChange={(e) => updateSearch(e.target.value)}
+      <FilterBar
+        fields={[
+          { key: 'search', label: 'Search', type: 'search', placeholder: 'Search supplier name...' },
+          { key: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS },
+        ]}
+        values={values}
+        onChange={(key, value) => setValues((v) => ({ ...v, [key]: value }))}
+        onApply={applyFilters}
+        onReset={resetFilters}
       />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

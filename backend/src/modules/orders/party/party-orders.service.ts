@@ -15,6 +15,7 @@ import { computeBalance, suggestPaymentType } from '../../../common/utils/balanc
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 import { getPdfBannerDataUri } from '../../../common/utils/pdf-banner.util';
+import { REPORT_PDF_STYLES, renderReportHeader, renderFilterSummary, renderGeneratedFooter } from '../../../common/utils/pdf-report.util';
 import { Role } from '../../../common/enums/role.enum';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
@@ -106,13 +107,32 @@ export class PartyOrdersService {
   ) {}
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
-  async findAll(params: { status?: string; search?: string; viewerRole?: Role; page?: number; limit?: number }) {
+  // `paymentStatus` is derived from receivedAmount/balanceAmount, not a
+  // stored column - filtered/paginated in JS after computing it, same
+  // "compute then filter" pattern as RawMaterial's isLow (paginating in SQL
+  // first would drop matching rows before the derived filter runs).
+  async findAll(params: {
+    status?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    shopId?: string;
+    paymentStatus?: 'SETTLED' | 'DUE';
+    viewerRole?: Role;
+    page?: number;
+    limit?: number;
+  }) {
     const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
     const paginated = params.page != null;
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
     const where = {
       deliveryStatus: params.status ? (params.status as any) : undefined,
+      shopId: params.shopId,
+      orderDate:
+        params.dateFrom || params.dateTo
+          ? { gte: params.dateFrom ? new Date(params.dateFrom) : undefined, lte: params.dateTo ? new Date(params.dateTo) : undefined }
+          : undefined,
       OR: params.search
         ? [
             { shopName: { contains: params.search } },
@@ -123,24 +143,28 @@ export class PartyOrdersService {
           ]
         : undefined,
     };
-    const [orders, total] = await Promise.all([
-      this.prisma.partyOrder.findMany({
-        where,
-        include: {
-          payments: true,
-          ...itemsInclude,
-          createdBy: { select: { id: true, name: true } },
-          assignedEmployee: { select: { id: true, name: true } },
-          assignedBy: { select: { id: true, name: true } },
-          modelNoUpdatedBy: { select: { id: true, name: true } },
-        },
-        orderBy: { orderDate: 'desc' },
-        ...(paginated ? toSkipTake(page, limit) : {}),
-      }),
-      paginated ? this.prisma.partyOrder.count({ where }) : Promise.resolve(0),
-    ]);
-    const mapped = orders.map((o) => stripOrderMoney(withBalance(o), hide));
-    return paginated ? paginate(mapped, total, page, limit) : mapped;
+    const orders = await this.prisma.partyOrder.findMany({
+      where,
+      include: {
+        payments: true,
+        ...itemsInclude,
+        createdBy: { select: { id: true, name: true } },
+        assignedEmployee: { select: { id: true, name: true } },
+        assignedBy: { select: { id: true, name: true } },
+        modelNoUpdatedBy: { select: { id: true, name: true } },
+      },
+      orderBy: { orderDate: 'desc' },
+    });
+    const withStatus = orders.map((o) => {
+      const balanced = withBalance(o);
+      return { ...balanced, paymentStatus: (balanced.balanceAmount <= 0 ? 'SETTLED' : 'DUE') as 'SETTLED' | 'DUE' };
+    });
+    const filtered = params.paymentStatus ? withStatus.filter((o) => o.paymentStatus === params.paymentStatus) : withStatus;
+    const mapped = filtered.map((o) => stripOrderMoney(o, hide));
+
+    if (!paginated) return mapped;
+    const { skip, take } = toSkipTake(page, limit);
+    return paginate(mapped.slice(skip, skip + take), mapped.length, page, limit);
   }
 
   async findOne(id: string, viewerRole?: Role) {
@@ -482,119 +506,114 @@ export class PartyOrdersService {
     return this.findOne(updated.id, user.role as Role);
   }
 
-  // Matches CustomerOrdersService.buildPdfHtml - same branded "BILL &
-  // PAYMENT / ORDER CONFIRMATION" template, adapted for Party Order fields
-  // (shopName instead of customerName, no per-line category so each box is
-  // titled by the product name itself, and finish/pattern/details shown
-  // alongside size/colour when present).
+  // "Product Supply Details" style report - a real per-item table (not the
+  // old free-text "item box" bill) matching how wholesale/dealer order
+  // information is traditionally presented on paper, modernized with the
+  // shop's existing banner/branding. One template for both Download PDF
+  // and Send PDF via WhatsApp - not two.
   private buildPdfHtml(order: Awaited<ReturnType<PartyOrdersService['findOne']>>): string {
-    const lines: { label: string; qty: number; total: number; details: string[] }[] = order.items.length
+    const lines = order.items.length
       ? order.items.map((i) => ({
-          label: i.productName,
-          qty: i.qty,
-          total: i.qty * Number(i.unitPrice ?? 0),
-          details: [
-            i.modelNo ? `Model No : ${i.modelNo}` : null,
-            i.finish ? `Finish : ${i.finish}` : null,
-            i.size ? `Size : ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : null,
-            i.pattern ? `Pattern : ${i.pattern}` : null,
-            i.color ? `Colour : ${i.color}` : null,
-            i.details ? `Details : ${i.details}` : null,
-            `Quantity : ${i.qty}`,
-            i.unitPrice != null ? `Price : ₹${Number(i.unitPrice).toLocaleString('en-IN')}/-` : null,
-          ].filter((d): d is string => d !== null),
+          date: order.orderDate,
+          order: i.productName,
+          finish: i.finish ?? '-',
+          size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || '-',
+          pattern: i.pattern ?? '-',
+          price: i.unitPrice != null ? Number(i.unitPrice) : null,
+          modelNo: i.modelNo ?? '-',
+          value: i.totalValue != null ? Number(i.totalValue) : (i.qty ?? 1) * Number(i.unitPrice ?? 0),
         }))
       : [
           {
-            label: order.model ?? 'Order',
-            qty: order.qty ?? 1,
-            total: Number(order.totalAmount ?? 0),
-            details: [`Product : ${order.model ?? '-'}`, `Price : ₹${Number(order.totalAmount ?? 0).toLocaleString('en-IN')}/-`],
+            date: order.orderDate,
+            order: order.model ?? 'Order',
+            finish: order.finish ?? '-',
+            size: [order.size, order.sizeUnit].filter(Boolean).join(' ') || '-',
+            pattern: '-',
+            price: order.price != null ? Number(order.price) : null,
+            modelNo: order.cotNo ?? '-',
+            value: Number(order.totalAmount ?? 0),
           },
         ];
 
-    const itemBoxes = lines
+    const rows = lines
       .map(
-        (l) => `
-        <div class="item-box">
-          <div class="item-title">${escapeHtml(l.label.toUpperCase())}</div>
-          <ul>${l.details.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}</ul>
-        </div>`,
-      )
-      .join('');
-
-    const summaryRows = lines
-      .map(
-        (l, i) => `<tr>
-          <td>${i + 1}</td>
-          <td>${escapeHtml(l.label)}${l.qty > 1 ? ` (${l.qty} Nos)` : ''}</td>
-          <td style="text-align:right">₹${l.total.toLocaleString('en-IN')}/-</td>
+        (l, idx) => `<tr>
+          <td>${idx + 1}</td>
+          <td>${l.date.toLocaleDateString('en-IN')}</td>
+          <td>${escapeHtml(l.order)}</td>
+          <td>${escapeHtml(l.finish)}</td>
+          <td>${escapeHtml(l.size)}</td>
+          <td>${escapeHtml(l.pattern)}</td>
+          <td style="text-align:right">${l.price != null ? `₹${l.price.toLocaleString('en-IN')}` : '-'}</td>
+          <td>${escapeHtml(l.modelNo)}</td>
+          <td style="text-align:right">₹${l.value.toLocaleString('en-IN')}</td>
         </tr>`,
       )
       .join('');
 
-    const latestPayment = order.payments && order.payments.length > 0 ? order.payments[order.payments.length - 1] : null;
-    const paymentMode = latestPayment?.mode || 'Cash / Bank';
+    const totalOrderValue = Number(order.totalAmount ?? 0);
+    const received = Number((order as any).receivedAmount ?? 0);
+    const balance = Number((order as any).balanceAmount ?? totalOrderValue - received);
+
+    const deliveryBlock =
+      order.courierTrack || order.actualDeliveryDate
+        ? `<div style="margin-top:18px">
+             <h3 style="font-size:13px;margin:0 0 8px">Delivery Details</h3>
+             <p style="font-size:12px;color:#374151;margin:0">
+               ${order.courierTrack ? `Vehicle Number: ${escapeHtml(order.courierTrack)}<br/>` : ''}
+               ${order.actualDeliveryDate ? `Actual Delivery Date: ${order.actualDeliveryDate.toLocaleDateString('en-IN')}<br/>` : ''}
+               Delivery Status: ${escapeHtml(String(order.deliveryStatus).replace(/_/g, ' '))}
+             </p>
+           </div>`
+        : '';
 
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>
-  body { font-family: Arial, Helvetica, sans-serif; color: #2b2b2b; margin: 0; background: #fff; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; background: #fff; }
   .banner { width: 100%; display: block; }
   .body { padding: 20px 28px 28px; }
-  .title-row { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 6px; break-inside: avoid; page-break-inside: avoid; }
-  .title h1 { margin: 0; font-size: 26px; letter-spacing: 0.5px; }
-  .title h1 .accent { color: #80011f; }
-  .title p { margin: 2px 0 0; font-size: 12px; letter-spacing: 3px; color: #80011f; font-weight: bold; }
-  .meta-box { border: 1px solid #c9a227; border-radius: 6px; padding: 10px 16px; font-size: 12px; text-align: left; min-width: 220px; }
-  .meta-box div { margin: 2px 0; }
-  .meta-box b { display: inline-block; width: 100px; }
-  .greeting { margin: 18px 0 4px; font-size: 14px; }
-  .greeting .name { font-weight: bold; }
-  .item-box { border: 1px solid #e3d9c6; border-radius: 6px; margin-top: 12px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
-  .item-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; }
-  .item-box ul { list-style: none; margin: 0; padding: 8px 16px 10px; font-size: 12.5px; }
-  .item-box li { padding: 2px 0; }
-  .summary-section { break-inside: avoid; page-break-inside: avoid; margin-top: 20px; }
-  .summary-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; border-radius: 6px 6px 0 0; }
-  table.summary { width: 100%; border-collapse: collapse; font-size: 12.5px; border: 1px solid #e3d9c6; border-top: none; }
-  table.summary th { background: #f4f2ec; text-align: left; padding: 8px 14px; border-bottom: 1px solid #e3d9c6; }
-  table.summary td { padding: 8px 14px; border-bottom: 1px solid #efede6; }
-  table.summary tr { break-inside: avoid; page-break-inside: avoid; }
-  .grand-total td { font-weight: bold; font-size: 14px; background: #f1e4c0; border-top: 2px solid #c9a227; }
-  .thanks { text-align: center; margin-top: 22px; font-size: 12px; color: #6b6b6b; break-inside: avoid; page-break-inside: avoid; }
+  .title { text-align: center; margin: 10px 0 18px; }
+  .title h1 { margin: 0; font-size: 20px; letter-spacing: 1px; color: #80011f; }
+  .title p { margin: 2px 0 0; font-size: 12px; letter-spacing: 2px; color: #6b7280; font-weight: bold; }
+  .meta { display: flex; flex-wrap: wrap; gap: 20px; font-size: 12px; margin-bottom: 16px; }
+  .meta div b { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; break-inside: avoid; }
+  th { background: #f4f2ec; text-align: left; padding: 7px 9px; border-bottom: 1px solid #e3e1d9; }
+  td { padding: 7px 9px; border-bottom: 1px solid #efede6; }
+  .summary { display: flex; gap: 20px; margin-top: 18px; }
+  .summary div { flex: 1; border: 1px solid #e3e1d9; border-radius: 8px; padding: 10px 14px; }
+  .summary .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }
+  .summary .value { font-size: 16px; font-weight: bold; margin-top: 2px; }
+  .thanks { text-align: center; margin-top: 22px; font-size: 12px; color: #6b6b6b; }
   .thanks strong { color: #80011f; }
 </style></head>
 <body>
   <img class="banner" src="${getPdfBannerDataUri()}" alt="SSS Furniture" />
   <div class="body">
-    <div class="title-row">
-      <div class="title">
-        <h1>BILL <span class="accent">&amp; PAYMENT</span></h1>
-        <p>ORDER CONFIRMATION</p>
-      </div>
-      <div class="meta-box">
-        <div><b>Invoice No</b> : ${escapeHtml(order.jobNumber ?? order.cotNo ?? order.id)}</div>
-        <div><b>Date</b> : ${order.orderDate.toLocaleDateString('en-IN')}</div>
-        <div><b>Payment Mode</b> : ${escapeHtml(paymentMode)}</div>
-      </div>
+    <div class="title">
+      <h1>SSS COMPANY</h1>
+      <p>PRODUCT SUPPLY DETAILS</p>
     </div>
-
-    <p class="greeting">Dear <span class="name">${escapeHtml(order.shopName)}</span>,<br/>Kindly check and confirm the following order details:</p>
-
-    ${itemBoxes}
-
-    <div class="summary-section">
-      <div class="summary-title">PAYMENT SUMMARY</div>
-      <table class="summary">
-        <thead><tr><th style="width:40px">S.No</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
-        <tbody>
-          ${summaryRows}
-          <tr class="grand-total"><td colspan="2" style="text-align:right">GRAND TOTAL</td><td style="text-align:right">₹${Number(order.totalAmount ?? 0).toLocaleString('en-IN')}/-</td></tr>
-        </tbody>
-      </table>
+    <div class="meta">
+      <div><b>Dealer Name</b>${escapeHtml(order.shopName)}</div>
+      ${order.phone ? `<div><b>Phone</b>${escapeHtml(order.phone)}</div>` : ''}
+      <div><b>Job No</b>${escapeHtml(order.jobNumber ?? order.cotNo ?? order.id)}</div>
+      <div><b>Order Date</b>${order.orderDate.toLocaleDateString('en-IN')}</div>
     </div>
-
+    <table>
+      <thead>
+        <tr><th>S.No</th><th>Date</th><th>Order</th><th>Finish</th><th>Size</th><th>Pattern</th><th style="text-align:right">Price</th><th>Model No</th><th style="text-align:right">Value</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="summary">
+      <div><div class="label">Total Order Value</div><div class="value">₹${totalOrderValue.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Received</div><div class="value" style="color:#15803d">₹${received.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">₹${balance.toLocaleString('en-IN')}</div></div>
+    </div>
+    ${deliveryBlock}
     <p class="thanks"><strong>Thank you</strong> for your trust and support - SSS Furniture</p>
   </div>
 </body></html>`;
@@ -617,5 +636,57 @@ export class PartyOrdersService {
       mimetype: 'application/pdf',
       caption: `Order confirmation ${order.jobNumber ?? ''} - ${order.shopName} - SSS Company`,
     });
+  }
+
+  // Party Orders list PDF - exactly the filtered rows the list page is
+  // showing, never the whole table.
+  async generateListPdf(params: {
+    status?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    shopId?: string;
+    paymentStatus?: 'SETTLED' | 'DUE';
+  }): Promise<Buffer> {
+    const orders = (await this.findAll(params)) as any[];
+    const rows = orders
+      .map(
+        (o, idx) => `<tr>
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(o.jobNumber ?? o.cotNo ?? o.id)}</td>
+          <td>${escapeHtml(o.shopName)}</td>
+          <td>${new Date(o.orderDate).toLocaleDateString('en-IN')}</td>
+          <td>${o.items?.length ?? 0}</td>
+          <td style="text-align:right">₹${Number(o.totalAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${Number(o.receivedAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${Number(o.balanceAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td>${escapeHtml(String(o.deliveryStatus).replace(/_/g, ' '))}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const filterSummary = renderFilterSummary({
+      Search: params.search,
+      Status: params.status ? params.status.replace(/_/g, ' ') : undefined,
+      'Date From': params.dateFrom ? new Date(params.dateFrom).toLocaleDateString('en-IN') : undefined,
+      'Date To': params.dateTo ? new Date(params.dateTo).toLocaleDateString('en-IN') : undefined,
+      'Payment Status': params.paymentStatus,
+    });
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${renderReportHeader('Party Orders')}
+  <div class="body">
+    ${filterSummary}
+    <table>
+      <thead><tr><th>S.No</th><th>Job No</th><th>Dealer/Shop</th><th>Date</th><th>Products</th><th style="text-align:right">Total</th><th style="text-align:right">Received</th><th style="text-align:right">Balance</th><th>Status</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px">No party orders found</td></tr>'}</tbody>
+    </table>
+    ${renderGeneratedFooter(orders.length, 'order')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html);
   }
 }

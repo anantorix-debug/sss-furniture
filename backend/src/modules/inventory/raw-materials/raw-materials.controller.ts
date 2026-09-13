@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { RawMaterialsService } from './raw-materials.service';
 import { CreateRawMaterialDto } from './dto/create-raw-material.dto';
 import { UpdateRawMaterialDto } from './dto/update-raw-material.dto';
@@ -33,9 +34,65 @@ export class RawMaterialsController {
     });
   }
 
+  // Static route - must come before the dynamic :id route below, otherwise
+  // Nest would try to treat "movements" as an :id.
+  @Get('raw-materials/movements/pdf')
+  async movementsPdf(
+    @Res() res: Response,
+    @Query('rawMaterialId') rawMaterialId?: string,
+    @Query('type') type?: string,
+    @Query('workerType') workerType?: string,
+    @Query('carpenterId') carpenterId?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('reference') reference?: 'PURCHASE_ORDER' | 'PRODUCTION' | 'ADJUSTMENT',
+    @CurrentUser() user?: AuthUser,
+  ) {
+    const buffer = await this.service.generateMovementsPdf({
+      rawMaterialId,
+      type,
+      workerType,
+      carpenterId,
+      dateFrom,
+      dateTo,
+      reference,
+      viewerRole: user?.role as Role,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="material-movement-history-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    res.send(buffer);
+  }
+
   @Get('raw-materials/:id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user.role as Role);
+  }
+
+  @Get('raw-materials/:id/pdf')
+  async materialDetailPdf(
+    @Param('id') id: string,
+    @Res() res: Response,
+    @Query('type') type?: string,
+    @Query('workerType') workerType?: string,
+    @Query('carpenterId') carpenterId?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('reference') reference?: 'PURCHASE_ORDER' | 'PRODUCTION' | 'ADJUSTMENT',
+    @CurrentUser() user?: AuthUser,
+  ) {
+    const material = await this.service.findOne(id, user?.role as Role);
+    const buffer = await this.service.generateMaterialDetailPdf(id, {
+      type,
+      workerType,
+      carpenterId,
+      dateFrom,
+      dateTo,
+      reference,
+      viewerRole: user?.role as Role,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${(material as any).name}.pdf"`);
+    res.send(buffer);
   }
 
   @Roles(Role.ADMIN)
@@ -87,6 +144,9 @@ export class RawMaterialsController {
     @Query('workItemId') workItemId?: string,
     @Query('workerType') workerType?: string,
     @Query('carpenterId') carpenterId?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('reference') reference?: 'PURCHASE_ORDER' | 'PRODUCTION' | 'ADJUSTMENT',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
@@ -97,6 +157,9 @@ export class RawMaterialsController {
       workItemId,
       workerType,
       carpenterId,
+      dateFrom,
+      dateTo,
+      reference,
       viewerRole: user?.role as Role,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,

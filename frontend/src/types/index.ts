@@ -182,6 +182,7 @@ export interface SupplierSummary {
   totalPurchaseValue: number;
   totalPaid: number;
   balance: number;
+  status: 'DUE' | 'SETTLED';
 }
 
 export interface SupplierPurchase {

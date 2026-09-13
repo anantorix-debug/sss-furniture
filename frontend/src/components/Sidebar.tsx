@@ -16,6 +16,11 @@ interface NavItem {
   // Used for employee-only items like My Work, which are meaningless for
   // Super Admin/Admin (no linked worker profile to show jobs for).
   exact?: boolean;
+  // Extra path prefixes that should also highlight this item - used for
+  // "Purchasing" which links to /suppliers but should stay active while
+  // on /purchase-orders too (the two are still separate route trees, just
+  // presented as one module via PurchasingTabs).
+  alsoActiveOn?: string[];
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -24,8 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/customer-orders', label: 'Customer Orders', icon: '₹', minRole: 'ADMIN' },
   { href: '/party-orders', label: 'Party Orders', icon: '◉', minRole: 'ADMIN' },
   { href: '/inventory', label: 'Inventory', icon: '▤' },
-  { href: '/suppliers', label: 'Suppliers', icon: '⇩', minRole: 'ADMIN' },
-  { href: '/purchase-orders', label: 'Purchase Orders', icon: '⇩', minRole: 'ADMIN' },
+  { href: '/suppliers', label: 'Purchasing', icon: '⇩', minRole: 'ADMIN', alsoActiveOn: ['/purchase-orders'] },
   { href: '/carpenters', label: 'Production', icon: '✦' },
   { href: '/production-control', label: 'Production Control', icon: '⏻', minRole: 'ADMIN' },
   { href: '/payments', label: 'Payments', icon: '▣', minRole: 'ADMIN' },
@@ -73,7 +77,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           const roles = Array.isArray(item.minRole) ? item.minRole : [item.minRole];
           return item.exact ? roles.includes(user.role) : hasRole(...roles);
         }).map((item) => {
-          const active = pathname === item.href || pathname?.startsWith(item.href + '/');
+          const active =
+            pathname === item.href ||
+            pathname?.startsWith(item.href + '/') ||
+            item.alsoActiveOn?.some((p) => pathname === p || pathname?.startsWith(p + '/'));
           return (
             <Link
               key={item.href}

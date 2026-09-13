@@ -14,12 +14,15 @@ import { StatCard } from '@/components/StatCard';
 import { Chip } from '@/components/StatusBadge';
 import { UnitSelect } from '@/components/UnitSelect';
 import { downloadCsv } from '@/lib/csv';
-import { assetUrl, uploadGalleryImage, validateProductImageFile } from '@/lib/api';
+import { assetUrl, uploadGalleryImage, validateProductImageFile, getAccessToken } from '@/lib/api';
 import { GalleryGrid } from '@/components/GalleryGrid';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
-import type { GalleryImage, MaterialGroup, MaterialMeasurementKind, Product, ProductStockMovement, RawMaterial, StockMovement, WorkerType } from '@/types';
+import { FilterBar } from '@/components/FilterBar';
+import type { CarpenterSummary, GalleryImage, MaterialGroup, Product, ProductStockMovement, RawMaterial, StockMovement, WorkerType } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 type Tab = 'products' | 'materials' | 'movements' | 'stock-movements' | 'gallery';
 
@@ -60,19 +63,11 @@ const emptyBulkRow: BulkProductRow = {
   retailPrice: '',
 };
 
-const emptyMaterialForm = { name: '', type: '', unit: '', reorderLevel: '', materialGroup: 'WOOD' as MaterialGroup, measurementKind: 'OTHER' as MaterialMeasurementKind };
-
 const MATERIAL_GROUP_LABEL: Record<MaterialGroup, string> = {
   WOOD: 'Carpenter Team',
   CARVING: 'Carving Team',
   POLISH: 'Polish Team',
   OTHER: 'Other / Shared',
-};
-
-const LOCKED_MEASUREMENT_UNIT: Partial<Record<MaterialMeasurementKind, string>> = {
-  BOARD_FEET: 'Board Feet',
-  SHEET: 'Sheet',
-  COUNT: 'Nos',
 };
 
 const ALL_TABS: [Tab, string, boolean][] = [
@@ -123,7 +118,7 @@ export default function InventoryPage() {
 
       {tab === 'products' && <ProductsTab canEdit={hasRole('ADMIN')} />}
       {tab === 'gallery' && <GalleryTab canEdit={hasRole('SUPERADMIN')} />}
-      {tab === 'materials' && <MaterialsTab canEdit={hasRole('ADMIN')} />}
+      {tab === 'materials' && <MaterialsTab />}
       {tab === 'movements' && <MovementsTab />}
       {tab === 'stock-movements' && <StockMovementsTab />}
     </div>
@@ -791,10 +786,10 @@ function GalleryTab({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-function MaterialsTab({ canEdit }: { canEdit: boolean }) {
+function MaterialsTab() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<RawMaterial>>(
+  const { data: result, isLoading } = useSWR<PaginatedResult<RawMaterial>>(
     `/raw-materials?${new URLSearchParams({ ...(search ? { search } : {}), page: String(page), limit: '20' })}`,
     fetcher,
   );
@@ -802,34 +797,6 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
   function updateSearch(value: string) {
     setSearch(value);
     setPage(1);
-  }
-
-  const [formOpen, setFormOpen] = useState(false);
-  const [form, setForm] = useState(emptyMaterialForm);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    try {
-      await api.post('/raw-materials', {
-        name: form.name,
-        type: form.type || undefined,
-        unit: form.measurementKind === 'OTHER' || form.measurementKind === 'LIQUID' ? form.unit : undefined,
-        reorderLevel: form.reorderLevel ? parseFloat(form.reorderLevel) : undefined,
-        materialGroup: form.materialGroup,
-        measurementKind: form.measurementKind,
-      });
-      setFormOpen(false);
-      setForm(emptyMaterialForm);
-      mutate();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to add material');
-    } finally {
-      setSubmitting(false);
-    }
   }
 
   const stockValue = data?.reduce((s, m) => s + m.stockValue, 0) ?? 0;
@@ -865,11 +832,6 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
           >
             Export Excel
           </button>
-          {canEdit && (
-            <button className="btn-primary" onClick={() => setFormOpen(true)}>
-              + Add Material
-            </button>
-          )}
         </div>
       </div>
 
@@ -937,95 +899,68 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
         )}
       </div>
 
-      {formOpen && (
-        <Modal title="Add Raw Material" onClose={() => setFormOpen(false)}>
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div>
-              <label className="label">Name</label>
-              <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Plywood 19mm" />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="label">Type</label>
-                <input className="input" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))} placeholder="Plywood / Timber / Mica" />
-              </div>
-              <div>
-                <label className="label">Measurement Type</label>
-                <select
-                  className="input"
-                  value={form.measurementKind}
-                  onChange={(e) => setForm((f) => ({ ...f, measurementKind: e.target.value as MaterialMeasurementKind, unit: '' }))}
-                >
-                  <option value="OTHER">Other (choose a unit below)</option>
-                  <option value="BOARD_FEET">Wood / Timber - Board Feet</option>
-                  <option value="SHEET">Plywood / Sheet material</option>
-                  <option value="LIQUID">Polish / Liquid</option>
-                  <option value="COUNT">Tools / Hardware - Nos</option>
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="label">Unit</label>
-              {LOCKED_MEASUREMENT_UNIT[form.measurementKind] ? (
-                <div className="input bg-brand-50 text-brand-700">{LOCKED_MEASUREMENT_UNIT[form.measurementKind]}</div>
-              ) : form.measurementKind === 'LIQUID' ? (
-                <select className="input" required value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}>
-                  <option value="">Select unit...</option>
-                  <option value="Litre">Litre</option>
-                  <option value="Kg">Kg</option>
-                  <option value="Gram">Gram</option>
-                </select>
-              ) : (
-                <UnitSelect id="material-unit" required value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} />
-              )}
-            </div>
-            <div>
-              <label className="label">Team (which employees can use this material)</label>
-              <select className="input" value={form.materialGroup} onChange={(e) => setForm((f) => ({ ...f, materialGroup: e.target.value as MaterialGroup }))}>
-                <option value="WOOD">Carpenter Team</option>
-                <option value="CARVING">Carving Team</option>
-                <option value="POLISH">Polish Team</option>
-                <option value="OTHER">Other / Shared</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">Reorder Level (minimum stock)</label>
-              <input type="number" min="0" step="0.01" className="input" value={form.reorderLevel} onChange={(e) => setForm((f) => ({ ...f, reorderLevel: e.target.value }))} />
-            </div>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>
-                Cancel
-              </button>
-              <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? 'Saving...' : 'Add Material'}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }
 
-const WORKER_MATERIAL_TABS: { value: WorkerType | ''; label: string }[] = [
-  { value: '', label: 'All Materials' },
-  { value: 'CARPENTER', label: 'Carpenter Material' },
-  { value: 'CARVER', label: 'Carving Material' },
-  { value: 'POLISHER', label: 'Polish Material' },
+
+const MOVEMENT_TYPE_OPTIONS = [
+  { value: 'IN', label: 'Stock In' },
+  { value: 'OUT', label: 'Issued / Consumed' },
+  { value: 'ADJUSTMENT', label: 'Adjustment' },
 ];
+const MOVEMENT_ROLE_OPTIONS: { value: WorkerType; label: string }[] = [
+  { value: 'CARPENTER', label: 'Carpenter' },
+  { value: 'CARVER', label: 'Carving' },
+  { value: 'POLISHER', label: 'Polisher' },
+];
+const MOVEMENT_REFERENCE_OPTIONS = [
+  { value: 'PURCHASE_ORDER', label: 'Purchase Order' },
+  { value: 'PRODUCTION', label: 'Production' },
+  { value: 'ADJUSTMENT', label: 'Adjustment' },
+];
+const emptyMovementFilters: Record<string, string> = {};
 
 function MovementsTab() {
-  const [workerType, setWorkerType] = useState<WorkerType | ''>('');
   const [page, setPage] = useState(1);
-  const { data: result, isLoading } = useSWR<PaginatedResult<StockMovement>>(
-    `/stock-movements?${new URLSearchParams({ ...(workerType ? { workerType } : {}), page: String(page), limit: '20' })}`,
-    fetcher,
-  );
+  const [values, setValues] = useState<Record<string, string>>(emptyMovementFilters);
+  const [applied, setApplied] = useState<Record<string, string>>(emptyMovementFilters);
+  const [downloading, setDownloading] = useState(false);
+  const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
+  const { data: carpenters } = useSWR<CarpenterSummary[]>('/carpenters', fetcher);
+
+  const queryParams = new URLSearchParams({ ...applied, page: String(page), limit: '20' });
+  const { data: result, isLoading } = useSWR<PaginatedResult<StockMovement>>(`/stock-movements?${queryParams}`, fetcher);
   const data = result?.data;
-  function updateWorkerType(value: WorkerType | '') {
-    setWorkerType(value);
+
+  function applyFilters() {
+    setApplied(values);
     setPage(1);
+  }
+  function resetFilters() {
+    setValues(emptyMovementFilters);
+    setApplied(emptyMovementFilters);
+    setPage(1);
+  }
+
+  async function downloadPdf() {
+    setDownloading(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/raw-materials/movements/pdf?${new URLSearchParams(applied)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `material-movement-history-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
   }
 
   const typeChip = (type: string) => {
@@ -1036,18 +971,25 @@ function MovementsTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-1 border-b border-brand-200">
-        {WORKER_MATERIAL_TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => updateWorkerType(t.value)}
-            className={`px-3.5 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
-              workerType === t.value ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <FilterBar
+          fields={[
+            { key: 'dateFrom', label: 'Date From', type: 'date' },
+            { key: 'dateTo', label: 'Date To', type: 'date' },
+            { key: 'type', label: 'Movement Type', type: 'select', options: MOVEMENT_TYPE_OPTIONS },
+            { key: 'carpenterId', label: 'Employee', type: 'select', options: (carpenters ?? []).map((c) => ({ value: c.id, label: c.name })) },
+            { key: 'workerType', label: 'Role', type: 'select', options: MOVEMENT_ROLE_OPTIONS },
+            { key: 'reference', label: 'Reference', type: 'select', options: MOVEMENT_REFERENCE_OPTIONS },
+            { key: 'rawMaterialId', label: 'Material', type: 'select', options: (materials ?? []).map((m) => ({ value: m.id, label: m.name })) },
+          ]}
+          values={values}
+          onChange={(key, value) => setValues((v) => ({ ...v, [key]: value }))}
+          onApply={applyFilters}
+          onReset={resetFilters}
+        />
+        <button className="btn-secondary h-9 px-4 text-sm" onClick={downloadPdf} disabled={downloading}>
+          {downloading ? 'Preparing...' : 'Download PDF'}
+        </button>
       </div>
       <div className="card overflow-x-auto">
       <table className="table-shell">
@@ -1057,6 +999,8 @@ function MovementsTab() {
             <th>Material</th>
             <th>Type</th>
             <th>Qty</th>
+            <th>Employee</th>
+            <th>Role</th>
             <th>Reference</th>
             <th>Reason</th>
             <th>By</th>
@@ -1065,14 +1009,14 @@ function MovementsTab() {
         <tbody>
           {isLoading && (
             <tr>
-              <td colSpan={7} className="text-center py-8 text-brand-400">
+              <td colSpan={9} className="text-center py-8 text-brand-400">
                 Loading movements...
               </td>
             </tr>
           )}
           {!isLoading && data?.length === 0 && (
             <tr>
-              <td colSpan={7} className="text-center py-8 text-brand-400">
+              <td colSpan={9} className="text-center py-8 text-brand-400">
                 No stock movements yet
               </td>
             </tr>
@@ -1086,8 +1030,10 @@ function MovementsTab() {
                 {m.quantity > 0 ? '+' : ''}
                 {m.quantity} {m.rawMaterial?.unit}
               </td>
+              <td className="text-brand-500">{m.workItem?.carpenter?.name ?? '-'}</td>
+              <td className="text-brand-500">{m.workItem?.carpenter?.workerType ?? '-'}</td>
               <td className="text-brand-500">
-                {m.workItem ? `Work: ${m.workItem.productName}${m.workItem.carpenter ? ` (${m.workItem.carpenter.name})` : ''}` : m.purchaseOrder ? `PO ${m.purchaseOrder.poNumber}` : '-'}
+                {m.purchaseOrder ? `PO ${m.purchaseOrder.poNumber}` : m.workItem ? `Production: ${m.workItem.productName}` : m.type === 'ADJUSTMENT' ? 'Adjustment' : '-'}
               </td>
               <td className="text-brand-500">{m.reason ?? '-'}</td>
               <td>{m.createdBy?.name ?? '-'}</td>

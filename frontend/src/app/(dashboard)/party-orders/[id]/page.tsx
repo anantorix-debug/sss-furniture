@@ -206,8 +206,6 @@ function PartyOrderDetailContent() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 text-sm">
           <ViewField label="Job No" value={order.jobNumber ?? '-'} />
           <ViewField label="Order Date" value={formatDate(order.orderDate)} />
-          <ViewField label="Vehicle Number" value={order.courierTrack ?? '-'} />
-          <ViewField label="Actual Delivery Date" value={order.actualDeliveryDate ? formatDate(order.actualDeliveryDate) : '-'} />
           <ViewField label="Created By" value={order.createdBy?.name ?? '-'} />
           {order.items.length === 0 && (
             <ViewField label="Model No By" value={order.assignedEmployee?.name ?? 'Not set'} />
@@ -285,6 +283,18 @@ function PartyOrderDetailContent() {
             mutate();
           }}
         />
+      </div>
+
+      <div className="card p-5">
+        <h2 className="font-semibold text-brand-900 mb-3">Delivery</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 text-sm">
+          <ViewField label="Vehicle Number" value={order.courierTrack ?? '-'} />
+          <ViewField label="Actual Delivery Date" value={order.actualDeliveryDate ? formatDate(order.actualDeliveryDate) : '-'} />
+          <div>
+            <p className="text-xs text-brand-400 mb-1">Delivery Status</p>
+            <StatusBadge status={order.deliveryStatus} />
+          </div>
+        </div>
       </div>
 
       {editOpen && <PartyOrderFormModal editing={order} onClose={() => setEditOpen(false)} onSaved={() => mutate()} />}

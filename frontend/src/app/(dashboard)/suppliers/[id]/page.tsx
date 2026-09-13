@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, getAccessToken } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
@@ -14,6 +14,7 @@ import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { PURCHASE_ORDER_STATUS_LABEL } from '@/types';
 import type { SupplierDetail, SupplierPayment, PurchaseOrder, PurchaseOrderStatus } from '@/types';
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptyPaymentForm = { date: new Date().toISOString().slice(0, 10), particulars: '', voucherNo: '', amount: '', mode: 'CASH' };
 
 const STATUS_CHIP: Record<PurchaseOrderStatus, ChipColor> = {
@@ -41,7 +42,28 @@ function SupplierDetailContent() {
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState(emptyPaymentForm);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const canEdit = hasRole('ADMIN');
+
+  async function downloadPdf() {
+    setDownloading(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/suppliers/${id}/pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${supplier?.name ?? 'supplier'}-detail.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   async function addPayment(e: React.FormEvent) {
     e.preventDefault();
@@ -98,12 +120,17 @@ function SupplierDetailContent() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.push('/suppliers')}>
-          &larr; All suppliers
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.push('/suppliers')}>
+            &larr; All suppliers
+          </button>
+          <h1 className="text-2xl font-bold text-brand-900">{supplier.name}</h1>
+          {supplier.phone && <p className="text-sm text-brand-500">{supplier.phone}</p>}
+        </div>
+        <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
+          {downloading ? 'Preparing...' : 'Download PDF'}
         </button>
-        <h1 className="text-2xl font-bold text-brand-900">{supplier.name}</h1>
-        {supplier.phone && <p className="text-sm text-brand-500">{supplier.phone}</p>}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

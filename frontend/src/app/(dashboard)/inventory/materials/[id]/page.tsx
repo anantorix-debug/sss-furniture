@@ -4,12 +4,28 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, getAccessToken } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip } from '@/components/StatusBadge';
-import type { RawMaterialDetail, CarpenterWorkItem } from '@/types';
+import { FilterBar } from '@/components/FilterBar';
+import type { PaginatedResult } from '@/components/Pagination';
+import type { RawMaterialDetail, CarpenterWorkItem, CarpenterSummary, StockMovement, WorkerType } from '@/types';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+
+const MOVEMENT_TYPE_OPTIONS = [
+  { value: 'IN', label: 'Stock In' },
+  { value: 'OUT', label: 'Issued / Consumed' },
+  { value: 'ADJUSTMENT', label: 'Adjustment' },
+];
+const MOVEMENT_ROLE_OPTIONS: { value: WorkerType; label: string }[] = [
+  { value: 'CARPENTER', label: 'Carpenter' },
+  { value: 'CARVER', label: 'Carving' },
+  { value: 'POLISHER', label: 'Polisher' },
+];
+const emptyMovementFilters: Record<string, string> = {};
 
 export default function MaterialDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -36,6 +52,42 @@ export default function MaterialDetailPage() {
   const [issueForm, setIssueForm] = useState({ date: new Date().toISOString().slice(0, 10), workItemId: '', quantity: '', reason: '' });
   const [error, setError] = useState<string | null>(null);
 
+  const { data: carpenters } = useSWR<CarpenterSummary[]>('/carpenters', fetcher);
+  const [movementValues, setMovementValues] = useState<Record<string, string>>(emptyMovementFilters);
+  const [movementApplied, setMovementApplied] = useState<Record<string, string>>(emptyMovementFilters);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const movementParams = new URLSearchParams({ ...movementApplied, rawMaterialId: id, limit: '200' });
+  const { data: movementsResult, mutate: mutateMovements } = useSWR<PaginatedResult<StockMovement>>(`/stock-movements?${movementParams}`, fetcher);
+  const movements = movementsResult?.data ?? [];
+
+  function applyMovementFilters() {
+    setMovementApplied(movementValues);
+  }
+  function resetMovementFilters() {
+    setMovementValues(emptyMovementFilters);
+    setMovementApplied(emptyMovementFilters);
+  }
+
+  async function downloadMaterialPdf() {
+    setDownloadingPdf(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/raw-materials/${id}/pdf?${new URLSearchParams(movementApplied)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${material?.name ?? 'material'}-detail.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
   async function submitIssue(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -48,6 +100,7 @@ export default function MaterialDetailPage() {
       });
       setIssueForm({ date: new Date().toISOString().slice(0, 10), workItemId: '', quantity: '', reason: '' });
       mutate();
+      mutateMovements();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to record issue');
     }
@@ -65,6 +118,7 @@ export default function MaterialDetailPage() {
       });
       setAdjustForm({ date: new Date().toISOString().slice(0, 10), quantity: '', reason: '' });
       mutate();
+      mutateMovements();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to record adjustment');
     }
@@ -100,28 +154,48 @@ export default function MaterialDetailPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3">Movement History</h2>
-        <div className="max-h-80 overflow-y-auto rounded-lg border border-brand-100">
+        <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
+          <h2 className="font-semibold text-brand-900">Movement History</h2>
+          <button className="btn-secondary h-9 px-4 text-sm" onClick={downloadMaterialPdf} disabled={downloadingPdf}>
+            {downloadingPdf ? 'Preparing...' : 'Download PDF'}
+          </button>
+        </div>
+        <FilterBar
+          fields={[
+            { key: 'dateFrom', label: 'Date From', type: 'date' },
+            { key: 'dateTo', label: 'Date To', type: 'date' },
+            { key: 'type', label: 'Movement Type', type: 'select', options: MOVEMENT_TYPE_OPTIONS },
+            { key: 'carpenterId', label: 'Employee', type: 'select', options: (carpenters ?? []).map((c) => ({ value: c.id, label: c.name })) },
+            { key: 'workerType', label: 'Role', type: 'select', options: MOVEMENT_ROLE_OPTIONS },
+          ]}
+          values={movementValues}
+          onChange={(key, value) => setMovementValues((v) => ({ ...v, [key]: value }))}
+          onApply={applyMovementFilters}
+          onReset={resetMovementFilters}
+        />
+        <div className="max-h-80 overflow-y-auto rounded-lg border border-brand-100 mt-3">
           <table className="table-shell">
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Type</th>
                 <th>Qty</th>
+                <th>Employee</th>
+                <th>Role</th>
                 <th>Reference</th>
                 <th>Reason</th>
                 <th>By</th>
               </tr>
             </thead>
             <tbody>
-              {material.stockMovements.length === 0 && (
+              {movements.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center text-brand-400 py-4">
+                  <td colSpan={8} className="text-center text-brand-400 py-4">
                     No movements recorded
                   </td>
                 </tr>
               )}
-              {material.stockMovements.map((m) => (
+              {movements.map((m) => (
                 <tr key={m.id}>
                   <td>{formatDate(m.date)}</td>
                   <td>
@@ -133,8 +207,10 @@ export default function MaterialDetailPage() {
                     {m.quantity > 0 ? '+' : ''}
                     {m.quantity}
                   </td>
+                  <td className="text-brand-500">{m.workItem?.carpenter?.name ?? '-'}</td>
+                  <td className="text-brand-500">{m.workItem?.carpenter?.workerType ?? '-'}</td>
                   <td className="text-brand-500">
-                    {m.workItem ? `Work: ${m.workItem.productName}${m.workItem.carpenter ? ` (${m.workItem.carpenter.name})` : ''}` : m.purchaseOrder ? `PO ${m.purchaseOrder.poNumber}` : '-'}
+                    {m.purchaseOrder ? `PO ${m.purchaseOrder.poNumber}` : m.workItem ? `Production: ${m.workItem.productName}` : m.type === 'ADJUSTMENT' ? 'Adjustment' : '-'}
                   </td>
                   <td className="text-brand-500">{m.reason ?? '-'}</td>
                   <td>{m.createdBy?.name ?? '-'}</td>

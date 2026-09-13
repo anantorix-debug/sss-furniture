@@ -17,10 +17,21 @@ import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { sharePdf } from '@/lib/sharePdf';
-import type { PartyOrder } from '@/types';
+import type { PartyOrder, Shop } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+import { FilterBar } from '@/components/FilterBar';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+const emptyFilters: Record<string, string> = {};
+const STATUS_OPTIONS = [
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'DELIVERED', label: 'Delivered' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+];
+const PAYMENT_STATUS_OPTIONS = [
+  { value: 'DUE', label: 'Due' },
+  { value: 'SETTLED', label: 'Settled' },
+];
 
 function productSummary(order: PartyOrder): string {
   if (order.items.length === 0) return order.model ?? '-';
@@ -65,30 +76,46 @@ function buildOrderConfirmationMessage(order: PartyOrder): string {
 
 function PartyOrdersContent() {
   const { hasRole } = useAuth();
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
-  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<PartyOrder>>(
-    `/party-orders?${new URLSearchParams({
-      ...(search ? { search } : {}),
-      ...(statusFilter ? { status: statusFilter } : {}),
-      page: String(page),
-      limit: '20',
-    })}`,
-    fetcher,
-  );
+  const [values, setValues] = useState<Record<string, string>>(emptyFilters);
+  const [applied, setApplied] = useState<Record<string, string>>(emptyFilters);
+  const [downloadingList, setDownloadingList] = useState(false);
+  const { data: shops, mutate: mutateShops } = useSWR<Shop[]>('/shops', fetcher);
+  const queryParams = new URLSearchParams({ ...applied, page: String(page), limit: '20' });
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<PartyOrder>>(`/party-orders?${queryParams}`, fetcher);
   const data = result?.data;
-  const { mutate: mutateShops } = useSWR<unknown>('/shops', fetcher);
   const [shopManagerOpen, setShopManagerOpen] = useState(false);
 
-  function updateSearch(value: string) {
-    setSearch(value);
+  function applyFilters() {
+    setApplied(values);
     setPage(1);
   }
-  function updateStatusFilter(value: string) {
-    setStatusFilter(value);
+  function resetFilters() {
+    setValues(emptyFilters);
+    setApplied(emptyFilters);
     setPage(1);
   }
+
+  async function downloadListPdf() {
+    setDownloadingList(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/party-orders/pdf?${new URLSearchParams(applied)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `party-orders-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingList(false);
+    }
+  }
+
   const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
 
   const [formOpen, setFormOpen] = useState(false);
@@ -196,6 +223,9 @@ function PartyOrdersContent() {
           {notice && <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2 mt-2">{notice}</p>}
         </div>
         <div className="flex gap-2">
+          <button className="btn-secondary" onClick={downloadListPdf} disabled={downloadingList}>
+            {downloadingList ? 'Preparing...' : 'Download PDF'}
+          </button>
           <button
             className="btn-secondary"
             onClick={() =>
@@ -234,20 +264,20 @@ function PartyOrdersContent() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <input
-          className="input max-w-xs"
-          placeholder="Search shop, product, Model No..."
-          value={search}
-          onChange={(e) => updateSearch(e.target.value)}
-        />
-        <select className="input max-w-[160px]" value={statusFilter} onChange={(e) => updateStatusFilter(e.target.value)}>
-          <option value="">All statuses</option>
-          <option value="PENDING">Pending</option>
-          <option value="DELIVERED">Delivered</option>
-          <option value="CANCELLED">Cancelled</option>
-        </select>
-      </div>
+      <FilterBar
+        fields={[
+          { key: 'search', label: 'Search', type: 'search', placeholder: 'Search shop, product, Model No...' },
+          { key: 'dateFrom', label: 'Date From', type: 'date' },
+          { key: 'dateTo', label: 'Date To', type: 'date' },
+          { key: 'shopId', label: 'Shop', type: 'select', options: (shops ?? []).map((s) => ({ value: s.id, label: s.name })) },
+          { key: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS },
+          { key: 'paymentStatus', label: 'Payment Status', type: 'select', options: PAYMENT_STATUS_OPTIONS },
+        ]}
+        values={values}
+        onChange={(key, value) => setValues((v) => ({ ...v, [key]: value }))}
+        onApply={applyFilters}
+        onReset={resetFilters}
+      />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {isLoading && <p className="text-brand-400 text-sm">Loading orders...</p>}

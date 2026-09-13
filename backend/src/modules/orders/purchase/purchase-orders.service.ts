@@ -9,6 +9,7 @@ import { RejectPurchaseOrderDto } from './dto/reject-purchase-order.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 import { computeBoardFeet } from '../../../common/utils/board-feet.util';
+import { REPORT_PDF_STYLES, renderReportHeader, renderFilterSummary, renderGeneratedFooter } from '../../../common/utils/pdf-report.util';
 
 function generatePoNumber(): string {
   return `PO-${Date.now().toString(36).toUpperCase()}`;
@@ -65,11 +66,17 @@ export class PurchaseOrdersService {
   }
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
-  async findAll(params: { status?: string; supplierId?: string; page?: number; limit?: number }) {
+  async findAll(params: { status?: string; supplierId?: string; search?: string; page?: number; limit?: number }) {
     const paginated = params.page != null;
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
-    const where = { status: params.status as any, supplierId: params.supplierId };
+    const where = {
+      status: params.status as any,
+      supplierId: params.supplierId,
+      OR: params.search
+        ? [{ poNumber: { contains: params.search } }, { supplier: { name: { contains: params.search } } }]
+        : undefined,
+    };
     const [orders, total] = await Promise.all([
       this.prisma.purchaseOrder.findMany({
         where,
@@ -419,5 +426,44 @@ export class PurchaseOrdersService {
       mimetype: 'application/pdf',
       caption: `Purchase Order ${po.poNumber} - SSS Company`,
     });
+  }
+
+  // Purchase Orders list PDF - exactly the filtered rows the list page is
+  // showing, never the whole table.
+  async generateListPdf(params: { status?: string; supplierId?: string; search?: string }): Promise<Buffer> {
+    const orders = (await this.findAll(params)) as any[];
+    const rows = orders
+      .map(
+        (o) => `<tr>
+          <td>${escapeHtml(o.poNumber)}</td>
+          <td>${escapeHtml(o.supplier?.name ?? '-')}</td>
+          <td>${o.orderDate.toLocaleDateString('en-IN')}</td>
+          <td>${o.items.length}</td>
+          <td style="text-align:right">₹${o.totalValue.toLocaleString('en-IN')}</td>
+          <td>${escapeHtml(String(o.status).replace(/_/g, ' '))}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const filterSummary = renderFilterSummary({
+      Search: params.search,
+      Status: params.status ? params.status.replace(/_/g, ' ') : undefined,
+    });
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${renderReportHeader('Purchase Orders')}
+  <div class="body">
+    ${filterSummary}
+    <table>
+      <thead><tr><th>PO Number</th><th>Supplier</th><th>Order Date</th><th>Items</th><th style="text-align:right">Total Value</th><th>Status</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:16px">No purchase orders found</td></tr>'}</tbody>
+    </table>
+    ${renderGeneratedFooter(orders.length, 'purchase order')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html);
   }
 }

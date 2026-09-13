@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
@@ -19,17 +20,41 @@ export class SuppliersController {
   constructor(private service: SuppliersService) {}
 
   @Get()
-  findAll(@Query('search') search?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+  findAll(
+    @Query('search') search?: string,
+    @Query('status') status?: 'DUE' | 'SETTLED',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
     return this.service.findAll({
       search,
+      status,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
   }
 
+  // Static route - must come before the dynamic :id route below.
+  @Get('pdf')
+  async listPdf(@Res() res: Response, @Query('search') search?: string, @Query('status') status?: 'DUE' | 'SETTLED') {
+    const buffer = await this.service.generateListPdf({ search, status });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="suppliers-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    res.send(buffer);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
+  }
+
+  @Get(':id/pdf')
+  async detailPdf(@Param('id') id: string, @Res() res: Response) {
+    const supplier = await this.service.findOne(id);
+    const buffer = await this.service.generateDetailPdf(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${(supplier as any).name}.pdf"`);
+    res.send(buffer);
   }
 
   @Post()

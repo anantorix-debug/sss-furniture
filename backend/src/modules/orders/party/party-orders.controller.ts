@@ -22,6 +22,10 @@ export class PartyOrdersController {
   findAll(
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('shopId') shopId?: string,
+    @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
@@ -29,10 +33,31 @@ export class PartyOrdersController {
     return this.service.findAll({
       status,
       search,
+      dateFrom,
+      dateTo,
+      shopId,
+      paymentStatus,
       viewerRole: user?.role as Role,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  // Static route - must come before the dynamic :id route below.
+  @Get('pdf')
+  async listPdf(
+    @Res() res: Response,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('shopId') shopId?: string,
+    @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
+  ) {
+    const buffer = await this.service.generateListPdf({ status, search, dateFrom, dateTo, shopId, paymentStatus });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="party-orders-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    res.send(buffer);
   }
 
   @Get(':id')
