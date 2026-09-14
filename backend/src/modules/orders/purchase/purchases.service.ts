@@ -44,7 +44,15 @@ export class PurchasesService {
       if (!material) throw new NotFoundException(`Raw material ${item.rawMaterialId} not found`);
 
       const isBoardFeet = material.measurementKind === 'BOARD_FEET';
-      const quantity = isBoardFeet
+      // A BOARD_FEET line with dimensions given still gets its quantity
+      // server-computed from them (never trusts the client's total) - the
+      // simplified "just a CFT total" entry (no dimensions) has no formula
+      // to recompute from, so quantity is trusted as-is there (it already
+      // arrives pre-converted to the internal Board-Feet-equivalent scale,
+      // same as every other BOARD_FEET quantity - see Purchase Orders'
+      // handleSubmit).
+      const hasDimensions = item.thicknessIn != null && item.widthIn != null && item.lengthFt != null && item.pieces != null;
+      const quantity = isBoardFeet && hasDimensions
         ? computeBoardFeet({ thicknessIn: item.thicknessIn, widthIn: item.widthIn, lengthFt: item.lengthFt, pieces: item.pieces })
         : item.quantity;
 
@@ -52,10 +60,10 @@ export class PurchasesService {
         rawMaterialId: item.rawMaterialId,
         quantity,
         unitPrice: item.unitPrice,
-        thicknessIn: isBoardFeet ? item.thicknessIn : undefined,
-        widthIn: isBoardFeet ? item.widthIn : undefined,
-        lengthFt: isBoardFeet ? item.lengthFt : undefined,
-        pieces: isBoardFeet ? item.pieces : undefined,
+        thicknessIn: isBoardFeet && hasDimensions ? item.thicknessIn : undefined,
+        widthIn: isBoardFeet && hasDimensions ? item.widthIn : undefined,
+        lengthFt: isBoardFeet && hasDimensions ? item.lengthFt : undefined,
+        pieces: isBoardFeet && hasDimensions ? item.pieces : undefined,
       };
     });
   }
@@ -76,7 +84,7 @@ export class PurchasesService {
       this.prisma.purchase.findMany({
         where,
         include: {
-          items: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } },
+          items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } },
           supplier: { select: { id: true, name: true } },
           createdBy: { select: { name: true } },
         },
@@ -93,7 +101,7 @@ export class PurchasesService {
     const purchase = await this.prisma.purchase.findUnique({
       where: { id },
       include: {
-        items: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } },
+        items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } },
         supplier: true,
         createdBy: { select: { name: true } },
       },
@@ -117,7 +125,7 @@ export class PurchasesService {
           createdById: userId,
           items: { create: items },
         },
-        include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } } },
+        include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
       });
 
       await tx.stockMovement.createMany({
@@ -161,7 +169,7 @@ export class PurchasesService {
   async update(id: string, dto: UpdatePurchaseDto, userId: string) {
     const existing = await this.prisma.purchase.findUnique({
       where: { id },
-      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } } },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
     });
     if (!existing) throw new NotFoundException('Purchase not found');
     if (existing.status === 'CANCELLED') {
@@ -195,7 +203,7 @@ export class PurchasesService {
 
         const created = await tx.purchase.findUniqueOrThrow({
           where: { id },
-          include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } } },
+          include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
         });
 
         await tx.stockMovement.createMany({
@@ -227,7 +235,7 @@ export class PurchasesService {
       return tx.purchase.update({
         where: { id },
         data: { supplierId, purchaseDate, notes: dto.notes },
-        include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } } },
+        include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
       });
     });
 
@@ -241,7 +249,7 @@ export class PurchasesService {
   async cancel(id: string, userId: string) {
     const existing = await this.prisma.purchase.findUnique({
       where: { id },
-      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } } },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
     });
     if (!existing) throw new NotFoundException('Purchase not found');
     if (existing.status === 'CANCELLED') {
@@ -288,7 +296,7 @@ export class PurchasesService {
         // as its per-BF equivalent (see PurchaseOrders' handleSubmit), so
         // print it back out as the /CFT rate actually agreed with the
         // supplier.
-        const isBoardFeet = i.pieces != null;
+        const isBoardFeet = i.rawMaterial.measurementKind === 'BOARD_FEET';
         const rateLabel = isBoardFeet ? `₹${(Number(i.unitPrice) * 12).toLocaleString('en-IN')}/CFT` : `₹${Number(i.unitPrice).toLocaleString('en-IN')}`;
         return `<tr>
           <td>${escapeHtml(i.rawMaterial.name)}</td>

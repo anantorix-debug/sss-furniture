@@ -169,7 +169,7 @@ function PurchaseDetailContent() {
                       stored as its per-BF equivalent (see Purchase Orders'
                       handleSubmit), so show it back out as the /CFT rate that
                       was actually agreed with the supplier. */}
-                  {item.pieces != null ? `${formatCurrency(item.unitPrice * 12)}/CFT` : formatCurrency(item.unitPrice)}
+                  {item.rawMaterial?.measurementKind === 'BOARD_FEET' ? `${formatCurrency(item.unitPrice * 12)}/CFT` : formatCurrency(item.unitPrice)}
                 </td>
                 <td className="font-medium">{formatCurrency(item.quantity * item.unitPrice)}</td>
               </tr>
