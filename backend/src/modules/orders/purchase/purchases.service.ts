@@ -283,15 +283,21 @@ export class PurchasesService {
 
   private buildPdfHtml(purchase: Awaited<ReturnType<PurchasesService['findOne']>>): string {
     const rows = purchase.items
-      .map(
-        (i) => `<tr>
+      .map((i) => {
+        // Timber is priced per CFT, not per Board Foot - unitPrice is stored
+        // as its per-BF equivalent (see PurchaseOrders' handleSubmit), so
+        // print it back out as the /CFT rate actually agreed with the
+        // supplier.
+        const isBoardFeet = i.pieces != null;
+        const rateLabel = isBoardFeet ? `₹${(Number(i.unitPrice) * 12).toLocaleString('en-IN')}/CFT` : `₹${Number(i.unitPrice).toLocaleString('en-IN')}`;
+        return `<tr>
           <td>${escapeHtml(i.rawMaterial.name)}</td>
           <td style="text-align:right">${Number(i.quantity)}</td>
           <td>${escapeHtml(i.rawMaterial.unit)}</td>
-          <td style="text-align:right">₹${Number(i.unitPrice).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">${rateLabel}</td>
           <td style="text-align:right">₹${(Number(i.quantity) * Number(i.unitPrice)).toLocaleString('en-IN')}</td>
-        </tr>`,
-      )
+        </tr>`;
+      })
       .join('');
 
     return `<!DOCTYPE html>

@@ -164,7 +164,13 @@ function PurchaseDetailContent() {
                 </td>
                 <td>{item.quantity}</td>
                 <td className="text-brand-500">{item.rawMaterial?.unit}</td>
-                <td>{formatCurrency(item.unitPrice)}</td>
+                <td>
+                  {/* Timber is priced per CFT, not per Board Foot - unitPrice is
+                      stored as its per-BF equivalent (see Purchase Orders'
+                      handleSubmit), so show it back out as the /CFT rate that
+                      was actually agreed with the supplier. */}
+                  {item.pieces != null ? `${formatCurrency(item.unitPrice * 12)}/CFT` : formatCurrency(item.unitPrice)}
+                </td>
                 <td className="font-medium">{formatCurrency(item.quantity * item.unitPrice)}</td>
               </tr>
             ))}

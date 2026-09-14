@@ -170,15 +170,22 @@ function PurchaseOrdersContent() {
     setPurchaseDate(purchase.purchaseDate.slice(0, 10));
     setNotes(purchase.notes ?? '');
     setItems(
-      purchase.items.map((i) => ({
-        rawMaterialId: i.rawMaterialId,
-        quantity: String(i.quantity),
-        unitPrice: String(i.unitPrice),
-        thicknessIn: i.thicknessIn != null ? String(i.thicknessIn) : '',
-        widthIn: i.widthIn != null ? String(i.widthIn) : '',
-        lengthFt: i.lengthFt != null ? String(i.lengthFt) : '',
-        pieces: i.pieces != null ? String(i.pieces) : '',
-      })),
+      purchase.items.map((i) => {
+        // Stored unitPrice is per Board Foot (see handleSubmit); the form
+        // shows/collects a per-CFT rate, so convert back for editing (1 CFT
+        // = 12 BF) - otherwise a reopened purchase would show 1/12th of the
+        // rate the user actually typed in.
+        const isBoardFeet = materialOf(i.rawMaterialId)?.measurementKind === 'BOARD_FEET';
+        return {
+          rawMaterialId: i.rawMaterialId,
+          quantity: String(i.quantity),
+          unitPrice: String(isBoardFeet ? Number(i.unitPrice) * 12 : i.unitPrice),
+          thicknessIn: i.thicknessIn != null ? String(i.thicknessIn) : '',
+          widthIn: i.widthIn != null ? String(i.widthIn) : '',
+          lengthFt: i.lengthFt != null ? String(i.lengthFt) : '',
+          pieces: i.pieces != null ? String(i.pieces) : '',
+        };
+      }),
     );
     setError(null);
     setFormOpen(true);
@@ -202,10 +209,17 @@ function PurchaseOrdersContent() {
           .map((i) => {
             if (rowIsBoardFeet(i)) {
               const bf = boardFeetPreview(i.thicknessIn, i.widthIn, i.lengthFt, i.pieces);
+              // The entered Rate is per CFT, but quantity/unitPrice are
+              // stored and totalled in Board Feet everywhere else in the
+              // system (stock, movement cost, etc.) - convert the CFT rate
+              // to its per-Board-Foot equivalent (1 CFT = 12 BF) so
+              // quantity(BF) x unitPrice reproduces the same CFT x Rate
+              // total the user sees above, without touching every other
+              // BF-based cost calculation in the app.
               return {
                 rawMaterialId: i.rawMaterialId,
                 quantity: bf?.total ?? 0.01, // server recomputes/overrides this for BOARD_FEET lines anyway
-                unitPrice: parseFloat(i.unitPrice),
+                unitPrice: (parseFloat(i.unitPrice) || 0) / 12,
                 thicknessIn: parseFloat(i.thicknessIn),
                 widthIn: parseFloat(i.widthIn),
                 lengthFt: parseFloat(i.lengthFt),
@@ -248,8 +262,11 @@ function PurchaseOrdersContent() {
   const lineTotal = (row: ItemRow) => {
     const price = parseFloat(row.unitPrice) || 0;
     if (rowIsBoardFeet(row)) {
+      // Timber is priced per CFT (cubic feet) by the supplier, not per Board
+      // Foot - the entered Rate is a CFT rate. Board Feet stays the stock
+      // unit (quantity), it's just not what the price is quoted against.
       const bf = boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthFt, row.pieces);
-      return (bf?.total ?? 0) * price;
+      return (bf?.totalCft ?? 0) * price;
     }
     return (parseFloat(row.quantity) || 0) * price;
   };
@@ -424,12 +441,12 @@ function PurchaseOrdersContent() {
                             <input type="number" min="1" className="input text-sm" placeholder="Pieces" required value={row.pieces} onChange={(e) => updateItemRow(idx, { pieces: e.target.value })} />
                           </div>
                           <div className="grid grid-cols-2 gap-2">
-                            <input type="number" step="0.01" className="input text-sm" placeholder="Rate per Board Foot" required value={row.unitPrice} onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })} />
+                            <input type="number" step="0.01" className="input text-sm" placeholder="Rate per CFT" required value={row.unitPrice} onChange={(e) => updateItemRow(idx, { unitPrice: e.target.value })} />
                             <div className="input text-xs bg-brand-50 text-brand-700 flex flex-col justify-center leading-tight py-1">
                               {bf ? (
                                 <>
                                   <span>{bf.perPiece} BF/pc &times; {row.pieces} = <strong>{bf.total} BF</strong> ({bf.totalCft} CFT)</span>
-                                  <span className="font-semibold">{formatCurrency(lineTotal(row))}</span>
+                                  <span className="font-semibold">{formatCurrency(lineTotal(row))} ({bf.totalCft} CFT &times; Rate)</span>
                                 </>
                               ) : (
                                 <span className="text-brand-400">Enter dimensions</span>
