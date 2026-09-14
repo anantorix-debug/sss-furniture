@@ -1227,9 +1227,16 @@ function MovementsTab() {
               <td>{m.rawMaterial?.name}</td>
               <td>{typeChip(m.type)}</td>
               <td className={m.quantity < 0 ? 'text-red-600' : 'text-emerald-600'}>
-                {m.quantity > 0 ? '+' : ''}
-                {m.quantity} {m.rawMaterial?.unit}
-                {m.pieces != null && <span className="text-brand-400"> ({m.pieces} pcs)</span>}
+                {m.pieces != null ? (
+                  <>
+                    {m.pieces} pcs <span className="text-brand-400">({m.quantity > 0 ? '+' : ''}{m.quantity} {m.rawMaterial?.unit})</span>
+                  </>
+                ) : (
+                  <>
+                    {m.quantity > 0 ? '+' : ''}
+                    {m.quantity} {m.rawMaterial?.unit}
+                  </>
+                )}
               </td>
               <td className="text-brand-500">{m.unitCost != null ? formatCurrency(Math.abs(m.quantity) * m.unitCost) : '-'}</td>
               <td className="text-brand-500">{m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-'}</td>
