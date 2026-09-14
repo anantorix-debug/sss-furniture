@@ -980,7 +980,19 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
                 <td>{m.type ?? '-'}</td>
                 <td>{MATERIAL_GROUP_LABEL[m.materialGroup]}</td>
                 <td>{m.unit}</td>
-                <td>{m.inStock}</td>
+                <td>
+                  {m.totalPurchasedPieces != null ? (
+                    <>
+                      {m.totalPurchasedPieces - (m.totalConsumedPieces ?? 0)} pcs
+                      <span className="block text-[10px] text-brand-400">
+                        {m.inStock} {m.unit}
+                        {m.hasUntrackedAdjustment ? ' · adj. not counted' : ''}
+                      </span>
+                    </>
+                  ) : (
+                    m.inStock
+                  )}
+                </td>
                 <td>{m.reorderLevel ?? '-'}</td>
                 <td>{formatCurrency(m.purchaseRate)}</td>
                 <td>{formatCurrency(m.stockValue)}</td>

@@ -121,7 +121,17 @@ export class RawMaterialsService {
         materialGroup: group,
         OR: params.search ? [{ name: { contains: params.search } }, { type: { contains: params.search } }] : undefined,
       },
-      include: { stockMovements: { select: { quantity: true, unitCost: true, type: true, date: true } } },
+      include: {
+        stockMovements: {
+          select: {
+            quantity: true,
+            unitCost: true,
+            type: true,
+            date: true,
+            purchase: { select: { items: { select: { rawMaterialId: true, pieces: true } } } },
+          },
+        },
+      },
       orderBy: { name: 'asc' },
     });
 
@@ -131,7 +141,29 @@ export class RawMaterialsService {
       const { stockMovements, ...rest } = m;
       const summary = this.summarize(m);
       const isLow = m.reorderLevel != null && summary.inStock < Number(m.reorderLevel);
-      return stripFinancials({ ...rest, ...summary, isLow, lastPieceDimensions: dimMap.get(m.id) ?? null }, params.viewerRole);
+      // Real sums of each movement's own recorded piece count - see the
+      // identical, more detailed version of this in findOne.
+      const isBoardFeet = m.measurementKind === 'BOARD_FEET';
+      const piecesOf = (mv: (typeof stockMovements)[number]) => mv.purchase?.items.find((i) => i.rawMaterialId === m.id)?.pieces ?? null;
+      const totalPurchasedPieces = isBoardFeet
+        ? stockMovements.filter((mv) => mv.type === 'IN' && piecesOf(mv) != null).reduce((s, mv) => s + (piecesOf(mv) ?? 0), 0)
+        : null;
+      const totalConsumedPieces = isBoardFeet
+        ? stockMovements.filter((mv) => mv.type === 'OUT' && piecesOf(mv) != null).reduce((s, mv) => s + (piecesOf(mv) ?? 0), 0)
+        : null;
+      const hasUntrackedAdjustment = stockMovements.some((mv) => mv.type === 'ADJUSTMENT');
+      return stripFinancials(
+        {
+          ...rest,
+          ...summary,
+          isLow,
+          lastPieceDimensions: dimMap.get(m.id) ?? null,
+          totalPurchasedPieces,
+          totalConsumedPieces,
+          hasUntrackedAdjustment,
+        },
+        params.viewerRole,
+      );
     });
 
     const filtered = params.lowStockOnly ? summarized.filter((m) => (m as any).isLow) : summarized;

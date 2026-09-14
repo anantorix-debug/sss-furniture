@@ -478,6 +478,17 @@ export interface RawMaterial {
   // Purchase, so Issue Material can auto-fill dimensions and only ask for
   // Pieces. Null if no dimensioned purchase has been recorded yet.
   lastPieceDimensions?: { thicknessIn: number; widthIn: number; lengthFt: number } | null;
+  // Real sums of each movement's own recorded pieces count - not an
+  // estimate. Only movements that actually carry a piece count (dimensioned
+  // purchases, Issue Material once Pieces is entered) contribute; a plain
+  // Stock Adjustment has none, see hasUntrackedAdjustment. Null for a
+  // non-board-feet material, where "pieces" is meaningless.
+  totalPurchasedPieces?: number | null;
+  totalConsumedPieces?: number | null;
+  // True if this material has at least one Adjustment movement, which has
+  // no piece count - so totalPurchasedPieces - totalConsumedPieces may not
+  // equal the true pieces currently in stock.
+  hasUntrackedAdjustment?: boolean;
 }
 
 export interface StockMovement {
@@ -501,16 +512,6 @@ export interface StockMovement {
 
 export interface RawMaterialDetail extends RawMaterial {
   stockMovements: StockMovement[];
-  // Real sums of each movement's own recorded pieces count - not an
-  // estimate. Only movements that actually carry a piece count (dimensioned
-  // purchases, Issue Material once Pieces is entered) contribute; a plain
-  // Stock Adjustment has none, see hasUntrackedAdjustment.
-  totalPurchasedPieces?: number;
-  totalConsumedPieces?: number;
-  // True if this material has at least one Adjustment movement, which has
-  // no piece count - so totalPurchasedPieces - totalConsumedPieces may not
-  // equal the true pieces currently in stock.
-  hasUntrackedAdjustment?: boolean;
 }
 
 // --- Purchase Orders --------------------------------------------------------
