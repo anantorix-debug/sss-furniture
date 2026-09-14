@@ -44,15 +44,7 @@ export class PurchasesService {
       if (!material) throw new NotFoundException(`Raw material ${item.rawMaterialId} not found`);
 
       const isBoardFeet = material.measurementKind === 'BOARD_FEET';
-      // A BOARD_FEET line with dimensions given still gets its quantity
-      // server-computed from them (never trusts the client's total) - the
-      // simplified "just a CFT total" entry (no dimensions) has no formula
-      // to recompute from, so quantity is trusted as-is there (it already
-      // arrives pre-converted to the internal Board-Feet-equivalent scale,
-      // same as every other BOARD_FEET quantity - see Purchase Orders'
-      // handleSubmit).
-      const hasDimensions = item.thicknessIn != null && item.widthIn != null && item.lengthFt != null && item.pieces != null;
-      const quantity = isBoardFeet && hasDimensions
+      const quantity = isBoardFeet
         ? computeBoardFeet({ thicknessIn: item.thicknessIn, widthIn: item.widthIn, lengthFt: item.lengthFt, pieces: item.pieces })
         : item.quantity;
 
@@ -60,10 +52,10 @@ export class PurchasesService {
         rawMaterialId: item.rawMaterialId,
         quantity,
         unitPrice: item.unitPrice,
-        thicknessIn: isBoardFeet && hasDimensions ? item.thicknessIn : undefined,
-        widthIn: isBoardFeet && hasDimensions ? item.widthIn : undefined,
-        lengthFt: isBoardFeet && hasDimensions ? item.lengthFt : undefined,
-        pieces: isBoardFeet && hasDimensions ? item.pieces : undefined,
+        thicknessIn: isBoardFeet ? item.thicknessIn : undefined,
+        widthIn: isBoardFeet ? item.widthIn : undefined,
+        lengthFt: isBoardFeet ? item.lengthFt : undefined,
+        pieces: isBoardFeet ? item.pieces : undefined,
       };
     });
   }

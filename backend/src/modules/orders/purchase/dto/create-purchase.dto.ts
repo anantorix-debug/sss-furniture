@@ -5,11 +5,10 @@ class PurchaseItemDto {
   @IsString()
   rawMaterialId: string;
 
-  // Purchased quantity. Required for a non-BOARD_FEET material. For a
-  // BOARD_FEET material with all four dimension fields below given, the
-  // service overrides this with the server-computed Total Board Feet
-  // instead of trusting it; without dimensions (the simplified "just a CFT
-  // total" entry), it's trusted as-is (see PurchasesService.resolveItemsInput).
+  // Purchased quantity - required for a non-BOARD_FEET material. For a
+  // BOARD_FEET material the service overrides this with the server-computed
+  // Total Board Feet from the four dimension fields below, ignoring
+  // whatever's sent here (see PurchasesService).
   @IsNumber()
   @Min(0.01)
   quantity: number;
