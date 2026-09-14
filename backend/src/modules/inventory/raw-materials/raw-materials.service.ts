@@ -170,7 +170,7 @@ export class RawMaterialsService {
   // unit and the physical quantity it's actually bought/sold in (and every
   // paired StockMovement/SupplierPurchase) can never disagree.
   private resolveUnit(measurementKind: string, requestedUnit?: string): string {
-    const LOCKED: Partial<Record<string, string>> = { BOARD_FEET: 'Board Feet', SHEET: 'Sheet', COUNT: 'Nos' };
+    const LOCKED: Partial<Record<string, string>> = { BOARD_FEET: 'CFT', SHEET: 'Sheet', COUNT: 'Nos' };
     if (LOCKED[measurementKind]) return LOCKED[measurementKind]!;
     if (measurementKind === 'LIQUID') {
       const LIQUID_UNITS = ['Litre', 'Kg', 'Gram'];
@@ -416,7 +416,17 @@ export class RawMaterialsService {
         include: {
           rawMaterial: { select: { id: true, name: true, unit: true } },
           workItem: { select: { id: true, productName: true, carpenter: { select: { name: true, workerType: true } } } },
-          purchase: { select: { id: true, purchaseNumber: true, supplier: { select: { name: true } } } },
+          purchase: {
+            select: {
+              id: true,
+              purchaseNumber: true,
+              supplier: { select: { name: true } },
+              // Only used to look up this movement's own line's pieces
+              // count below - never returned as-is (a Purchase can have
+              // other materials' items too).
+              items: { select: { rawMaterialId: true, pieces: true } },
+            },
+          },
           createdBy: { select: { name: true } },
         },
         orderBy: { date: 'desc' },
@@ -425,7 +435,11 @@ export class RawMaterialsService {
       paginated ? this.prisma.stockMovement.count({ where }) : Promise.resolve(0),
     ]);
 
-    const mapped = movements.map((m) => stripFinancials(m, params.viewerRole));
+    const mapped = movements.map((m) => {
+      const pieces = m.purchase?.items.find((i) => i.rawMaterialId === m.rawMaterialId)?.pieces ?? null;
+      const purchase = m.purchase ? { id: m.purchase.id, purchaseNumber: m.purchase.purchaseNumber, supplier: m.purchase.supplier } : null;
+      return stripFinancials({ ...m, purchase, pieces }, params.viewerRole);
+    });
     return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 

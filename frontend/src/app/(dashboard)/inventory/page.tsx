@@ -78,7 +78,7 @@ const emptyMaterialForm = { name: '', type: '', unit: '', reorderLevel: '', mate
 // physical unit and the quantities recorded against it (via PO items,
 // issues, adjustments) can never disagree.
 const LOCKED_MEASUREMENT_UNIT: Partial<Record<MaterialMeasurementKind, string>> = {
-  BOARD_FEET: 'Board Feet',
+  BOARD_FEET: 'CFT',
   SHEET: 'Sheet',
   COUNT: 'Nos',
 };
@@ -1039,7 +1039,7 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
                   onChange={(e) => setForm((f) => ({ ...f, measurementKind: e.target.value as MaterialMeasurementKind, unit: '' }))}
                 >
                   <option value="OTHER">Other (choose a unit below)</option>
-                  <option value="BOARD_FEET">Wood / Timber - Board Feet</option>
+                  <option value="BOARD_FEET">Wood / Timber - CFT</option>
                   <option value="SHEET">Plywood / Sheet material</option>
                   <option value="LIQUID">Polish / Liquid</option>
                   <option value="COUNT">Tools / Hardware - Nos</option>
@@ -1229,6 +1229,7 @@ function MovementsTab() {
               <td className={m.quantity < 0 ? 'text-red-600' : 'text-emerald-600'}>
                 {m.quantity > 0 ? '+' : ''}
                 {m.quantity} {m.rawMaterial?.unit}
+                {m.pieces != null && <span className="text-brand-400"> ({m.pieces} pcs)</span>}
               </td>
               <td className="text-brand-500">{m.unitCost != null ? formatCurrency(Math.abs(m.quantity) * m.unitCost) : '-'}</td>
               <td className="text-brand-500">{m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-'}</td>

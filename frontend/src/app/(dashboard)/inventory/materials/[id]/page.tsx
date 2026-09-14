@@ -177,10 +177,10 @@ export default function MaterialDetailPage() {
       </div>
 
       <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${canSeeCost ? 'lg:grid-cols-6' : 'lg:grid-cols-4'}`}>
-        <StatCard label="In Stock" value={`${material.inStock} ${material.unit}`} />
-        <StatCard label="Purchased" value={`${material.totalPurchased} ${material.unit}`} />
-        <StatCard label="Consumed" value={`${material.totalConsumed} ${material.unit}`} />
-        <StatCard label="Adjusted" value={`${material.totalAdjusted} ${material.unit}`} />
+        <StatCard label="In Stock" value={String(material.inStock)} />
+        <StatCard label="Purchased" value={String(material.totalPurchased)} />
+        <StatCard label="Consumed" value={String(material.totalConsumed)} />
+        <StatCard label="Adjusted" value={String(material.totalAdjusted)} />
         {canSeeCost && (
           <>
             <StatCard label="Purchase Rate" value={formatCurrency(material.purchaseRate)} />
@@ -244,6 +244,7 @@ export default function MaterialDetailPage() {
                   <td className={m.quantity < 0 ? 'text-red-600' : 'text-emerald-600'}>
                     {m.quantity > 0 ? '+' : ''}
                     {m.quantity}
+                    {m.pieces != null && <span className="text-brand-400"> ({m.pieces} pcs)</span>}
                   </td>
                   <td className="text-brand-500">{m.unitCost != null ? formatCurrency(Math.abs(m.quantity) * m.unitCost) : '-'}</td>
                   <td className="text-brand-500">{m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-'}</td>

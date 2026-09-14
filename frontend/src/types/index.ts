@@ -492,6 +492,9 @@ export interface StockMovement {
   workItem?: { id: string; productName: string; carpenter?: { name: string; workerType?: WorkerType } | null } | null;
   purchaseId?: string | null;
   purchase?: { id: string; purchaseNumber: string; supplier?: { name: string } | null } | null;
+  // Pieces count from this movement's own Purchase line item, when it came
+  // from a dimensioned (board-feet) purchase. Null otherwise.
+  pieces?: number | null;
   date: string;
   createdBy?: { name: string };
 }
