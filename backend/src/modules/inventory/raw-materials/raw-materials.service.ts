@@ -151,7 +151,14 @@ export class RawMaterialsService {
           orderBy: { date: 'desc' },
           include: {
             workItem: { select: { id: true, productName: true, carpenter: { select: { name: true } } } },
-            purchase: { select: { id: true, purchaseNumber: true, supplier: { select: { name: true } } } },
+            purchase: {
+              select: {
+                id: true,
+                purchaseNumber: true,
+                supplier: { select: { name: true } },
+                items: { select: { rawMaterialId: true, pieces: true } },
+              },
+            },
             createdBy: { select: { name: true } },
           },
         },
@@ -160,10 +167,32 @@ export class RawMaterialsService {
     if (!material) throw new NotFoundException('Raw material not found');
 
     const summary = this.summarize(material);
-    const stockMovements = material.stockMovements.map((m) => stripFinancials(m, viewerRole));
+    const withPieces = material.stockMovements.map((m) => {
+      const pieces = m.purchase?.items.find((i) => i.rawMaterialId === m.rawMaterialId)?.pieces ?? null;
+      const purchase = m.purchase ? { id: m.purchase.id, purchaseNumber: m.purchase.purchaseNumber, supplier: m.purchase.supplier } : null;
+      return { ...m, purchase, pieces };
+    });
+    // Real counts, not an estimate - only movements that actually carry a
+    // recorded piece count (dimensioned purchases, and Issue Material once
+    // Pieces is entered) contribute. A plain Stock Adjustment has no piece
+    // count, so it's intentionally excluded here (see hasUntrackedAdjustment).
+    // null (not 0) for a non-board-feet material, where "pieces" is
+    // meaningless - the frontend falls back to the plain CFT/unit figure.
+    const isBoardFeet = material.measurementKind === 'BOARD_FEET';
+    const totalPurchasedPieces = isBoardFeet
+      ? withPieces.filter((m) => m.type === 'IN' && m.pieces != null).reduce((s, m) => s + (m.pieces ?? 0), 0)
+      : null;
+    const totalConsumedPieces = isBoardFeet
+      ? withPieces.filter((m) => m.type === 'OUT' && m.pieces != null).reduce((s, m) => s + (m.pieces ?? 0), 0)
+      : null;
+    const hasUntrackedAdjustment = withPieces.some((m) => m.type === 'ADJUSTMENT');
+    const stockMovements = withPieces.map((m) => stripFinancials(m, viewerRole));
     const lastPieceDimensions =
       material.measurementKind === 'BOARD_FEET' ? (await this.lastPieceDimensionsMap([material.id])).get(material.id) ?? null : null;
-    return stripFinancials({ ...material, stockMovements, ...summary, lastPieceDimensions }, viewerRole);
+    return stripFinancials(
+      { ...material, stockMovements, ...summary, lastPieceDimensions, totalPurchasedPieces, totalConsumedPieces, hasUntrackedAdjustment },
+      viewerRole,
+    );
   }
 
   // Locks the unit for every measurementKind except OTHER, so a material's

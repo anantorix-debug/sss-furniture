@@ -183,11 +183,27 @@ export default function MaterialDetailPage() {
       <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${canSeeCost ? 'lg:grid-cols-6' : 'lg:grid-cols-4'}`}>
         <StatCard
           label="In Stock"
-          value={perPieceBF ? `${Math.round(material.inStock / perPieceBF)} pcs` : String(material.inStock)}
-          sub={perPieceBF ? `${material.inStock} ${material.unit}` : undefined}
+          value={
+            material.totalPurchasedPieces != null
+              ? `${material.totalPurchasedPieces - (material.totalConsumedPieces ?? 0)} pcs`
+              : String(material.inStock)
+          }
+          sub={
+            material.totalPurchasedPieces != null
+              ? `${material.inStock} ${material.unit}${material.hasUntrackedAdjustment ? ' · adjustments not counted in pcs' : ''}`
+              : undefined
+          }
         />
-        <StatCard label="Purchased" value={String(material.totalPurchased)} />
-        <StatCard label="Consumed" value={String(material.totalConsumed)} />
+        <StatCard
+          label="Purchased"
+          value={material.totalPurchasedPieces != null ? `${material.totalPurchasedPieces} pcs` : String(material.totalPurchased)}
+          sub={material.totalPurchasedPieces != null ? `${material.totalPurchased} ${material.unit}` : undefined}
+        />
+        <StatCard
+          label="Consumed"
+          value={material.totalConsumedPieces != null ? `${material.totalConsumedPieces} pcs` : String(material.totalConsumed)}
+          sub={material.totalConsumedPieces != null ? `${material.totalConsumed} ${material.unit}` : undefined}
+        />
         <StatCard label="Adjusted" value={String(material.totalAdjusted)} />
         {canSeeCost && (
           <>

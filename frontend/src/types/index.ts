@@ -501,6 +501,16 @@ export interface StockMovement {
 
 export interface RawMaterialDetail extends RawMaterial {
   stockMovements: StockMovement[];
+  // Real sums of each movement's own recorded pieces count - not an
+  // estimate. Only movements that actually carry a piece count (dimensioned
+  // purchases, Issue Material once Pieces is entered) contribute; a plain
+  // Stock Adjustment has none, see hasUntrackedAdjustment.
+  totalPurchasedPieces?: number;
+  totalConsumedPieces?: number;
+  // True if this material has at least one Adjustment movement, which has
+  // no piece count - so totalPurchasedPieces - totalConsumedPieces may not
+  // equal the true pieces currently in stock.
+  hasUntrackedAdjustment?: boolean;
 }
 
 // --- Purchase Orders --------------------------------------------------------
