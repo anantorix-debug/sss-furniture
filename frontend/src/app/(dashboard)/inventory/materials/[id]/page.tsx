@@ -102,6 +102,10 @@ export default function MaterialDetailPage() {
   // Plank size from the most recent Purchase - when known, the employee
   // only enters Pieces; the size itself isn't re-typed every issue.
   const lastDims = material?.lastPieceDimensions ?? null;
+  // Board Feet per single piece at the last recorded size - used to turn
+  // the raw stock/rate figures into a pieces-based view (In Stock, Purchase
+  // Rate) for anyone who thinks in "how many planks" rather than in CFT.
+  const perPieceBF = lastDims ? (lastDims.thicknessIn * lastDims.widthIn * lastDims.lengthFt) / 12 : null;
   const issueBf = isBoardFeet
     ? lastDims
       ? boardFeetPreview(String(lastDims.thicknessIn), String(lastDims.widthIn), String(lastDims.lengthFt), issueForm.pieces)
@@ -177,13 +181,21 @@ export default function MaterialDetailPage() {
       </div>
 
       <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${canSeeCost ? 'lg:grid-cols-6' : 'lg:grid-cols-4'}`}>
-        <StatCard label="In Stock" value={String(material.inStock)} />
+        <StatCard
+          label="In Stock"
+          value={perPieceBF ? `${Math.round(material.inStock / perPieceBF)} pcs` : String(material.inStock)}
+          sub={perPieceBF ? `${material.inStock} ${material.unit}` : undefined}
+        />
         <StatCard label="Purchased" value={String(material.totalPurchased)} />
         <StatCard label="Consumed" value={String(material.totalConsumed)} />
         <StatCard label="Adjusted" value={String(material.totalAdjusted)} />
         {canSeeCost && (
           <>
-            <StatCard label="Purchase Rate" value={formatCurrency(material.purchaseRate)} />
+            <StatCard
+              label="Purchase Rate"
+              value={perPieceBF ? `${formatCurrency(material.purchaseRate * perPieceBF)}/pc` : formatCurrency(material.purchaseRate)}
+              sub={perPieceBF ? `${formatCurrency(material.purchaseRate)}/${material.unit}` : undefined}
+            />
             <StatCard label="Stock Value" value={formatCurrency(material.stockValue)} />
           </>
         )}
