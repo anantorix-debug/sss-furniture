@@ -90,10 +90,10 @@ function UsersPageContent() {
     }
   }
   // Required (not optional) - independent of the WhatsApp modal, so a
-  // cancelled/failed send never strands the admin without the new
-  // password. bcrypt is one-way - once generated, this is the only place
-  // the plaintext will ever be recoverable.
-  const [tempPasswordBanner, setTempPasswordBanner] = useState<{ user: User; password: string } | null>(null);
+  // cancelled/failed send never strands the admin without the password.
+  // When isNew is true, this is the only place a freshly-generated
+  // password will ever be recoverable (bcrypt is one-way).
+  const [tempPasswordBanner, setTempPasswordBanner] = useState<{ user: User; password: string; isNew: boolean } | null>(null);
 
   // Unlinked worker profiles matching the selected role - lets a brand new
   // Carpenter/Carver/Polisher login be tied to their payee profile in the
@@ -193,6 +193,11 @@ function UsersPageContent() {
   // lets the admin search and pick any chat or group manually (same as
   // every other WhatsApp send in the app when there's no number to
   // pre-fill), just without a number pre-selected for them.
+  //
+  // The backend prefers returning the account's actual CURRENT password
+  // (isNew: false) - it only generates and sets a fresh one (isNew: true)
+  // when no recoverable copy exists (e.g. a password last set before this
+  // feature existed).
   async function confirmShareCredentials() {
     if (!sharingUser) return;
     const target = sharingUser;
@@ -200,15 +205,15 @@ function UsersPageContent() {
     setGeneratingPassword(true);
     setSharingError(null);
     try {
-      const { temporaryPassword } = await api.post<{ temporaryPassword: string }>(`/users/${target.id}/generate-temp-password`);
-      setTempPasswordBanner({ user: target, password: temporaryPassword });
+      const { password, isNew } = await api.post<{ password: string; isNew: boolean }>(`/users/${target.id}/generate-temp-password`);
+      setTempPasswordBanner({ user: target, password, isNew });
       openWhatsApp({
         recipientName: target.name,
         recipientPhone: target.phone ?? undefined,
-        defaultMessage: buildCredentialsMessage(target, ROLE_LABEL[target.role], temporaryPassword),
+        defaultMessage: buildCredentialsMessage(target, ROLE_LABEL[target.role], password),
       });
     } catch (err) {
-      setSharingError(err instanceof ApiError ? err.message : 'Failed to generate a temporary password');
+      setSharingError(err instanceof ApiError ? err.message : 'Failed to retrieve login credentials');
     } finally {
       setGeneratingPassword(false);
     }
@@ -232,7 +237,8 @@ function UsersPageContent() {
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span>
-              New password for <span className="font-medium">{tempPasswordBanner.user.name}</span>:
+              {tempPasswordBanner.isNew ? 'New password' : 'Current password'} for{' '}
+              <span className="font-medium">{tempPasswordBanner.user.name}</span>:
             </span>
             <PasswordInput className="input h-8 w-40 text-xs" readOnly value={tempPasswordBanner.password} />
           </div>
@@ -481,9 +487,8 @@ function UsersPageContent() {
       {sharingUser && (
         <ConfirmDialog
           title="Share Credentials"
-          message={`Generate a new temporary password for ${sharingUser.name} and share it via WhatsApp? Their current password will stop working immediately.`}
-          confirmLabel="Generate & Share"
-          danger
+          message={`Share ${sharingUser.name}'s login credentials via WhatsApp? If their current password isn't recoverable (set before this feature existed), a new one will be generated instead and their old password will stop working.`}
+          confirmLabel="Share Credentials"
           onConfirm={confirmShareCredentials}
           onCancel={() => setSharingUser(null)}
         />

@@ -7,6 +7,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { Role } from '../../common/enums/role.enum';
 import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 import { generateSecurePassword } from '../../common/utils/generate-password.util';
+import { encryptPassword, decryptPassword } from '../../common/utils/password-crypto.util';
 
 const SAFE_SELECT = {
   id: true,
@@ -64,6 +65,7 @@ export class UsersService {
         email: dto.email,
         phone: dto.phone,
         password: hash,
+        passwordEncrypted: encryptPassword(dto.password),
         role: dto.role ?? Role.CARPENTER,
       },
       select: SAFE_SELECT,
@@ -104,6 +106,7 @@ export class UsersService {
 
     if (dto.password) {
       data.password = await bcrypt.hash(dto.password, 12);
+      data.passwordEncrypted = encryptPassword(dto.password);
       data.refreshTokenHash = null;
     }
 
@@ -135,20 +138,36 @@ export class UsersService {
     return updated;
   }
 
-  // Passwords are bcrypt-hashed, one-way - there's no "reveal the current
-  // password" possible. This generates a fresh secure temporary password,
-  // resets the account to it (same effect as an admin-chosen PATCH
-  // password, including forcing re-login everywhere via refreshTokenHash),
-  // and returns the plaintext exactly once so the caller can hand it to
-  // the user (e.g. via WhatsApp) - it is never persisted or logged
-  // anywhere else.
-  async generateTemporaryPassword(id: string, actingUserId: string) {
+  // For "Share Credentials": returns a password the caller can hand to the
+  // user (e.g. via WhatsApp). Prefers the account's actual CURRENT
+  // password - recovered via passwordEncrypted (see password-crypto.util),
+  // kept in sync with `password` on every create/update - so nothing about
+  // login changes and the shared password is the one the user already
+  // knows. Only when no encrypted copy exists (an account whose password
+  // was last set before this field existed) does it fall back to
+  // generating and setting a fresh one, exactly as before.
+  async shareablePassword(id: string, actingUserId: string): Promise<{ password: string; isNew: boolean }> {
     const target = await this.prisma.user.findUnique({ where: { id } });
     if (!target) throw new NotFoundException('User not found');
 
-    const temporaryPassword = generateSecurePassword();
-    const hash = await bcrypt.hash(temporaryPassword, 12);
-    await this.prisma.user.update({ where: { id }, data: { password: hash, refreshTokenHash: null } });
+    if (target.passwordEncrypted) {
+      const password = decryptPassword(target.passwordEncrypted);
+      await this.audit.log({
+        userId: actingUserId,
+        action: 'CURRENT_PASSWORD_VIEWED',
+        targetType: 'User',
+        targetId: id,
+        metadata: { targetEmail: target.email },
+      });
+      return { password, isNew: false };
+    }
+
+    const password = generateSecurePassword();
+    const hash = await bcrypt.hash(password, 12);
+    await this.prisma.user.update({
+      where: { id },
+      data: { password: hash, passwordEncrypted: encryptPassword(password), refreshTokenHash: null },
+    });
     await this.audit.log({
       userId: actingUserId,
       action: 'TEMPORARY_PASSWORD_GENERATED',
@@ -156,7 +175,7 @@ export class UsersService {
       targetId: id,
       metadata: { targetEmail: target.email },
     });
-    return { temporaryPassword };
+    return { password, isNew: true };
   }
 
   async remove(id: string, actingUserId: string) {

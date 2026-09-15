@@ -38,9 +38,11 @@ export class UsersController {
     return this.usersService.update(id, dto, user.userId);
   }
 
+  // Route name kept as-is (predates the "prefer current password" change)
+  // to avoid an unnecessary frontend route churn.
   @Post(':id/generate-temp-password')
-  generateTempPassword(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.usersService.generateTemporaryPassword(id, user.userId);
+  shareablePassword(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.usersService.shareablePassword(id, user.userId);
   }
 
   @Delete(':id')

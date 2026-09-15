@@ -151,16 +151,21 @@ enum ProductStockMovementType {
 }
 
 model User {
-  id               String   @id @default(cuid())
-  name             String
-  email            String   @unique
-  phone            String?
-  password         String
-  role             Role     @default(CARPENTER)
-  isActive         Boolean  @default(true)
-  refreshTokenHash String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default(cuid())
+  name              String
+  email             String   @unique
+  phone             String?
+  password          String
+  // Reversibly-encrypted copy of the current password, kept in sync
+  // whenever `password` is set, so Super Admin can share the actual
+  // current password (see password-crypto.util.ts) - not used for login,
+  // which only ever checks the bcrypt hash above.
+  passwordEncrypted String?
+  role              Role     @default(CARPENTER)
+  isActive          Boolean  @default(true)
+  refreshTokenHash  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   customerOrders               CustomerOrder[]
   customerOrdersDelivered      CustomerOrder[]        @relation("CustomerOrderDeliveredBy")

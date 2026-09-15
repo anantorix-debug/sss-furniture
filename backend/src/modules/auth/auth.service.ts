@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { encryptPassword } from '../../common/utils/password-crypto.util';
 
 @Injectable()
 export class AuthService {
@@ -90,7 +91,10 @@ export class AuthService {
     const newHash = await bcrypt.hash(dto.newPassword, 12);
     await this.prisma.user.update({
       where: { id: userId },
-      data: { password: newHash, refreshTokenHash: null },
+      // Keep passwordEncrypted in sync so "Share Credentials" always
+      // reflects the truly current password, even after a self-service
+      // change.
+      data: { password: newHash, passwordEncrypted: encryptPassword(dto.newPassword), refreshTokenHash: null },
     });
 
     await this.audit.log({ userId: user.id, userEmail: user.email, action: 'PASSWORD_CHANGED' });
