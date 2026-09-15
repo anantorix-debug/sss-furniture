@@ -535,7 +535,8 @@ export class CustomerOrdersService {
   // every WhatsApp order-confirmation message; everything below it (item
   // boxes, payment summary, grand total) is generated from the real order
   // data instead of copied text.
-  private buildPdfHtml(order: Awaited<ReturnType<CustomerOrdersService['findOne']>>): string {
+  private buildPdfHtml(order: Awaited<ReturnType<CustomerOrdersService['findOne']>>, recipientType: 'customer' | 'employee' = 'customer'): string {
+    const isEmployee = recipientType === 'employee';
     const lines: { label: string; qty: number; unitPrice: number; total: number; details: string[] }[] = order.items.length
       ? order.items.map((i) => ({
           label: i.category || i.productName,
@@ -547,7 +548,7 @@ export class CustomerOrdersService {
             i.size ? `Size : ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : null,
             i.color ? `Colour : ${i.color}` : null,
             `Quantity : ${i.quantity}`,
-            `Price : ₹${Number(i.unitPrice).toLocaleString('en-IN')}/-`,
+            isEmployee ? null : `Price : ₹${Number(i.unitPrice).toLocaleString('en-IN')}/-`,
           ].filter((d): d is string => d !== null),
         }))
       : [
@@ -556,7 +557,9 @@ export class CustomerOrdersService {
             qty: 1,
             unitPrice: Number(order.orderValue),
             total: Number(order.orderValue),
-            details: [`Product : ${order.product}`, `Price : ₹${Number(order.orderValue).toLocaleString('en-IN')}/-`],
+            details: [`Product : ${order.product}`, isEmployee ? null : `Price : ₹${Number(order.orderValue).toLocaleString('en-IN')}/-`].filter(
+              (d): d is string => d !== null,
+            ),
           },
         ];
 
@@ -621,21 +624,26 @@ export class CustomerOrdersService {
   <div class="body">
     <div class="title-row" style="break-inside: avoid; page-break-inside: avoid;">
       <div class="title">
-        <h1>BILL <span class="accent">&amp; PAYMENT</span></h1>
+        ${isEmployee ? `<h1>ORDER <span class="accent">DETAILS</span></h1>` : `<h1>BILL <span class="accent">&amp; PAYMENT</span></h1>`}
         <p>ORDER CONFIRMATION</p>
       </div>
       <div class="meta-box">
         <div><b>Invoice No</b> : ${escapeHtml(order.jobNumber ?? order.orderId)}</div>
         <div><b>Date</b> : ${order.orderDate.toLocaleDateString('en-IN')}</div>
-        <div><b>Payment Mode</b> : ${escapeHtml(paymentMode)}</div>
+        ${isEmployee ? '' : `<div><b>Payment Mode</b> : ${escapeHtml(paymentMode)}</div>`}
       </div>
     </div>
 
-    <p class="greeting">Dear <span class="name">${escapeHtml(order.customerName)}</span>,<br/>Kindly check and confirm the following order details:</p>
+    <p class="greeting">Dear <span class="name">${escapeHtml(isEmployee ? (order.assignedEmployee?.name ?? 'Team') : order.customerName)}</span>,<br/>${
+      isEmployee ? 'Please proceed with the following order:' : 'Kindly check and confirm the following order details:'
+    }</p>
 
     ${itemBoxes}
 
-    <div class="summary-section">
+    ${
+      isEmployee
+        ? ''
+        : `<div class="summary-section">
       <div class="summary-title">PAYMENT SUMMARY</div>
       <table class="summary">
         <thead><tr><th style="width:40px">S.No</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
@@ -646,16 +654,17 @@ export class CustomerOrdersService {
           <tr class="grand-total"><td colspan="2" style="text-align:right">BALANCE DUE</td><td style="text-align:right">₹${Number(order.balanceAmount).toLocaleString('en-IN')}/-</td></tr>
         </tbody>
       </table>
-    </div>
+    </div>`
+    }
 
     <p class="thanks"><strong>Thank you</strong> for your trust and support - SSS Furniture</p>
   </div>
 </body></html>`;
   }
 
-  async generatePdf(id: string): Promise<Buffer> {
+  async generatePdf(id: string, recipientType: 'customer' | 'employee' = 'customer'): Promise<Buffer> {
     const order = await this.findOne(id);
-    return this.pdf.renderHtmlToPdf(this.buildPdfHtml(order));
+    return this.pdf.renderHtmlToPdf(this.buildPdfHtml(order, recipientType));
   }
 
   async sendPdfToCustomer(id: string) {

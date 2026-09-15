@@ -511,7 +511,8 @@ export class PartyOrdersService {
   // information is traditionally presented on paper, modernized with the
   // shop's existing banner/branding. One template for both Download PDF
   // and Send PDF via WhatsApp - not two.
-  private buildPdfHtml(order: Awaited<ReturnType<PartyOrdersService['findOne']>>): string {
+  private buildPdfHtml(order: Awaited<ReturnType<PartyOrdersService['findOne']>>, recipientType: 'customer' | 'employee' = 'customer'): string {
+    const isEmployee = recipientType === 'employee';
     const lines = order.items.length
       ? order.items.map((i) => ({
           date: order.orderDate,
@@ -545,9 +546,9 @@ export class PartyOrdersService {
           <td>${escapeHtml(l.finish)}</td>
           <td>${escapeHtml(l.size)}</td>
           <td>${escapeHtml(l.pattern)}</td>
-          <td style="text-align:right">${l.price != null ? `₹${l.price.toLocaleString('en-IN')}` : '-'}</td>
+          ${isEmployee ? '' : `<td style="text-align:right">${l.price != null ? `₹${l.price.toLocaleString('en-IN')}` : '-'}</td>`}
           <td>${escapeHtml(l.modelNo)}</td>
-          <td style="text-align:right">₹${l.value.toLocaleString('en-IN')}</td>
+          ${isEmployee ? '' : `<td style="text-align:right">₹${l.value.toLocaleString('en-IN')}</td>`}
         </tr>`,
       )
       .join('');
@@ -604,24 +605,30 @@ export class PartyOrdersService {
     </div>
     <table>
       <thead>
-        <tr><th>S.No</th><th>Date</th><th>Order</th><th>Finish</th><th>Size</th><th>Pattern</th><th style="text-align:right">Price</th><th>Model No</th><th style="text-align:right">Value</th></tr>
+        <tr><th>S.No</th><th>Date</th><th>Order</th><th>Finish</th><th>Size</th><th>Pattern</th>${
+          isEmployee ? '' : '<th style="text-align:right">Price</th>'
+        }<th>Model No</th>${isEmployee ? '' : '<th style="text-align:right">Value</th>'}</tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    <div class="summary">
+    ${
+      isEmployee
+        ? ''
+        : `<div class="summary">
       <div><div class="label">Total Order Value</div><div class="value">₹${totalOrderValue.toLocaleString('en-IN')}</div></div>
       <div><div class="label">Received</div><div class="value" style="color:#15803d">₹${received.toLocaleString('en-IN')}</div></div>
       <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">₹${balance.toLocaleString('en-IN')}</div></div>
-    </div>
+    </div>`
+    }
     ${deliveryBlock}
     <p class="thanks"><strong>Thank you</strong> for your trust and support - SSS Furniture</p>
   </div>
 </body></html>`;
   }
 
-  async generatePdf(id: string): Promise<Buffer> {
+  async generatePdf(id: string, recipientType: 'customer' | 'employee' = 'customer'): Promise<Buffer> {
     const order = await this.findOne(id);
-    return this.pdf.renderHtmlToPdf(this.buildPdfHtml(order));
+    return this.pdf.renderHtmlToPdf(this.buildPdfHtml(order, recipientType));
   }
 
   async sendPdfToShop(id: string) {

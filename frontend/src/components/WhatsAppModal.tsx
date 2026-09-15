@@ -86,6 +86,10 @@ export function WhatsAppModal({
   function handleRecipientTypeChange(type: MessageRecipientType) {
     setRecipientType(type);
     if (messageVariants) setMessage(messageVariants[type]);
+    // Keep an already-attached order PDF in sync with the newly selected
+    // recipient type - re-fetches the correct variant (with/without
+    // pricing) instead of silently leaving the old one attached.
+    if (mediaFile?.type === 'application/pdf') attachOrderPdf(type);
   }
   const [searchQuery, setSearchQuery] = useState('');
   const [sending, setSending] = useState(false);
@@ -97,13 +101,19 @@ export function WhatsAppModal({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function attachOrderPdf() {
+  async function attachOrderPdf(type: MessageRecipientType = recipientType) {
     if (!pdfUrl) return;
     setAttachingPdf(true);
     setError(null);
     try {
       const token = getAccessToken();
-      const res = await fetch(`${API_BASE_URL}${pdfUrl}`, {
+      // Order PDFs strip pricing/payment for the Employee variant, same as
+      // the message text - only relevant when this modal has the toggle
+      // (messageVariants set); other callers' PDFs are unaffected.
+      const url = messageVariants
+        ? `${API_BASE_URL}${pdfUrl}${pdfUrl.includes('?') ? '&' : '?'}recipientType=${type}`
+        : `${API_BASE_URL}${pdfUrl}`;
+      const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: 'include',
       });
@@ -434,7 +444,7 @@ export function WhatsAppModal({
               {pdfUrl && (
                 <button
                   type="button"
-                  onClick={attachOrderPdf}
+                  onClick={() => attachOrderPdf()}
                   disabled={attachingPdf}
                   className="btn-secondary text-xs mt-2"
                 >

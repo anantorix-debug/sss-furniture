@@ -106,8 +106,8 @@ export class CustomerOrdersController {
 
   @Roles(Role.ADMIN)
   @Get(':id/pdf')
-  async downloadPdf(@Param('id') id: string, @Res() res: Response) {
-    const buffer = await this.service.generatePdf(id);
+  async downloadPdf(@Param('id') id: string, @Res() res: Response, @Query('recipientType') recipientType?: string) {
+    const buffer = await this.service.generatePdf(id, recipientType === 'employee' ? 'employee' : 'customer');
     const order = await this.service.findOne(id);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="Order Confirmation - ${order.orderId}.pdf"`);
