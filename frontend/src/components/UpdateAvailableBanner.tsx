@@ -15,6 +15,11 @@ export function UpdateAvailableBanner() {
   const initialVersion = useRef<string | null>(null);
 
   useEffect(() => {
+    // build-version.txt only exists after a production build (see
+    // postbuild) - skip entirely in dev so this doesn't poll a 404 every
+    // 5 minutes for the whole session.
+    if (process.env.NODE_ENV !== 'production') return;
+
     let cancelled = false;
 
     async function checkVersion() {
