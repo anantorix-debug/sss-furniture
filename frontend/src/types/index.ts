@@ -503,9 +503,18 @@ export interface StockMovement {
   workItem?: { id: string; productName: string; carpenter?: { name: string; workerType?: WorkerType } | null } | null;
   purchaseId?: string | null;
   purchase?: { id: string; purchaseNumber: string; supplier?: { name: string } | null } | null;
-  // Pieces count from this movement's own Purchase line item, when it came
-  // from a dimensioned (board-feet) purchase. Null otherwise.
+  // Pieces count and per-piece dimensions from this movement's own
+  // Purchase line item, when it came from a dimensioned (board-feet)
+  // purchase. Null otherwise.
   pieces?: number | null;
+  thicknessIn?: number | null;
+  widthIn?: number | null;
+  lengthFt?: number | null;
+  // Server-computed cost for this movement - pieces x per-piece Board
+  // Feet x rate when dimension data is available (this movement's own
+  // exact size), else quantity x rate. Null when there's no cost data at
+  // all (e.g. a manual Stock In with no rate entered).
+  amount?: number | null;
   date: string;
   createdBy?: { name: string };
 }

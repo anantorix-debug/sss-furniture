@@ -33,12 +33,12 @@ const ROLE_LABEL_FOR_GROUP: Record<string, string> = { WOOD: 'Carpenter', CARVIN
 
 // Fields a Carpenter/Carver/Polisher must never see - supplier cost,
 // purchase price, bill amount, etc. They record physical stock only.
-function stripFinancials<T extends { purchaseRate?: unknown; stockValue?: unknown; unitCost?: unknown }>(
+function stripFinancials<T extends { purchaseRate?: unknown; stockValue?: unknown; unitCost?: unknown; amount?: unknown }>(
   obj: T,
   viewerRole?: Role,
 ): T {
   if (viewerRole !== Role.CARPENTER && viewerRole !== Role.CARVER && viewerRole !== Role.POLISHER) return obj;
-  const { purchaseRate, stockValue, unitCost, ...rest } = obj as any;
+  const { purchaseRate, stockValue, unitCost, amount, ...rest } = obj as any;
   return rest;
 }
 
@@ -482,10 +482,10 @@ export class RawMaterialsService {
               id: true,
               purchaseNumber: true,
               supplier: { select: { name: true } },
-              // Only used to look up this movement's own line's pieces
-              // count below - never returned as-is (a Purchase can have
-              // other materials' items too).
-              items: { select: { rawMaterialId: true, pieces: true } },
+              // Only used to look up this movement's own line's pieces/
+              // dimensions below - never returned as-is (a Purchase can
+              // have other materials' items too).
+              items: { select: { rawMaterialId: true, pieces: true, thicknessIn: true, widthIn: true, lengthFt: true } },
             },
           },
           createdBy: { select: { name: true } },
@@ -496,10 +496,28 @@ export class RawMaterialsService {
       paginated ? this.prisma.stockMovement.count({ where }) : Promise.resolve(0),
     ]);
 
+    const round2 = (n: number) => Math.round(n * 100) / 100;
     const mapped = movements.map((m) => {
-      const pieces = m.purchase?.items.find((i) => i.rawMaterialId === m.rawMaterialId)?.pieces ?? null;
+      const item = m.purchase?.items.find((i) => i.rawMaterialId === m.rawMaterialId);
+      const pieces = item?.pieces ?? null;
+      const thicknessIn = item?.thicknessIn != null ? Number(item.thicknessIn) : null;
+      const widthIn = item?.widthIn != null ? Number(item.widthIn) : null;
+      const lengthFt = item?.lengthFt != null ? Number(item.lengthFt) : null;
       const purchase = m.purchase ? { id: m.purchase.id, purchaseNumber: m.purchase.purchaseNumber, supplier: m.purchase.supplier } : null;
-      return stripFinancials({ ...m, purchase, pieces }, params.viewerRole);
+      // Amount is computed per piece (pieces x per-piece Board Feet x
+      // rate), not quantity x rate - this uses this movement's own exact
+      // recorded dimensions rather than an estimate, and is what "amount
+      // calculation is only in pieces" asks for. Falls back to the plain
+      // quantity x rate for movements with no piece/dimension data (non-
+      // board-feet materials, or adjustments with nothing to derive from).
+      const unitCost = m.unitCost != null ? Number(m.unitCost) : null;
+      const amount =
+        unitCost == null
+          ? null
+          : pieces != null && thicknessIn != null && widthIn != null && lengthFt != null
+            ? round2(pieces * ((thicknessIn * widthIn * lengthFt) / 12) * unitCost)
+            : round2(Math.abs(Number(m.quantity)) * unitCost);
+      return stripFinancials({ ...m, purchase, pieces, thicknessIn, widthIn, lengthFt, amount }, params.viewerRole);
     });
     return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
@@ -514,10 +532,14 @@ export class RawMaterialsService {
         const supplierOrEmployee = m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-';
         const role = m.workItem?.carpenter?.workerType ?? '-';
         const reference = m.purchase ? m.purchase.purchaseNumber : m.workItem ? `Production: ${m.workItem.productName}` : m.type === 'ADJUSTMENT' ? 'Adjustment' : '-';
+        const qty = `${Number(m.quantity) > 0 ? '+' : ''}${Number(m.quantity)}${m.pieces != null ? ` (${m.pieces} pcs)` : ''}`;
         return `<tr>
           <td>${new Date(m.date).toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(m.type)}</td>
-          <td style="text-align:right">${Number(m.quantity) > 0 ? '+' : ''}${Number(m.quantity)}</td>
+          <td style="text-align:right">${escapeHtml(qty)}</td>
+          <td style="text-align:right">${m.lengthFt != null ? `${m.lengthFt} ft` : '-'}</td>
+          <td style="text-align:right">${m.widthIn != null ? `${m.widthIn} in` : '-'}</td>
+          <td style="text-align:right">${m.amount != null ? `₹${Number(m.amount).toLocaleString('en-IN')}` : '-'}</td>
           <td>${escapeHtml(supplierOrEmployee)}</td>
           <td>${escapeHtml(role)}</td>
           <td>${escapeHtml(reference)}</td>
@@ -549,8 +571,8 @@ export class RawMaterialsService {
       <div><div class="label">Net Movement</div><div class="value">${netMovement > 0 ? '+' : ''}${netMovement}</div></div>
     </div>
     <table>
-      <thead><tr><th>Date</th><th>Type</th><th style="text-align:right">Qty</th><th>Supplier / Employee</th><th>Role</th><th>Reference</th><th>Reason</th><th>By</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px">No movements found</td></tr>'}</tbody>
+      <thead><tr><th>Date</th><th>Type</th><th style="text-align:right">Qty</th><th style="text-align:right">Length</th><th style="text-align:right">Width</th><th style="text-align:right">Amount</th><th>Supplier / Employee</th><th>Role</th><th>Reference</th><th>Reason</th><th>By</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="11" style="text-align:center;color:#9ca3af;padding:16px">No movements found</td></tr>'}</tbody>
     </table>
     ${renderGeneratedFooter(movements.length, 'movement')}`;
 

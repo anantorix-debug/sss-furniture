@@ -246,6 +246,8 @@ export default function MaterialDetailPage() {
                 <th>Date</th>
                 <th>Type</th>
                 <th>Qty</th>
+                <th>Length</th>
+                <th>Width</th>
                 <th>Amount</th>
                 <th>Supplier / Employee</th>
                 <th>Role</th>
@@ -256,7 +258,7 @@ export default function MaterialDetailPage() {
             <tbody>
               {movements.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="text-center text-brand-400 py-4">
+                  <td colSpan={10} className="text-center text-brand-400 py-4">
                     No movements recorded
                   </td>
                 </tr>
@@ -281,7 +283,9 @@ export default function MaterialDetailPage() {
                       </>
                     )}
                   </td>
-                  <td className="text-brand-500">{m.unitCost != null ? formatCurrency(Math.abs(m.quantity) * m.unitCost) : '-'}</td>
+                  <td className="text-brand-500">{m.lengthFt != null ? `${m.lengthFt} ft` : '-'}</td>
+                  <td className="text-brand-500">{m.widthIn != null ? `${m.widthIn} in` : '-'}</td>
+                  <td className="text-brand-500">{m.amount != null ? formatCurrency(m.amount) : '-'}</td>
                   <td className="text-brand-500">{m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-'}</td>
                   <td className="text-brand-500">{m.workItem?.carpenter?.workerType ?? '-'}</td>
                   <td className="text-brand-500">{m.reason ?? '-'}</td>

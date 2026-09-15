@@ -1211,6 +1211,8 @@ function MovementsTab() {
             <th>Material</th>
             <th>Type</th>
             <th>Qty</th>
+            <th>Length</th>
+            <th>Width</th>
             <th>Amount</th>
             <th>Supplier / Employee</th>
             <th>Role</th>
@@ -1221,14 +1223,14 @@ function MovementsTab() {
         <tbody>
           {isLoading && (
             <tr>
-              <td colSpan={9} className="text-center py-8 text-brand-400">
+              <td colSpan={11} className="text-center py-8 text-brand-400">
                 Loading movements...
               </td>
             </tr>
           )}
           {!isLoading && data?.length === 0 && (
             <tr>
-              <td colSpan={9} className="text-center py-8 text-brand-400">
+              <td colSpan={11} className="text-center py-8 text-brand-400">
                 No stock movements yet
               </td>
             </tr>
@@ -1250,7 +1252,9 @@ function MovementsTab() {
                   </>
                 )}
               </td>
-              <td className="text-brand-500">{m.unitCost != null ? formatCurrency(Math.abs(m.quantity) * m.unitCost) : '-'}</td>
+              <td className="text-brand-500">{m.lengthFt != null ? `${m.lengthFt} ft` : '-'}</td>
+              <td className="text-brand-500">{m.widthIn != null ? `${m.widthIn} in` : '-'}</td>
+              <td className="text-brand-500">{m.amount != null ? formatCurrency(m.amount) : '-'}</td>
               <td className="text-brand-500">{m.purchase?.supplier?.name ?? m.workItem?.carpenter?.name ?? '-'}</td>
               <td className="text-brand-500">{m.workItem?.carpenter?.workerType ?? '-'}</td>
               <td className="text-brand-500">{m.reason ?? '-'}</td>
