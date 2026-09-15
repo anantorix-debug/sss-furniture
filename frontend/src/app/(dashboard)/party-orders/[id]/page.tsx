@@ -20,6 +20,7 @@ import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { sharePdf } from '@/lib/sharePdf';
+import { buildPartyOrderMessage } from '@/lib/orderMessages';
 import type { PartyOrder, PartyOrderItem, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -159,7 +160,11 @@ function PartyOrderDetailContent() {
                 openWhatsApp({
                   recipientName: order.shopName || 'Shop',
                   recipientPhone: order.phone ?? undefined,
-                  defaultMessage: `Order ${order.jobNumber ?? ''} for ${order.shopName} - Total ₹${order.totalAmount ?? 0}, Balance ₹${order.balanceAmount ?? 0}.`,
+                  defaultMessage: buildPartyOrderMessage(order, 'customer'),
+                  messageVariants: {
+                    customer: buildPartyOrderMessage(order, 'customer'),
+                    employee: buildPartyOrderMessage(order, 'employee'),
+                  },
                   defaultImageUrl: '/wa-template.jpeg',
                   pdfUrl: `/party-orders/${order.id}/pdf`,
                   pdfFilename: `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`,
@@ -354,6 +359,9 @@ function PartyOrderDetailContent() {
           defaultImageUrl={whatsappOptions.defaultImageUrl}
           pdfUrl={whatsappOptions.pdfUrl}
           pdfFilename={whatsappOptions.pdfFilename}
+          autoAttachPdf={whatsappOptions.autoAttachPdf}
+          messageVariants={whatsappOptions.messageVariants}
+          defaultRecipientType={whatsappOptions.defaultRecipientType}
           onSuccess={() => mutate()}
         />
       )}

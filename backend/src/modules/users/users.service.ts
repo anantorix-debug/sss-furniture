@@ -6,11 +6,13 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Role } from '../../common/enums/role.enum';
 import { paginate, toSkipTake } from '../../common/utils/pagination.util';
+import { generateSecurePassword } from '../../common/utils/generate-password.util';
 
 const SAFE_SELECT = {
   id: true,
   name: true,
   email: true,
+  phone: true,
   role: true,
   isActive: true,
   createdAt: true,
@@ -60,6 +62,7 @@ export class UsersService {
       data: {
         name: dto.name,
         email: dto.email,
+        phone: dto.phone,
         password: hash,
         role: dto.role ?? Role.CARPENTER,
       },
@@ -94,6 +97,7 @@ export class UsersService {
     const data: Record<string, unknown> = {
       name: dto.name,
       email: dto.email,
+      phone: dto.phone,
       role: dto.role,
       isActive: dto.isActive,
     };
@@ -129,6 +133,30 @@ export class UsersService {
     }
 
     return updated;
+  }
+
+  // Passwords are bcrypt-hashed, one-way - there's no "reveal the current
+  // password" possible. This generates a fresh secure temporary password,
+  // resets the account to it (same effect as an admin-chosen PATCH
+  // password, including forcing re-login everywhere via refreshTokenHash),
+  // and returns the plaintext exactly once so the caller can hand it to
+  // the user (e.g. via WhatsApp) - it is never persisted or logged
+  // anywhere else.
+  async generateTemporaryPassword(id: string, actingUserId: string) {
+    const target = await this.prisma.user.findUnique({ where: { id } });
+    if (!target) throw new NotFoundException('User not found');
+
+    const temporaryPassword = generateSecurePassword();
+    const hash = await bcrypt.hash(temporaryPassword, 12);
+    await this.prisma.user.update({ where: { id }, data: { password: hash, refreshTokenHash: null } });
+    await this.audit.log({
+      userId: actingUserId,
+      action: 'TEMPORARY_PASSWORD_GENERATED',
+      targetType: 'User',
+      targetId: id,
+      metadata: { targetEmail: target.email },
+    });
+    return { temporaryPassword };
   }
 
   async remove(id: string, actingUserId: string) {

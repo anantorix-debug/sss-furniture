@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
@@ -12,6 +12,9 @@ import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { StatCard } from '@/components/StatCard';
 import { PermissionMatrix } from '@/components/PermissionMatrix';
 import { PasswordInput } from '@/components/PasswordInput';
+import { WhatsAppModal } from '@/components/WhatsAppModal';
+import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { buildCredentialsMessage } from '@/lib/credentialsMessage';
 import { formatDate } from '@/lib/format';
 import type { User, Role, CarpenterSummary } from '@/types';
 
@@ -40,6 +43,7 @@ function UsersPageContent() {
   const [editing, setEditing] = useState<User | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Role>('CARPENTER');
   const [isActive, setIsActive] = useState(true);
@@ -48,6 +52,48 @@ function UsersPageContent() {
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [pendingDeactivation, setPendingDeactivation] = useState(false);
   const [linkCarpenterId, setLinkCarpenterId] = useState('');
+
+  const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
+  const [sharingUser, setSharingUser] = useState<User | null>(null);
+  const [sharingError, setSharingError] = useState<string | null>(null);
+  const [generatingPassword, setGeneratingPassword] = useState(false);
+
+  // Inline password change directly from the table row - a lighter-weight
+  // alternative to opening the full Edit modal just to set a password.
+  const [passwordEditId, setPasswordEditId] = useState<string | null>(null);
+  const [passwordEditValue, setPasswordEditValue] = useState('');
+  const [passwordEditError, setPasswordEditError] = useState<string | null>(null);
+  const [passwordEditSubmitting, setPasswordEditSubmitting] = useState(false);
+
+  function startPasswordEdit(u: User) {
+    setPasswordEditId(u.id);
+    setPasswordEditValue('');
+    setPasswordEditError(null);
+  }
+
+  async function savePasswordEdit(u: User) {
+    if (passwordEditValue.length < 6) {
+      setPasswordEditError('Password must be at least 6 characters');
+      return;
+    }
+    setPasswordEditSubmitting(true);
+    setPasswordEditError(null);
+    try {
+      await api.patch(`/users/${u.id}`, { password: passwordEditValue });
+      setPasswordEditId(null);
+      setPasswordEditValue('');
+      mutate();
+    } catch (err) {
+      setPasswordEditError(err instanceof ApiError ? err.message : 'Failed to change password');
+    } finally {
+      setPasswordEditSubmitting(false);
+    }
+  }
+  // Required (not optional) - independent of the WhatsApp modal, so a
+  // cancelled/failed send never strands the admin without the new
+  // password. bcrypt is one-way - once generated, this is the only place
+  // the plaintext will ever be recoverable.
+  const [tempPasswordBanner, setTempPasswordBanner] = useState<{ user: User; password: string } | null>(null);
 
   // Unlinked worker profiles matching the selected role - lets a brand new
   // Carpenter/Carver/Polisher login be tied to their payee profile in the
@@ -62,6 +108,7 @@ function UsersPageContent() {
     setEditing(null);
     setName('');
     setEmail('');
+    setPhone('');
     setPassword('');
     setRole('CARPENTER');
     setIsActive(true);
@@ -74,6 +121,7 @@ function UsersPageContent() {
     setEditing(u);
     setName(u.name);
     setEmail(u.email);
+    setPhone(u.phone ?? '');
     setPassword('');
     setRole(u.role);
     setIsActive(u.isActive);
@@ -102,12 +150,13 @@ function UsersPageContent() {
         await api.patch(`/users/${editing.id}`, {
           name,
           email,
+          phone: phone || undefined,
           role,
           isActive,
           ...(password ? { password } : {}),
         });
       } else {
-        const created = await api.post<User>('/users', { name, email, password, role });
+        const created = await api.post<User>('/users', { name, email, phone: phone || undefined, password, role });
         if (linkCarpenterId) {
           await api.patch(`/carpenters/${linkCarpenterId}`, { userId: created.id });
         }
@@ -135,6 +184,36 @@ function UsersPageContent() {
     }
   }
 
+  function startShareCredentials(u: User) {
+    setSharingError(null);
+    setSharingUser(u);
+  }
+
+  // No phone on file doesn't block this - the WhatsApp popup below still
+  // lets the admin search and pick any chat or group manually (same as
+  // every other WhatsApp send in the app when there's no number to
+  // pre-fill), just without a number pre-selected for them.
+  async function confirmShareCredentials() {
+    if (!sharingUser) return;
+    const target = sharingUser;
+    setSharingUser(null);
+    setGeneratingPassword(true);
+    setSharingError(null);
+    try {
+      const { temporaryPassword } = await api.post<{ temporaryPassword: string }>(`/users/${target.id}/generate-temp-password`);
+      setTempPasswordBanner({ user: target, password: temporaryPassword });
+      openWhatsApp({
+        recipientName: target.name,
+        recipientPhone: target.phone ?? undefined,
+        defaultMessage: buildCredentialsMessage(target, ROLE_LABEL[target.role], temporaryPassword),
+      });
+    } catch (err) {
+      setSharingError(err instanceof ApiError ? err.message : 'Failed to generate a temporary password');
+    } finally {
+      setGeneratingPassword(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -148,6 +227,28 @@ function UsersPageContent() {
           + New User
         </button>
       </div>
+
+      {tempPasswordBanner && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span>
+              New password for <span className="font-medium">{tempPasswordBanner.user.name}</span>:
+            </span>
+            <PasswordInput className="input h-8 w-40 text-xs" readOnly value={tempPasswordBanner.password} />
+          </div>
+          <button className="text-xs text-brand-500 hover:underline" onClick={() => setTempPasswordBanner(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {sharingError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">
+          <span>{sharingError}</span>
+          <button className="text-xs text-red-500 hover:underline" onClick={() => setSharingError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Users" value={String(data?.length ?? 0)} sub="Across 4 roles" />
@@ -181,7 +282,8 @@ function UsersPageContent() {
               </tr>
             )}
             {data?.map((u) => (
-              <tr key={u.id}>
+              <Fragment key={u.id}>
+              <tr>
                 <td className="font-medium">
                   {u.name}
                   {u.id === me?.id && <span className="ml-2 text-xs text-brand-400">(you)</span>}
@@ -192,7 +294,7 @@ function UsersPageContent() {
                 </td>
                 <td>{u.isActive ? <Chip color="green" label="Active" /> : <Chip color="red" label="Inactive" />}</td>
                 <td>{formatDate(u.createdAt)}</td>
-                <td className="space-x-2">
+                <td className="space-x-2 whitespace-nowrap">
                   <button className="text-brand-600 hover:underline text-xs" onClick={() => openEdit(u)}>
                     Edit
                   </button>
@@ -201,8 +303,52 @@ function UsersPageContent() {
                       Delete
                     </button>
                   )}
+                  <button
+                    className="text-emerald-600 hover:underline text-xs disabled:opacity-50"
+                    disabled={generatingPassword}
+                    title="Share Credentials via WhatsApp"
+                    onClick={() => startShareCredentials(u)}
+                  >
+                    WhatsApp
+                  </button>
+                  <button
+                    className="text-brand-600 hover:underline text-xs"
+                    title="Change Password"
+                    onClick={() => (passwordEditId === u.id ? setPasswordEditId(null) : startPasswordEdit(u))}
+                  >
+                    Password
+                  </button>
                 </td>
               </tr>
+              {passwordEditId === u.id && (
+                <tr>
+                  <td colSpan={6} className="bg-brand-50">
+                    <div className="flex flex-wrap items-center gap-2 py-1">
+                      <span className="text-xs text-brand-500 whitespace-nowrap">New password for {u.name}:</span>
+                      <PasswordInput
+                        className="input h-8 w-44 text-xs"
+                        autoFocus
+                        minLength={6}
+                        value={passwordEditValue}
+                        onChange={(e) => setPasswordEditValue(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && savePasswordEdit(u)}
+                      />
+                      <button
+                        className="btn-primary text-xs px-3 py-1.5"
+                        disabled={passwordEditSubmitting}
+                        onClick={() => savePasswordEdit(u)}
+                      >
+                        {passwordEditSubmitting ? 'Saving...' : 'Save'}
+                      </button>
+                      <button className="text-xs text-brand-500 hover:underline" onClick={() => setPasswordEditId(null)}>
+                        Cancel
+                      </button>
+                      {passwordEditError && <span className="text-xs text-red-600">{passwordEditError}</span>}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -220,6 +366,11 @@ function UsersPageContent() {
             <div>
               <label className="label">Email</label>
               <input type="email" className="input" required value={email} onChange={(e) => setEmail(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">WhatsApp Number (optional)</label>
+              <input type="tel" className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="9876543210" />
+              <p className="text-xs text-brand-400 mt-1">Used for the &quot;Share Credentials&quot; WhatsApp action.</p>
             </div>
             <div>
               <label className="label">{editing ? 'New Password (leave blank to keep current)' : 'Password'}</label>
@@ -260,7 +411,10 @@ function UsersPageContent() {
                     const id = e.target.value;
                     setLinkCarpenterId(id);
                     const worker = allCarpentersForRole.find((c) => c.id === id);
-                    if (worker) setName(worker.name);
+                    if (worker) {
+                      setName(worker.name);
+                      if (worker.phone) setPhone(worker.phone);
+                    }
                   }}
                 >
                   <option value="">Not now - link later from Production</option>
@@ -321,6 +475,25 @@ function UsersPageContent() {
           danger
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {sharingUser && (
+        <ConfirmDialog
+          title="Share Credentials"
+          message={`Generate a new temporary password for ${sharingUser.name} and share it via WhatsApp? Their current password will stop working immediately.`}
+          confirmLabel="Generate & Share"
+          danger
+          onConfirm={confirmShareCredentials}
+          onCancel={() => setSharingUser(null)}
+        />
+      )}
+
+      {showModal && whatsappOptions && (
+        <WhatsAppModal
+          onClose={closeWhatsApp}
+          recipientInfo={{ name: whatsappOptions.recipientName, phone: whatsappOptions.recipientPhone }}
+          defaultMessage={whatsappOptions.defaultMessage}
         />
       )}
     </div>

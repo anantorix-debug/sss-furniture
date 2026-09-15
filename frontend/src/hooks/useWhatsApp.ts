@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import type { MessageRecipientType } from '@/types';
 
 interface UseWhatsAppOptions {
   recipientName: string;
@@ -13,6 +14,9 @@ interface UseWhatsAppOptions {
   pdfUrl?: string;
   pdfFilename?: string;
   autoAttachPdf?: boolean;
+  // See WhatsAppModal's messageVariants/defaultRecipientType props.
+  messageVariants?: { customer: string; employee: string };
+  defaultRecipientType?: MessageRecipientType;
 }
 
 export function useWhatsApp() {

@@ -25,6 +25,7 @@ import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { sharePdf } from '@/lib/sharePdf';
+import { buildCustomerOrderMessage } from '@/lib/orderMessages';
 import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -259,48 +260,16 @@ function CustomerOrdersContent() {
     URL.revokeObjectURL(url);
   }
 
-  // Mirrors the "Dear Sir, kindly check and confirm..." confirmation
-  // format, built from whatever this order actually has on file - there's
-  // no separate COT/MATTRESS/DRESSING TABLE breakdown in the schema (that
-  // level of detail lives in specialInstructions as free text today), so
-  // this stays to Order/Size/Colour/Items/Payment, all real data.
-  function buildOrderConfirmationMessage(order: CustomerOrder): string {
-    const lines = [
-      `Dear Sir,`,
-      ``,
-      `Kindly check and confirm the following order details:`,
-      ``,
-      `*ORDER DETAILS*`,
-      `Order ID: ${order.orderId}`,
-      order.size ? `Size: ${order.size}${order.sizeUnit ? ` ${order.sizeUnit}` : ''}` : null,
-      order.colour ? `Colour: ${order.colour}` : null,
-      ``,
-      ...(order.items?.length
-        ? order.items.map((i) => `${i.productName} - Qty: ${i.quantity} x ₹${i.unitPrice}`)
-        : [`Product: ${order.product}`]),
-      order.specialInstructions ? `` : null,
-      order.specialInstructions ? `Special Instructions: ${order.specialInstructions}` : null,
-      ``,
-      `*PAYMENT DETAILS*`,
-      `Order Value: ₹${order.orderValue ?? 0}`,
-      order.totalReceived ? `Advance Paid: ₹${order.totalReceived}` : null,
-      `Balance Amount: ₹${order.balanceAmount ?? order.orderValue ?? 0}`,
-      ``,
-      `Please check all the above details carefully. Once confirmed, changes cannot be made. If everything is correct, kindly reply:`,
-      ``,
-      `"Confirmed – All Details OK."`,
-      ``,
-      `Thank you.`,
-    ].filter((l) => l !== null);
-    return lines.join('\n');
-  }
-
   function handleSendWhatsApp(order: CustomerOrder) {
     const galleryUrls = (order.galleryImages ?? []).map((i) => assetUrl(i.url)).filter((u): u is string => Boolean(u));
     openWhatsApp({
       recipientName: (order.customerName ?? '') || 'Customer',
       recipientPhone: order.phone ?? undefined,
-      defaultMessage: buildOrderConfirmationMessage(order),
+      defaultMessage: buildCustomerOrderMessage(order, 'customer'),
+      messageVariants: {
+        customer: buildCustomerOrderMessage(order, 'customer'),
+        employee: buildCustomerOrderMessage(order, 'employee'),
+      },
       // Selected Gallery images (if any) go out instead of the generic
       // template image - multiple images send as one message per image.
       ...(galleryUrls.length > 0 ? { defaultImageUrls: galleryUrls } : { defaultImageUrl: '/wa-template.jpeg' }),
@@ -838,6 +807,9 @@ function CustomerOrdersContent() {
           defaultImageUrls={whatsappOptions.defaultImageUrls}
           pdfUrl={whatsappOptions.pdfUrl}
           pdfFilename={whatsappOptions.pdfFilename}
+          autoAttachPdf={whatsappOptions.autoAttachPdf}
+          messageVariants={whatsappOptions.messageVariants}
+          defaultRecipientType={whatsappOptions.defaultRecipientType}
           onSuccess={() => mutate()}
         />
       )}

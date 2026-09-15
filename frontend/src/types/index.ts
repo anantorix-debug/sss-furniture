@@ -7,11 +7,15 @@ export const PURCHASE_STATUS_LABEL: Record<PurchaseStatus, string> = {
   CANCELLED: 'Cancelled',
 };
 export type StockMovementType = 'IN' | 'OUT' | 'ADJUSTMENT';
+// WhatsApp order-confirmation message content: full pricing/payment info
+// for a customer, operational-only (no money) for a production employee.
+export type MessageRecipientType = 'customer' | 'employee';
 
 export interface User {
   id: string;
   name: string;
   email: string;
+  phone?: string | null;
   role: Role;
   isActive: boolean;
   createdAt: string;

@@ -17,6 +17,7 @@ import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { sharePdf } from '@/lib/sharePdf';
+import { buildPartyOrderMessage } from '@/lib/orderMessages';
 import type { PartyOrder, Shop } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
@@ -44,34 +45,6 @@ function modelNoSummary(order: PartyOrder): string {
   if (order.items.length === 1) return order.items[0].modelNo ?? '';
   const withModelNo = order.items.filter((i) => i.modelNo).length;
   return withModelNo === 0 ? '' : `${withModelNo}/${order.items.length} assigned`;
-}
-
-// Same "Dear Sir, kindly check and confirm..." format as the Customer
-// Orders template, listing every product line rather than a single model.
-function buildOrderConfirmationMessage(order: PartyOrder): string {
-  const lines = [
-    `Dear Sir,`,
-    ``,
-    `Kindly check and confirm the following order details:`,
-    ``,
-    `*ORDER DETAILS*`,
-    `Shop: ${order.shopName}`,
-    ...order.items.map(
-      (i) => `${i.productName}${i.finish ? ` (${i.finish})` : ''} - Qty ${i.qty}${i.size ? `, ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : ''}`,
-    ),
-    ``,
-    `*PAYMENT DETAILS*`,
-    `Total Amount: ₹${order.totalAmount ?? 0}`,
-    order.receivedAmount ? `Received: ₹${order.receivedAmount}` : null,
-    `Balance Amount: ₹${order.balanceAmount ?? order.totalAmount ?? 0}`,
-    ``,
-    `Please check all the above details carefully. Once confirmed, changes cannot be made. If everything is correct, kindly reply:`,
-    ``,
-    `"Confirmed – All Details OK."`,
-    ``,
-    `Thank you.`,
-  ].filter((l) => l !== null);
-  return lines.join('\n');
 }
 
 function PartyOrdersContent() {
@@ -183,7 +156,11 @@ function PartyOrdersContent() {
     openWhatsApp({
       recipientName: (order.shopName ?? '') || 'Shop',
       recipientPhone: order.phone ?? undefined,
-      defaultMessage: buildOrderConfirmationMessage(order),
+      defaultMessage: buildPartyOrderMessage(order, 'customer'),
+      messageVariants: {
+        customer: buildPartyOrderMessage(order, 'customer'),
+        employee: buildPartyOrderMessage(order, 'employee'),
+      },
       defaultImageUrl: '/wa-template.jpeg',
       // Lets the sender attach the branded PDF instead, from inside the
       // same chat-picker popup.
@@ -408,6 +385,9 @@ function PartyOrdersContent() {
           defaultImageUrl={whatsappOptions.defaultImageUrl}
           pdfUrl={whatsappOptions.pdfUrl}
           pdfFilename={whatsappOptions.pdfFilename}
+          autoAttachPdf={whatsappOptions.autoAttachPdf}
+          messageVariants={whatsappOptions.messageVariants}
+          defaultRecipientType={whatsappOptions.defaultRecipientType}
           onSuccess={() => mutate()}
         />
       )}

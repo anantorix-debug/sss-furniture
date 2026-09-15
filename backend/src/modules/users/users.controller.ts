@@ -38,6 +38,11 @@ export class UsersController {
     return this.usersService.update(id, dto, user.userId);
   }
 
+  @Post(':id/generate-temp-password')
+  generateTempPassword(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.usersService.generateTemporaryPassword(id, user.userId);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.usersService.remove(id, user.userId);

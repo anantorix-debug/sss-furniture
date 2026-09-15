@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, getAccessToken, sendWhatsappMedia, WHATSAPP_MEDIA_MAX_BYTES } from '@/lib/api';
-import type { WhatsappChat } from '@/types';
+import type { WhatsappChat, MessageRecipientType } from '@/types';
 import { Modal } from './Modal';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -51,6 +51,13 @@ interface WhatsAppModalProps {
   // popup, so it's fetched and attached the moment the modal opens instead
   // of waiting for the sender to notice and click "Attach PDF" themselves.
   autoAttachPdf?: boolean;
+  // When given, renders a "Send To: Customer / Employee" radio pair and
+  // swaps the message between these two pre-built variants when toggled -
+  // e.g. the Customer variant includes pricing/payment, the Employee
+  // variant is operational-only. Omit for every caller that isn't sending
+  // an order confirmation (payment reminders, credential sharing, etc.).
+  messageVariants?: { customer: string; employee: string };
+  defaultRecipientType?: MessageRecipientType;
 }
 
 export function WhatsAppModal({
@@ -63,10 +70,23 @@ export function WhatsAppModal({
   pdfUrl,
   pdfFilename,
   autoAttachPdf,
+  messageVariants,
+  defaultRecipientType,
 }: WhatsAppModalProps) {
   const router = useRouter();
   const [selectedChat, setSelectedChat] = useState<WhatsappChat | null>(null);
   const [message, setMessage] = useState(defaultMessage);
+  const [recipientType, setRecipientType] = useState<MessageRecipientType>(defaultRecipientType ?? 'customer');
+
+  // Plain user-triggered state update - deliberately separate from the
+  // `useEffect` below that resets `message` when the `defaultMessage` prop
+  // changes, so toggling the radio never gets clobbered by that effect (it
+  // only fires when the PROP changes, which it doesn't while this modal
+  // instance stays mounted).
+  function handleRecipientTypeChange(type: MessageRecipientType) {
+    setRecipientType(type);
+    if (messageVariants) setMessage(messageVariants[type]);
+  }
   const [searchQuery, setSearchQuery] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -237,6 +257,34 @@ export function WhatsAppModal({
           To: <span className="font-semibold text-brand-900">{recipientInfo.name}</span>
           {recipientInfo.phone && <span className="text-brand-500"> ({recipientInfo.phone})</span>}
         </p>
+
+        {messageVariants && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-brand-900 mb-2">Send To</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-1.5 text-sm text-brand-700 cursor-pointer">
+                <input
+                  type="radio"
+                  name="recipientType"
+                  checked={recipientType === 'customer'}
+                  disabled={sending}
+                  onChange={() => handleRecipientTypeChange('customer')}
+                />
+                Customer
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-brand-700 cursor-pointer">
+                <input
+                  type="radio"
+                  name="recipientType"
+                  checked={recipientType === 'employee'}
+                  disabled={sending}
+                  onChange={() => handleRecipientTypeChange('employee')}
+                />
+                Employee
+              </label>
+            </div>
+          </div>
+        )}
 
         {!status?.operational ? (
           <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 mb-4 flex items-center justify-between">
