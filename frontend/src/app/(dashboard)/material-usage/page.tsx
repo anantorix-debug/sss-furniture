@@ -33,6 +33,7 @@ function MaterialUsageContent() {
   const { data: materials, isLoading: materialsLoading } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
   const [form, setForm] = useState(emptyForm);
   const [materialQuery, setMaterialQuery] = useState('');
+  const [materialDropdownOpen, setMaterialDropdownOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -126,21 +127,30 @@ function MaterialUsageContent() {
           <label className="label">Material</label>
           <input
             className="input h-12 text-base"
-            placeholder={materialsLoading ? 'Loading materials...' : 'Search material...'}
+            placeholder={materialsLoading ? 'Loading materials...' : 'Search or tap to see all materials...'}
             value={materialQuery}
+            onFocus={() => setMaterialDropdownOpen(true)}
+            onBlur={() => setTimeout(() => setMaterialDropdownOpen(false), 150)}
             onChange={(e) => {
               setMaterialQuery(e.target.value);
+              setMaterialDropdownOpen(true);
               if (form.rawMaterialId) setForm((f) => ({ ...f, rawMaterialId: '' }));
             }}
           />
-          {materialQuery && !form.rawMaterialId && filteredMaterials.length > 0 && (
+          {materialDropdownOpen && !form.rawMaterialId && (
             <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto card p-1 shadow-lg">
+              {filteredMaterials.length === 0 && (
+                <p className="px-3 py-2.5 text-sm text-brand-400">{materialsLoading ? 'Loading...' : 'No materials found'}</p>
+              )}
               {filteredMaterials.map((m) => (
                 <button
                   type="button"
                   key={m.id}
                   className="w-full text-left px-3 py-2.5 rounded-md hover:bg-brand-50 text-sm"
-                  onClick={() => selectMaterial(m.id)}
+                  onClick={() => {
+                    selectMaterial(m.id);
+                    setMaterialDropdownOpen(false);
+                  }}
                 >
                   <span className="font-medium text-ink">{m.name}</span>
                   <span className="text-brand-400"> &middot; {m.inStock} {m.unit} available</span>
