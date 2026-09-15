@@ -580,6 +580,12 @@ function CustomerOrdersContent() {
                       />
                       <input
                         className="input"
+                        placeholder="Size (e.g. 6x3 ft)"
+                        value={row.size}
+                        onChange={(e) => updateItemRow(idx, { size: e.target.value })}
+                      />
+                      <input
+                        className="input"
                         placeholder="Polish Colour (e.g. Walnut Brown)"
                         value={row.color}
                         onChange={(e) => updateItemRow(idx, { color: e.target.value })}
