@@ -576,6 +576,22 @@ export class RawMaterialsService {
               items: { select: { rawMaterialId: true, pieces: true, thicknessIn: true, widthIn: true, lengthFt: true } },
             },
           },
+          // The other purchase path - a Suppliers-ledger entry rather than a
+          // Purchase Order. Same dimension/pieces fields, just stored
+          // directly on the row instead of via a separate items join. Only
+          // one of purchase/supplierPurchase is ever set on a given
+          // movement.
+          supplierPurchase: {
+            select: {
+              id: true,
+              particulars: true,
+              pieces: true,
+              thicknessIn: true,
+              widthIn: true,
+              lengthFt: true,
+              supplier: { select: { name: true } },
+            },
+          },
           createdBy: { select: { name: true } },
         },
         orderBy: { date: 'desc' },
@@ -587,11 +603,22 @@ export class RawMaterialsService {
     const round2 = (n: number) => Math.round(n * 100) / 100;
     const mapped = movements.map((m) => {
       const item = m.purchase?.items.find((i) => i.rawMaterialId === m.rawMaterialId);
-      const pieces = item?.pieces ?? null;
-      const thicknessIn = item?.thicknessIn != null ? Number(item.thicknessIn) : null;
-      const widthIn = item?.widthIn != null ? Number(item.widthIn) : null;
-      const lengthFt = item?.lengthFt != null ? Number(item.lengthFt) : null;
-      const purchase = m.purchase ? { id: m.purchase.id, purchaseNumber: m.purchase.purchaseNumber, supplier: m.purchase.supplier } : null;
+      // A Purchase-Order line and a Suppliers-ledger entry store the same
+      // dimension/pieces data in different shapes - only one of the two is
+      // ever set on a given movement, so this is never a real conflict.
+      const pieces = item?.pieces ?? m.supplierPurchase?.pieces ?? null;
+      const thicknessIn = item?.thicknessIn != null ? Number(item.thicknessIn) : m.supplierPurchase?.thicknessIn != null ? Number(m.supplierPurchase.thicknessIn) : null;
+      const widthIn = item?.widthIn != null ? Number(item.widthIn) : m.supplierPurchase?.widthIn != null ? Number(m.supplierPurchase.widthIn) : null;
+      const lengthFt = item?.lengthFt != null ? Number(item.lengthFt) : m.supplierPurchase?.lengthFt != null ? Number(m.supplierPurchase.lengthFt) : null;
+      // Normalized into the same shape the frontend already reads
+      // (`m.purchase.supplier.name`) regardless of which purchase path this
+      // movement actually came from, so no frontend change is needed to
+      // show the supplier on a Suppliers-ledger stock-in.
+      const purchase = m.purchase
+        ? { id: m.purchase.id, purchaseNumber: m.purchase.purchaseNumber, supplier: m.purchase.supplier }
+        : m.supplierPurchase
+          ? { id: m.supplierPurchase.id, purchaseNumber: m.supplierPurchase.particulars, supplier: m.supplierPurchase.supplier }
+          : null;
       // Amount is computed per piece (pieces x per-piece Board Feet x
       // rate), not quantity x rate - this uses this movement's own exact
       // recorded dimensions rather than an estimate, and is what "amount
@@ -605,6 +632,11 @@ export class RawMaterialsService {
           : pieces != null && thicknessIn != null && widthIn != null && lengthFt != null
             ? round2(pieces * ((thicknessIn * widthIn * lengthFt) / 12) * unitCost)
             : round2(Math.abs(Number(m.quantity)) * unitCost);
+      // `purchase` above already folds in whichever of m.purchase/
+      // m.supplierPurchase applies - the raw supplierPurchase relation is
+      // left in place after it (harmless, no financial fields selected on
+      // it) rather than destructured out, to sidestep this project's
+      // lint config flagging an unused destructured variable.
       return stripFinancials({ ...m, purchase, pieces, thicknessIn, widthIn, lengthFt, amount }, params.viewerRole);
     });
     return paginated ? paginate(mapped, total, page, limit) : mapped;
