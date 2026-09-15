@@ -642,6 +642,8 @@ export class CustomerOrdersService {
         <tbody>
           ${summaryRows}
           <tr class="grand-total"><td colspan="2" style="text-align:right">GRAND TOTAL</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}/-</td></tr>
+          <tr><td colspan="2" style="text-align:right">Amount Received</td><td style="text-align:right">₹${Number(order.totalReceived).toLocaleString('en-IN')}/-</td></tr>
+          <tr class="grand-total"><td colspan="2" style="text-align:right">BALANCE DUE</td><td style="text-align:right">₹${Number(order.balanceAmount).toLocaleString('en-IN')}/-</td></tr>
         </tbody>
       </table>
     </div>
