@@ -93,7 +93,7 @@ function stripOrderMoney<
   };
 }
 
-const itemsInclude = { items: { orderBy: { createdAt: 'asc' as const } } };
+const itemsInclude = { items: { orderBy: { createdAt: 'asc' as const }, include: { referenceImage: true } } };
 
 @Injectable()
 export class PartyOrdersService {
@@ -221,6 +221,7 @@ export class PartyOrdersService {
             unitPrice: i.unitPrice,
             totalValue: this.lineTotal(i),
             modelNo: i.modelNo,
+            referenceImageId: i.referenceImageId,
           })),
         },
       },
@@ -313,6 +314,8 @@ export class PartyOrdersService {
                 qty: i.qty ?? 1,
                 unitPrice: i.unitPrice,
                 totalValue: this.lineTotal(i),
+                modelNo: i.modelNo,
+                referenceImageId: i.referenceImageId,
               })),
             }
           : undefined,

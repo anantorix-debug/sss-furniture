@@ -49,6 +49,10 @@ export interface CustomerOrderItem {
   // Stock-first split, computed at create/edit time.
   stockReservedQty?: number;
   productionQty?: number;
+  // Optional "this line looks like this" photo picked from the existing
+  // Gallery - per-product, independent of the order-wide galleryImages.
+  referenceImageId?: string | null;
+  referenceImage?: GalleryImage | null;
 }
 
 export interface CustomerOrder {
@@ -106,6 +110,10 @@ export interface PartyOrderItem {
   // Omitted entirely for Carpenter/Polisher viewers.
   unitPrice?: number;
   totalValue?: number;
+  // Optional "this line looks like this" photo picked from the existing
+  // Gallery - per-product, same purpose as CustomerOrderItem.referenceImage.
+  referenceImageId?: string | null;
+  referenceImage?: GalleryImage | null;
 }
 
 export interface PartyOrder {
@@ -304,6 +312,9 @@ export interface CarpenterWorkItem {
   sourceCustomerOrderId?: string | null;
   sourceCustomerOrderItemId?: string | null;
   sourcePartyOrderItemId?: string | null;
+  // The Model reference photo picked on the order line this work item came
+  // from, if any - lets a production worker see exactly what to build.
+  referenceImage?: GalleryImage | null;
   productId?: string | null;
   // Sequential Carpenter -> Carving -> Polish engine fields. batchId ties
   // together the stage-rows of one production run - null on legacy rows

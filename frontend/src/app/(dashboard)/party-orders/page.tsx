@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError, getAccessToken } from '@/lib/api';
+import { api, ApiError, getAccessToken, assetUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -18,7 +18,7 @@ import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { sharePdf } from '@/lib/sharePdf';
 import { buildPartyOrderMessage } from '@/lib/orderMessages';
-import type { PartyOrder, Shop } from '@/types';
+import type { PartyOrder, Shop, GalleryImage } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
 
@@ -45,6 +45,25 @@ function modelNoSummary(order: PartyOrder): string {
   if (order.items.length === 1) return order.items[0].modelNo ?? '';
   const withModelNo = order.items.filter((i) => i.modelNo).length;
   return withModelNo === 0 ? '' : `${withModelNo}/${order.items.length} assigned`;
+}
+
+// Card thumbnail - each line's own product image; shows the first plus a
+// "+N" badge when there's more than one.
+function OrderThumbnail({ order }: { order: PartyOrder }) {
+  const images = order.items.map((i) => i.referenceImage).filter((img): img is GalleryImage => Boolean(img));
+  if (images.length === 0) return null;
+  const first = images[0];
+  return (
+    <div className="relative shrink-0">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={assetUrl(first.url) ?? ''} alt={first.fileName} className="h-12 w-12 object-cover rounded-md border border-brand-200" />
+      {images.length > 1 && (
+        <span className="absolute -bottom-1 -right-1 bg-brand-700 text-white text-[9px] leading-none rounded-full h-4 w-4 flex items-center justify-center">
+          +{images.length - 1}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function PartyOrdersContent() {
@@ -255,10 +274,13 @@ function PartyOrdersContent() {
         {data?.map((order) => (
           <Link key={order.id} href={`/party-orders/${order.id}`} className="card p-5 hover:shadow-md transition-shadow block">
             <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="font-semibold text-brand-900 truncate">{order.shopName}</p>
-                {order.phone && <p className="text-xs text-brand-400">{order.phone}</p>}
-                <p className="text-brand-600 text-xs font-medium mt-0.5">{order.jobNumber ?? '-'}</p>
+              <div className="flex items-start gap-2 min-w-0">
+                <OrderThumbnail order={order} />
+                <div className="min-w-0">
+                  <p className="font-semibold text-brand-900 truncate">{order.shopName}</p>
+                  {order.phone && <p className="text-xs text-brand-400">{order.phone}</p>}
+                  <p className="text-brand-600 text-xs font-medium mt-0.5">{order.jobNumber ?? '-'}</p>
+                </div>
               </div>
               <StatusBadge status={order.deliveryStatus} />
             </div>

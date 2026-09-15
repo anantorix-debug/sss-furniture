@@ -278,13 +278,28 @@ export class CarpenterService {
           carpenter: { select: { id: true, name: true, phone: true, workerType: true } },
           createdBy: { select: { name: true } },
           stockMovements: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } },
+          // The Model reference photo picked on the order line this work
+          // item came from - surfaced here (flattened, not the raw nested
+          // relation) so My Work can show the worker exactly what to build
+          // without them needing order access.
+          sourceCustomerOrderItem: { select: { referenceImage: true } },
+          sourcePartyOrderItem: { select: { referenceImage: true } },
         },
         orderBy: { workDate: 'desc' },
         ...(paginated ? toSkipTake(page, limit) : {}),
       }),
       paginated ? this.prisma.carpenterWorkItem.count({ where }) : Promise.resolve(0),
     ]);
-    const mapped = items.map((w) => stripWorkItemMoney(w, hide));
+    const mapped = items.map((w) => {
+      const { sourceCustomerOrderItem, sourcePartyOrderItem, ...rest } = w as typeof w & {
+        sourceCustomerOrderItem?: { referenceImage: unknown } | null;
+        sourcePartyOrderItem?: { referenceImage: unknown } | null;
+      };
+      return stripWorkItemMoney(
+        { ...rest, referenceImage: sourceCustomerOrderItem?.referenceImage ?? sourcePartyOrderItem?.referenceImage ?? null },
+        hide,
+      );
+    });
     return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
 

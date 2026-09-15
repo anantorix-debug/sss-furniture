@@ -8,7 +8,9 @@ import { formatCurrency, toDateInputValue } from '@/lib/format';
 import { Modal } from './Modal';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import { ModelNoPicker } from './ModelNoPicker';
-import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product } from '@/types';
+import { GalleryGrid } from './GalleryGrid';
+import { assetUrl } from '@/lib/api';
+import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product, GalleryImage } from '@/types';
 
 interface ItemForm {
   productId?: string;
@@ -21,6 +23,8 @@ interface ItemForm {
   unitPrice: string;
   modelNo?: string;
   availableQuantity?: number;
+  referenceImageId?: string;
+  referenceImage?: GalleryImage | null;
 }
 
 const emptyItem: ItemForm = {
@@ -53,6 +57,8 @@ function itemFromExisting(i: PartyOrderItem): ItemForm {
     qty: String(i.qty),
     unitPrice: String(i.unitPrice ?? 0),
     modelNo: i.modelNo ?? undefined,
+    referenceImageId: i.referenceImageId ?? undefined,
+    referenceImage: i.referenceImage ?? null,
   };
 }
 
@@ -78,9 +84,13 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
   );
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [itemImagePickerIdx, setItemImagePickerIdx] = useState<number | null>(null);
 
   function updateItem(idx: number, patch: Partial<ItemForm>) {
     setItems((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+  function setItemImage(idx: number, image: GalleryImage | null) {
+    updateItem(idx, { referenceImageId: image?.id, referenceImage: image });
   }
   function addItem() {
     setItems((rows) => [...rows, { ...emptyItem }]);
@@ -134,6 +144,7 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
           qty: parseInt(i.qty, 10) || 1,
           unitPrice: parseFloat(i.unitPrice) || 0,
           modelNo: i.modelNo || undefined,
+          referenceImageId: i.referenceImageId || undefined,
         })),
       };
       if (editing) {
@@ -240,6 +251,28 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
                   </div>
                 </div>
                 {item.modelNo && <p className="text-[11px] text-brand-500">Model No: {item.modelNo}</p>}
+                <div className="flex items-center gap-2">
+                  {item.referenceImage ? (
+                    <div className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={assetUrl(item.referenceImage.url) ?? ''}
+                        alt={item.referenceImage.fileName}
+                        className="h-12 w-12 object-cover rounded-md border border-brand-200"
+                      />
+                      <button
+                        type="button"
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-[11px] leading-none"
+                        onClick={() => setItemImage(idx, null)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : null}
+                  <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => setItemImagePickerIdx(idx)}>
+                    {item.referenceImage ? 'Change Image' : '+ Add Image'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -289,6 +322,25 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
           </button>
         </div>
       </form>
+
+      {itemImagePickerIdx !== null && (
+        <Modal title="Select Product Image" onClose={() => setItemImagePickerIdx(null)} wide>
+          <GalleryGrid
+            canManage={false}
+            selectable
+            selectedIds={items[itemImagePickerIdx]?.referenceImageId ? [items[itemImagePickerIdx].referenceImageId as string] : []}
+            onToggle={(image) => {
+              setItemImage(itemImagePickerIdx, image);
+              setItemImagePickerIdx(null);
+            }}
+          />
+          <div className="flex justify-end pt-3">
+            <button type="button" className="btn-secondary text-sm" onClick={() => setItemImagePickerIdx(null)}>
+              Close
+            </button>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }

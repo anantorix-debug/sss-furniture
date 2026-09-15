@@ -41,6 +41,8 @@ interface ItemRow {
   quantity: string;
   unitPrice: string;
   availableQuantity?: number;
+  referenceImageId?: string;
+  referenceImage?: GalleryImage | null;
 }
 
 const emptyRow: ItemRow = { productName: '', category: '', size: '', sizeUnit: '', color: '', quantity: '1', unitPrice: '' };
@@ -136,11 +138,18 @@ function CustomerOrdersContent() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedGalleryImages, setSelectedGalleryImages] = useState<GalleryImage[]>([]);
   const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
+  // Which product row's own image picker is open, if any - separate from
+  // the order-wide gallery picker above.
+  const [itemImagePickerIdx, setItemImagePickerIdx] = useState<number | null>(null);
 
   function toggleGalleryImage(image: GalleryImage) {
     setSelectedGalleryImages((prev) =>
       prev.some((i) => i.id === image.id) ? prev.filter((i) => i.id !== image.id) : [...prev, image],
     );
+  }
+
+  function setItemImage(idx: number, image: GalleryImage | null) {
+    updateItemRow(idx, { referenceImageId: image?.id, referenceImage: image });
   }
 
   function openCreate() {
@@ -176,6 +185,8 @@ function CustomerOrdersContent() {
             color: i.color ?? '',
             quantity: String(i.quantity),
             unitPrice: String(i.unitPrice),
+            referenceImageId: i.referenceImageId ?? undefined,
+            referenceImage: i.referenceImage ?? null,
           }))
         : [{ ...emptyRow, productName: order.product, unitPrice: String(order.orderValue ?? 0) }],
     );
@@ -210,6 +221,7 @@ function CustomerOrdersContent() {
             color: i.color || undefined,
             quantity: parseInt(i.quantity, 10) || 1,
             unitPrice: parseFloat(i.unitPrice),
+            referenceImageId: i.referenceImageId || undefined,
           })),
         galleryImageIds: selectedGalleryImages.map((i) => i.id),
       };
@@ -380,6 +392,7 @@ function CustomerOrdersContent() {
               <th>Model No</th>
               <th>Date</th>
               <th>Customer</th>
+              <th>Image</th>
               <th>Product</th>
               <th>Order Value</th>
               <th>Balance</th>
@@ -391,14 +404,14 @@ function CustomerOrdersContent() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={11} className="text-center py-8 text-brand-400">
+                <td colSpan={12} className="text-center py-8 text-brand-400">
                   Loading orders...
                 </td>
               </tr>
             )}
             {!isLoading && data?.length === 0 && (
               <tr>
-                <td colSpan={11} className="text-center py-8 text-brand-400">
+                <td colSpan={12} className="text-center py-8 text-brand-400">
                   No orders found
                 </td>
               </tr>
@@ -425,6 +438,9 @@ function CustomerOrdersContent() {
                 <td>
                   {order.customerName}
                   {order.phone && <div className="text-xs text-brand-400">{order.phone}</div>}
+                </td>
+                <td>
+                  <OrderThumbnail order={order} />
                 </td>
                 <td className="max-w-[220px] truncate">{order.product}</td>
                 <td>{formatCurrency(order.orderValue ?? 0)}</td>
@@ -559,6 +575,32 @@ function CustomerOrdersContent() {
                         value={row.color}
                         onChange={(e) => updateItemRow(idx, { color: e.target.value })}
                       />
+                      <div className="flex items-center gap-2">
+                        {row.referenceImage ? (
+                          <div className="relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={assetUrl(row.referenceImage.url) ?? ''}
+                              alt={row.referenceImage.fileName}
+                              className="h-12 w-12 object-cover rounded-md border border-brand-200"
+                            />
+                            <button
+                              type="button"
+                              className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-[11px] leading-none"
+                              onClick={() => setItemImage(idx, null)}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn-secondary text-xs px-2 py-1"
+                          onClick={() => setItemImagePickerIdx(idx)}
+                        >
+                          {row.referenceImage ? 'Change Image' : '+ Add Image'}
+                        </button>
+                      </div>
                       <div className="grid grid-cols-2 sm:grid-cols-[70px_110px_100px_auto] gap-2 sm:items-center">
                         <input
                           type="number"
@@ -795,6 +837,25 @@ function CustomerOrdersContent() {
         </Modal>
       )}
 
+      {itemImagePickerIdx !== null && (
+        <Modal title="Select Product Image" onClose={() => setItemImagePickerIdx(null)} wide>
+          <GalleryGrid
+            canManage={false}
+            selectable
+            selectedIds={items[itemImagePickerIdx]?.referenceImageId ? [items[itemImagePickerIdx].referenceImageId as string] : []}
+            onToggle={(image) => {
+              setItemImage(itemImagePickerIdx, image);
+              setItemImagePickerIdx(null);
+            }}
+          />
+          <div className="flex justify-end pt-3">
+            <button type="button" className="btn-secondary text-sm" onClick={() => setItemImagePickerIdx(null)}>
+              Close
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {showModal && whatsappOptions && (
         <WhatsAppModal
           onClose={closeWhatsApp}
@@ -903,6 +964,27 @@ function AssignProductionPickerModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+// Table thumbnail - prefers each line's own product image; falls back to
+// the order-wide gallery selection for older orders that only ever used
+// that. Shows the first image plus a "+N" badge when there's more than one.
+function OrderThumbnail({ order }: { order: CustomerOrder }) {
+  const itemImages = (order.items ?? []).map((i) => i.referenceImage).filter((img): img is GalleryImage => Boolean(img));
+  const images = itemImages.length > 0 ? itemImages : order.galleryImages ?? [];
+  if (images.length === 0) return <span className="text-brand-300 text-xs">-</span>;
+  const first = images[0];
+  return (
+    <div className="relative inline-block">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={assetUrl(first.url) ?? ''} alt={first.fileName} className="h-10 w-10 object-cover rounded-md border border-brand-200" />
+      {images.length > 1 && (
+        <span className="absolute -bottom-1 -right-1 bg-brand-700 text-white text-[9px] leading-none rounded-full h-4 w-4 flex items-center justify-center">
+          +{images.length - 1}
+        </span>
+      )}
+    </div>
   );
 }
 

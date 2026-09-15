@@ -123,7 +123,7 @@ export class CustomerOrdersService {
         where,
         include: {
           payments: true,
-          items: true,
+          items: { include: { referenceImage: true } },
           galleryImages: { include: { galleryImage: true } },
           createdBy: { select: { id: true, name: true } },
           assignedEmployee: { select: { id: true, name: true } },
@@ -145,7 +145,7 @@ export class CustomerOrdersService {
       where: { id },
       include: {
         payments: { orderBy: { date: 'asc' } },
-        items: true,
+        items: { include: { referenceImage: true } },
         galleryImages: { include: { galleryImage: true } },
         createdBy: { select: { id: true, name: true } },
         assignedEmployee: { select: { id: true, name: true } },
@@ -198,7 +198,7 @@ export class CustomerOrdersService {
           ? { create: dto.galleryImageIds.map((galleryImageId) => ({ galleryImageId })) }
           : undefined,
       },
-      include: { payments: true, items: true },
+      include: { payments: true, items: { include: { referenceImage: true } } },
     });
 
     await this.allocateItems(order.id, order.jobNumber ?? order.orderId, order.items, userId);
@@ -301,6 +301,7 @@ export class CustomerOrdersService {
                 color: i.color,
                 quantity: i.quantity ?? 1,
                 unitPrice: i.unitPrice,
+                referenceImageId: i.referenceImageId,
               })),
             }
           : undefined,
@@ -308,7 +309,7 @@ export class CustomerOrdersService {
           ? { create: dto.galleryImageIds!.map((galleryImageId) => ({ galleryImageId })) }
           : undefined,
       },
-      include: { payments: true, items: true },
+      include: { payments: true, items: { include: { referenceImage: true } } },
     });
 
     if (usingItems) {
