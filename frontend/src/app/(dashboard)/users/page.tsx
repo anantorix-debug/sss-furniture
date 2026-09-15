@@ -54,7 +54,6 @@ function UsersPageContent() {
   const [linkCarpenterId, setLinkCarpenterId] = useState('');
 
   const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
-  const [sharingUser, setSharingUser] = useState<User | null>(null);
   const [sharingError, setSharingError] = useState<string | null>(null);
   const [generatingPassword, setGeneratingPassword] = useState(false);
 
@@ -184,33 +183,23 @@ function UsersPageContent() {
     }
   }
 
-  function startShareCredentials(u: User) {
+  // Click the eye icon -> reveal this user's password (their actual
+  // current one whenever it's recoverable - see the backend's
+  // shareablePassword) right there in the banner, and open WhatsApp
+  // pre-filled with it at the same time. No confirm step: revealing an
+  // existing password is non-destructive, and the rare legacy fallback
+  // (generating+setting a new one) is already called out via the "New
+  // password" vs "Current password" label on the banner itself.
+  async function revealAndShare(u: User) {
     setSharingError(null);
-    setSharingUser(u);
-  }
-
-  // No phone on file doesn't block this - the WhatsApp popup below still
-  // lets the admin search and pick any chat or group manually (same as
-  // every other WhatsApp send in the app when there's no number to
-  // pre-fill), just without a number pre-selected for them.
-  //
-  // The backend prefers returning the account's actual CURRENT password
-  // (isNew: false) - it only generates and sets a fresh one (isNew: true)
-  // when no recoverable copy exists (e.g. a password last set before this
-  // feature existed).
-  async function confirmShareCredentials() {
-    if (!sharingUser) return;
-    const target = sharingUser;
-    setSharingUser(null);
     setGeneratingPassword(true);
-    setSharingError(null);
     try {
-      const { password, isNew } = await api.post<{ password: string; isNew: boolean }>(`/users/${target.id}/generate-temp-password`);
-      setTempPasswordBanner({ user: target, password, isNew });
+      const { password, isNew } = await api.post<{ password: string; isNew: boolean }>(`/users/${u.id}/generate-temp-password`);
+      setTempPasswordBanner({ user: u, password, isNew });
       openWhatsApp({
-        recipientName: target.name,
-        recipientPhone: target.phone ?? undefined,
-        defaultMessage: buildCredentialsMessage(target, ROLE_LABEL[target.role], password),
+        recipientName: u.name,
+        recipientPhone: u.phone ?? undefined,
+        defaultMessage: buildCredentialsMessage(u, ROLE_LABEL[u.role], password),
       });
     } catch (err) {
       setSharingError(err instanceof ApiError ? err.message : 'Failed to retrieve login credentials');
@@ -312,10 +301,10 @@ function UsersPageContent() {
                   <button
                     className="text-emerald-600 hover:underline text-xs disabled:opacity-50"
                     disabled={generatingPassword}
-                    title="Share Credentials via WhatsApp"
-                    onClick={() => startShareCredentials(u)}
+                    title="Reveal password and share via WhatsApp"
+                    onClick={() => revealAndShare(u)}
                   >
-                    WhatsApp
+                    👁 WhatsApp
                   </button>
                   <button
                     className="text-brand-600 hover:underline text-xs"
@@ -481,16 +470,6 @@ function UsersPageContent() {
           danger
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
-        />
-      )}
-
-      {sharingUser && (
-        <ConfirmDialog
-          title="Share Credentials"
-          message={`Share ${sharingUser.name}'s login credentials via WhatsApp? If their current password isn't recoverable (set before this feature existed), a new one will be generated instead and their old password will stop working.`}
-          confirmLabel="Share Credentials"
-          onConfirm={confirmShareCredentials}
-          onCancel={() => setSharingUser(null)}
         />
       )}
 
