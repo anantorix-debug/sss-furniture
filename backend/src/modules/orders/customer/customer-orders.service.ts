@@ -365,7 +365,25 @@ export class CustomerOrdersService {
         createdById: userId,
       },
     });
+    await this.autoMarkDeliveredIfPaid(orderId);
     return this.findOne(orderId);
+  }
+
+  // Clearing the balance is treated as an implicit "delivered" signal,
+  // matching how the physical tracking sheet worked (balance cleared =
+  // picked up/delivered). Only advances PENDING/OUT_FOR_DELIVERY forward -
+  // a CANCELLED or already-failed delivery is left alone, since a late
+  // payment on a cancelled order doesn't mean it was actually delivered.
+  private async autoMarkDeliveredIfPaid(orderId: string) {
+    const order = await this.prisma.customerOrder.findUnique({
+      where: { id: orderId },
+      include: { payments: true },
+    });
+    if (!order) return;
+    const { balanceAmount } = computeBalance(Number(order.orderValue), order.payments);
+    if (balanceAmount <= 0 && (order.deliveryStatus === 'PENDING' || order.deliveryStatus === 'OUT_FOR_DELIVERY')) {
+      await this.prisma.customerOrder.update({ where: { id: orderId }, data: { deliveryStatus: 'DELIVERED' } });
+    }
   }
 
   async removePayment(orderId: string, paymentId: string) {

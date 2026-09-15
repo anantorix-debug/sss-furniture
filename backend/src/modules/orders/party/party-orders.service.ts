@@ -365,7 +365,23 @@ export class PartyOrdersService {
         createdById: userId,
       },
     });
+    await this.autoMarkDeliveredIfPaid(orderId);
     return this.findOne(orderId);
+  }
+
+  // Same auto-advance as CustomerOrdersService.autoMarkDeliveredIfPaid -
+  // clearing the balance implies delivered, but only from PENDING/
+  // OUT_FOR_DELIVERY, never overriding a CANCELLED or failed delivery.
+  private async autoMarkDeliveredIfPaid(orderId: string) {
+    const order = await this.prisma.partyOrder.findUnique({
+      where: { id: orderId },
+      include: { payments: true },
+    });
+    if (!order) return;
+    const { balanceAmount } = computeBalance(Number(order.totalAmount), order.payments);
+    if (balanceAmount <= 0 && (order.deliveryStatus === 'PENDING' || order.deliveryStatus === 'OUT_FOR_DELIVERY')) {
+      await this.prisma.partyOrder.update({ where: { id: orderId }, data: { deliveryStatus: 'DELIVERED' } });
+    }
   }
 
   async removePayment(orderId: string, paymentId: string) {
