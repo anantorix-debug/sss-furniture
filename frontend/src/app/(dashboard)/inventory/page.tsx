@@ -25,7 +25,7 @@ import { Pagination, type PaginatedResult } from '@/components/Pagination';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
-type Tab = 'products' | 'materials' | 'movements' | 'stock-movements' | 'gallery';
+type Tab = 'products' | 'materials' | 'movements' | 'stock-movements' | 'gallery' | 'usage';
 
 const emptyProductForm = {
   modelNo: '',
@@ -93,6 +93,11 @@ const ALL_TABS: [Tab, string, boolean][] = [
   ['materials', 'Raw Material Stock', false],
   ['movements', 'Material Movement History', false],
   ['stock-movements', 'Stock Movement History', true],
+  // Oversight of employees' own "Material Usage" records (see the
+  // employee-facing /material-usage page) - Admin/Super Admin only, not
+  // something a Carpenter/Carver/Polisher needs to browse themselves (they
+  // already see their own usage on their own page).
+  ['usage', 'Material Usage', true],
 ];
 
 export default function InventoryPage() {
@@ -155,6 +160,7 @@ function InventoryPageContent() {
       {tab === 'materials' && <MaterialsTab canEdit={hasRole('ADMIN')} />}
       {tab === 'movements' && <MovementsTab />}
       {tab === 'stock-movements' && <StockMovementsTab />}
+      {tab === 'usage' && <UsageTab />}
     </div>
   );
 }
@@ -1130,6 +1136,7 @@ const MOVEMENT_REFERENCE_OPTIONS = [
   { value: 'PURCHASE', label: 'Purchase' },
   { value: 'PRODUCTION', label: 'Production' },
   { value: 'ADJUSTMENT', label: 'Adjustment' },
+  { value: 'USAGE', label: 'Material Usage' },
 ];
 const emptyMovementFilters: Record<string, string> = {};
 
@@ -1266,6 +1273,103 @@ function MovementsTab() {
       {result && (
         <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
       )}
+      </div>
+    </div>
+  );
+}
+
+const emptyUsageFilters: Record<string, string> = {};
+
+// Super Admin/Admin oversight of employees' standalone "Material Usage"
+// records (see /material-usage) - same /stock-movements data as
+// MovementsTab above, just pre-filtered to reference=USAGE and filtered by
+// the actual employee login (createdById) rather than a linked worker
+// profile, since a usage record has no work item to derive that from.
+function UsageTab() {
+  const [page, setPage] = useState(1);
+  const [values, setValues] = useState<Record<string, string>>(emptyUsageFilters);
+  const [applied, setApplied] = useState<Record<string, string>>(emptyUsageFilters);
+  const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
+  const { data: carpenters } = useSWR<CarpenterSummary[]>('/carpenters', fetcher);
+
+  const queryParams = new URLSearchParams({ ...applied, reference: 'USAGE', page: String(page), limit: '20' });
+  const { data: result, isLoading } = useSWR<PaginatedResult<StockMovement>>(`/stock-movements?${queryParams}`, fetcher);
+  const data = result?.data;
+
+  function applyFilters() {
+    setApplied(values);
+    setPage(1);
+  }
+  function resetFilters() {
+    setValues(emptyUsageFilters);
+    setApplied(emptyUsageFilters);
+    setPage(1);
+  }
+
+  const employeeOptions = (carpenters ?? [])
+    .filter((c): c is CarpenterSummary & { user: { id: string; name: string; role: string } } => Boolean(c.user))
+    .map((c) => ({ value: c.user.id, label: c.name }));
+
+  return (
+    <div className="space-y-3">
+      <FilterBar
+        fields={[
+          { key: 'dateFrom', label: 'Date From', type: 'date' },
+          { key: 'dateTo', label: 'Date To', type: 'date' },
+          { key: 'createdById', label: 'Employee', type: 'select', options: employeeOptions },
+          { key: 'rawMaterialId', label: 'Material', type: 'select', options: (materials ?? []).map((m) => ({ value: m.id, label: m.name })) },
+        ]}
+        values={values}
+        onChange={(key, value) => setValues((v) => ({ ...v, [key]: value }))}
+        onApply={applyFilters}
+        onReset={resetFilters}
+      />
+      <div className="card overflow-x-auto">
+        <table className="table-shell">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Employee</th>
+              <th>Material</th>
+              <th>Quantity Used</th>
+              <th>Unit</th>
+              <th>Notes</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && (
+              <tr>
+                <td colSpan={7} className="text-center py-8 text-brand-400">
+                  Loading...
+                </td>
+              </tr>
+            )}
+            {!isLoading && data?.length === 0 && (
+              <tr>
+                <td colSpan={7} className="text-center py-8 text-brand-400">
+                  No material usage recorded
+                </td>
+              </tr>
+            )}
+            {data?.map((m) => (
+              <tr key={m.id}>
+                <td>{formatDate(m.date)}</td>
+                <td>{m.createdBy?.name ?? '-'}</td>
+                <td>{m.rawMaterial?.name}</td>
+                <td className="text-red-600">{Math.abs(m.quantity)}</td>
+                <td className="text-brand-500">{m.rawMaterial?.unit}</td>
+                <td className="text-brand-500">{m.reason && m.reason !== 'Material usage' ? m.reason : '-'}</td>
+                <td className="text-brand-500">
+                  {new Date(m.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {result && (
+          <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />
+        )}
       </div>
     </div>
   );

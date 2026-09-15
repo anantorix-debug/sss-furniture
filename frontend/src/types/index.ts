@@ -531,6 +531,10 @@ export interface StockMovement {
   // all (e.g. a manual Stock In with no rate entered).
   amount?: number | null;
   date: string;
+  // When this row was actually recorded - `date` above is just the
+  // (date-only) day it's logged against, not a timestamp, so a "Time"
+  // column needs this instead.
+  createdAt: string;
   createdBy?: { name: string };
 }
 

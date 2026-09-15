@@ -26,6 +26,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: '▦', minRole: 'ADMIN' },
   { href: '/my-work', label: 'My Work', icon: '⚒', minRole: ['CARPENTER', 'CARVER', 'POLISHER'], exact: true },
+  { href: '/material-usage', label: 'Material Usage', icon: '⛃', minRole: ['CARPENTER', 'CARVER', 'POLISHER'], exact: true },
   { href: '/customer-orders', label: 'Customer Orders', icon: '₹', minRole: 'ADMIN' },
   { href: '/party-orders', label: 'Party Orders', icon: '◉', minRole: 'ADMIN' },
   { href: '/inventory', label: 'Inventory', icon: '▤' },

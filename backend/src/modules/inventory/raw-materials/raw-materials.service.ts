@@ -12,12 +12,14 @@ import { UpdateRawMaterialDto } from './dto/update-raw-material.dto';
 import { StockInDto } from './dto/stock-in.dto';
 import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
 import { IssueMaterialDto } from './dto/issue-material.dto';
+import { RecordUsageDto } from './dto/record-usage.dto';
 import { computeBoardFeet } from '../../../common/utils/board-feet.util';
 
 const REFERENCE_LABEL: Record<string, string> = {
   PURCHASE: 'Purchase',
   PRODUCTION: 'Production',
   ADJUSTMENT: 'Adjustment',
+  USAGE: 'Material Usage',
 };
 
 // Carpenter team only ever touches WOOD materials, Carving team CARVING,
@@ -416,6 +418,74 @@ export class RawMaterialsService {
     return sumAmounts(movements.map((m) => ({ amount: m.quantity })));
   }
 
+  // Employee "Material Usage" - a standalone consumption record, deliberately
+  // NOT tied to a work item/production job/customer (see RecordUsageDto).
+  // Reuses the exact same StockMovement/stock-balance mechanism as every
+  // other movement in the system (issueToWorkItem, stockIn, adjust) - a
+  // plain OUT movement with workItemId left unset is what marks this as
+  // "used directly" rather than "issued to a specific job".
+  async recordUsage(dto: RecordUsageDto, userId: string, actingRole?: Role) {
+    const material = await this.prisma.rawMaterial.findUnique({
+      where: { id: dto.rawMaterialId },
+      include: { stockMovements: { select: { quantity: true, unitCost: true, type: true, date: true } } },
+    });
+    if (!material) throw new NotFoundException('Raw material not found');
+
+    const requiredGroup = actingRole ? GROUP_FOR_ROLE[actingRole] : undefined;
+    if (requiredGroup && material.materialGroup !== requiredGroup) {
+      throw new ForbiddenException(`${ROLE_LABEL_FOR_GROUP[requiredGroup]} team can only record usage for their own material group`);
+    }
+
+    // Same override pattern as issueToWorkItem - a BOARD_FEET material's
+    // actual quantity is always server-computed from the dimension fields,
+    // never trusted from the client.
+    const isBoardFeet = material.measurementKind === 'BOARD_FEET';
+    const quantity = isBoardFeet
+      ? computeBoardFeet({ thicknessIn: dto.thicknessIn, widthIn: dto.widthIn, lengthFt: dto.lengthFt, pieces: dto.pieces })
+      : dto.quantity;
+
+    const { inStock, purchaseRate } = this.summarize(material);
+    if (inStock < quantity) {
+      throw new ConflictException(`Insufficient stock. Available: ${inStock} ${material.unit}.`);
+    }
+
+    const movement = await this.prisma.stockMovement.create({
+      data: {
+        rawMaterialId: dto.rawMaterialId,
+        type: 'OUT',
+        quantity: -Math.abs(quantity),
+        // Snapshot the material's purchase rate at the moment of use, same
+        // as issueToWorkItem, so cost-over-time stays accurate.
+        unitCost: purchaseRate || undefined,
+        reason: dto.notes || 'Material usage',
+        date: new Date(dto.date),
+        createdById: userId,
+      },
+      include: { rawMaterial: true },
+    });
+
+    await this.audit.log({
+      userId,
+      action: 'MATERIAL_USAGE_RECORDED',
+      targetType: 'RawMaterial',
+      targetId: material.id,
+      metadata: { materialName: material.name, quantity },
+    });
+
+    const remaining = inStock - quantity;
+    if (material.reorderLevel != null && remaining <= Number(material.reorderLevel)) {
+      await this.notifications.notifyRoles([Role.SUPERADMIN, Role.ADMIN], {
+        type: 'LOW_STOCK',
+        title: 'Low raw material stock',
+        message: `${material.name} stock is low - ${remaining} ${material.unit} remaining (reorder level ${material.reorderLevel} ${material.unit}).`,
+        targetType: 'RawMaterial',
+        targetId: material.id,
+      });
+    }
+
+    return movement;
+  }
+
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
   // Without `page`, keeps the previous 200-row cap so existing callers see
   // the same behavior as before.
@@ -425,14 +495,26 @@ export class RawMaterialsService {
     workItemId?: string;
     workerType?: string;
     carpenterId?: string;
+    // Who recorded the movement (the User, not the worker/payee profile) -
+    // lets an employee query "my own usage" and lets Super Admin filter the
+    // Material Usage view by employee. See viewerUserId below for the
+    // self-scoping that makes the former safe.
+    createdById?: string;
     dateFrom?: string;
     dateTo?: string;
     // A friendlier alias over `type`/the FK columns for the common ledger's
     // "Reference" filter - PURCHASE/PRODUCTION map to "this movement has
-    // that FK set", ADJUSTMENT is just the existing type value. No new
-    // column - purely a different way to query what's already there.
-    reference?: 'PURCHASE' | 'PRODUCTION' | 'ADJUSTMENT';
+    // that FK set", ADJUSTMENT is just the existing type value, USAGE is a
+    // standalone employee usage record (OUT, but tied to none of the other
+    // FKs - see RawMaterialsService.recordUsage). No new column - purely a
+    // different way to query what's already there.
+    reference?: 'PURCHASE' | 'PRODUCTION' | 'ADJUSTMENT' | 'USAGE';
     viewerRole?: Role;
+    // The logged-in user's own id. When viewerRole is a Carpenter/Carver/
+    // Polisher, this always wins over `createdById` - an employee can only
+    // ever see their own usage records, never another employee's, no
+    // matter what the request asks for.
+    viewerUserId?: string;
     page?: number;
     limit?: number;
     // PDF export needs every matching row, not the usual 200-row safety
@@ -441,6 +523,9 @@ export class RawMaterialsService {
     forExport?: boolean;
   }) {
     const group = params.viewerRole ? GROUP_FOR_ROLE[params.viewerRole] : undefined;
+    const isEmployeeViewer =
+      params.viewerRole === Role.CARPENTER || params.viewerRole === Role.CARVER || params.viewerRole === Role.POLISHER;
+    const effectiveCreatedById = isEmployeeViewer ? params.viewerUserId : params.createdById;
     const paginated = params.page != null;
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
@@ -451,11 +536,14 @@ export class RawMaterialsService {
           ? { workItemId: { not: null } }
           : params.reference === 'ADJUSTMENT'
             ? { type: 'ADJUSTMENT' as const }
-            : {};
+            : params.reference === 'USAGE'
+              ? { type: 'OUT' as const, workItemId: null, purchaseId: null, supplierPurchaseId: null }
+              : {};
     const where = {
       rawMaterialId: params.rawMaterialId || undefined,
       type: (params.type || undefined) as any,
       workItemId: params.workItemId || undefined,
+      createdById: effectiveCreatedById || undefined,
       workItem:
         params.workerType || params.carpenterId
           ? {

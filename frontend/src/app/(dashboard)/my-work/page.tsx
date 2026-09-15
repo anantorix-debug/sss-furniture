@@ -7,8 +7,7 @@ import { api, ApiError, assetUrl } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
-import { boardFeetPreview } from '@/lib/boardFeet';
-import type { CarpenterWorkItem, Product, RawMaterial } from '@/types';
+import type { CarpenterWorkItem, Product } from '@/types';
 
 const STATUS_CHIP: Record<string, ChipColor> = {
   ASSIGNED: 'gray',
@@ -17,17 +16,6 @@ const STATUS_CHIP: Record<string, ChipColor> = {
   REWORK: 'red',
   COMPLETED: 'green',
 };
-
-interface IssueRow {
-  rawMaterialId: string;
-  quantity: string;
-  thicknessIn: string;
-  widthIn: string;
-  lengthFt: string;
-  pieces: string;
-}
-
-const emptyIssueRow: IssueRow = { rawMaterialId: '', quantity: '', thicknessIn: '', widthIn: '', lengthFt: '', pieces: '' };
 
 // A multi-unit Stock Production batch can't take one shared Model No while
 // it's still a single work item (one Model No = one physical piece) - the
@@ -85,16 +73,8 @@ function BatchProducedPieces({ batchId }: { batchId: string }) {
 }
 
 function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () => void }) {
-  const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [materialsOpen, setMaterialsOpen] = useState(false);
-  const [issueRows, setIssueRows] = useState<IssueRow[]>([{ ...emptyIssueRow }]);
-  const materialOf = (matId: string) => materials?.find((m) => m.id === matId);
-  const rowIsBoardFeet = (row: IssueRow) => materialOf(row.rawMaterialId)?.measurementKind === 'BOARD_FEET';
-  function updateIssueRow(idx: number, patch: Partial<IssueRow>) {
-    setIssueRows((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-  }
   const [remarks, setRemarks] = useState('');
   const [modelNo, setModelNo] = useState(item.modelNo ?? '');
   const [savingModelNo, setSavingModelNo] = useState(false);
@@ -123,38 +103,6 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
       setError(err instanceof ApiError ? err.message : 'Failed to update status');
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function submitMaterials(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      await api.post('/raw-materials/issue', {
-        workItemId: item.id,
-        date: new Date().toISOString().slice(0, 10),
-        items: issueRows
-          .filter((r) => r.rawMaterialId && (rowIsBoardFeet(r) ? r.thicknessIn && r.widthIn && r.lengthFt && r.pieces : r.quantity))
-          .map((r) => {
-            if (rowIsBoardFeet(r)) {
-              const bf = boardFeetPreview(r.thicknessIn, r.widthIn, r.lengthFt, r.pieces);
-              return {
-                rawMaterialId: r.rawMaterialId,
-                quantity: bf?.total ?? 0.01, // server recomputes/overrides this for BOARD_FEET materials anyway
-                thicknessIn: parseFloat(r.thicknessIn),
-                widthIn: parseFloat(r.widthIn),
-                lengthFt: parseFloat(r.lengthFt),
-                pieces: parseInt(r.pieces, 10),
-              };
-            }
-            return { rawMaterialId: r.rawMaterialId, quantity: parseFloat(r.quantity) };
-          }),
-      });
-      setMaterialsOpen(false);
-      setIssueRows([{ ...emptyIssueRow }]);
-      onChanged();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to record material usage');
     }
   }
 
@@ -217,14 +165,9 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
           </button>
         )}
         {item.status === 'IN_PROGRESS' && (
-          <>
-            <button className="btn-secondary text-xs" onClick={() => setMaterialsOpen((v) => !v)}>
-              {materialsOpen ? 'Hide Materials' : 'Record Materials Used'}
-            </button>
-            <button className="btn-primary text-xs" disabled={busy} onClick={() => setStatus('COMPLETED')}>
-              Finish
-            </button>
-          </>
+          <button className="btn-primary text-xs" disabled={busy} onClick={() => setStatus('COMPLETED')}>
+            Finish
+          </button>
         )}
         {(item.status === 'QUALITY_CHECK' || item.status === 'COMPLETED') && (
           <span className="text-xs text-emerald-600">{item.status === 'QUALITY_CHECK' ? 'Sent for verification' : 'Done ✓'}</span>
@@ -244,114 +187,6 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
         <BatchProducedPieces batchId={item.batchId} />
       )}
 
-      {materialsOpen && (
-        <form onSubmit={submitMaterials} className="space-y-2 border-t border-brand-100 pt-3">
-          {issueRows.map((row, idx) => {
-            const isBoardFeet = rowIsBoardFeet(row);
-            const bf = isBoardFeet ? boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthFt, row.pieces) : null;
-            return (
-              <div key={idx} className="border border-brand-100 rounded-lg p-2 space-y-1.5">
-                <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
-                  <select
-                    className="input text-sm"
-                    required
-                    value={row.rawMaterialId}
-                    onChange={(e) => {
-                      const dims = materialOf(e.target.value)?.lastPieceDimensions;
-                      updateIssueRow(idx, {
-                        rawMaterialId: e.target.value,
-                        quantity: '',
-                        thicknessIn: dims ? String(dims.thicknessIn) : '',
-                        widthIn: dims ? String(dims.widthIn) : '',
-                        lengthFt: dims ? String(dims.lengthFt) : '',
-                        pieces: '',
-                      });
-                    }}
-                  >
-                    <option value="">Select material</option>
-                    {materials?.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name} ({m.inStock} {m.unit})
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="text-red-500 text-xs px-1"
-                    disabled={issueRows.length === 1}
-                    onClick={() => setIssueRows((rows) => rows.filter((_, i) => i !== idx))}
-                  >
-                    Remove
-                  </button>
-                </div>
-                {isBoardFeet ? (
-                  materialOf(row.rawMaterialId)?.lastPieceDimensions ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          className="input text-sm flex-1"
-                          placeholder="Pieces used"
-                          required
-                          value={row.pieces}
-                          onChange={(e) => updateIssueRow(idx, { pieces: e.target.value })}
-                        />
-                        <span className="text-xs text-brand-400 whitespace-nowrap">
-                          {row.thicknessIn}&quot; &times; {row.widthIn}&quot; &times; {row.lengthFt}ft each
-                        </span>
-                      </div>
-                      <p className="text-xs text-brand-500">
-                        {bf ? (
-                          <>
-                            {bf.perPiece} BF/pc &times; {row.pieces} = <strong>{bf.total} BF</strong> ({bf.totalCft} CFT)
-                          </>
-                        ) : (
-                          'Enter pieces used'
-                        )}
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                        <input type="number" step="0.01" className="input text-sm" placeholder="Thick(in)" required value={row.thicknessIn} onChange={(e) => updateIssueRow(idx, { thicknessIn: e.target.value })} />
-                        <input type="number" step="0.01" className="input text-sm" placeholder="Width(in)" required value={row.widthIn} onChange={(e) => updateIssueRow(idx, { widthIn: e.target.value })} />
-                        <input type="number" step="0.01" className="input text-sm" placeholder="Length(ft)" required value={row.lengthFt} onChange={(e) => updateIssueRow(idx, { lengthFt: e.target.value })} />
-                        <input type="number" min="1" className="input text-sm" placeholder="Pieces" required value={row.pieces} onChange={(e) => updateIssueRow(idx, { pieces: e.target.value })} />
-                      </div>
-                      <p className="text-xs text-brand-500">
-                        {bf ? (
-                          <>
-                            {bf.perPiece} BF/pc &times; {row.pieces} = <strong>{bf.total} BF</strong> ({bf.totalCft} CFT)
-                          </>
-                        ) : (
-                          'No recorded plank size yet - enter dimensions'
-                        )}
-                      </p>
-                    </>
-                  )
-                ) : (
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="input text-sm"
-                    placeholder="Qty"
-                    required
-                    value={row.quantity}
-                    onChange={(e) => updateIssueRow(idx, { quantity: e.target.value })}
-                  />
-                )}
-              </div>
-            );
-          })}
-          <button type="button" className="text-brand-600 text-xs hover:underline" onClick={() => setIssueRows((rows) => [...rows, { ...emptyIssueRow }])}>
-            + Add material line
-          </button>
-          <button type="submit" className="btn-primary text-xs w-full">
-            Save Materials Used
-          </button>
-        </form>
-      )}
     </div>
   );
 }
@@ -370,7 +205,7 @@ function MyWorkContent() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-brand-900">My Work</h1>
-        <p className="text-sm text-brand-500 mt-1">Your assigned production jobs - start, record materials used, and finish.</p>
+        <p className="text-sm text-brand-500 mt-1">Your assigned production jobs - start and finish. Record material usage from the Material Usage page.</p>
       </div>
 
       {meLoading && <p className="text-brand-400 text-sm">Loading...</p>}

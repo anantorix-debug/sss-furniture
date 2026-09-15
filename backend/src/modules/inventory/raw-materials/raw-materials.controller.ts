@@ -6,6 +6,7 @@ import { UpdateRawMaterialDto } from './dto/update-raw-material.dto';
 import { StockInDto } from './dto/stock-in.dto';
 import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
 import { IssueMaterialDto } from './dto/issue-material.dto';
+import { RecordUsageDto } from './dto/record-usage.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -137,6 +138,14 @@ export class RawMaterialsController {
     return this.service.issueToWorkItem(dto, user.userId, user.role as Role);
   }
 
+  // Employee "Material Usage" - standalone, no work item/job/customer
+  // involved (see RecordUsageDto). Same "any authenticated role" posture as
+  // /raw-materials/issue above.
+  @Post('raw-materials/usage')
+  recordUsage(@Body() dto: RecordUsageDto, @CurrentUser() user: AuthUser) {
+    return this.service.recordUsage(dto, user.userId, user.role as Role);
+  }
+
   @Get('stock-movements')
   findAllMovements(
     @Query('rawMaterialId') rawMaterialId?: string,
@@ -144,9 +153,10 @@ export class RawMaterialsController {
     @Query('workItemId') workItemId?: string,
     @Query('workerType') workerType?: string,
     @Query('carpenterId') carpenterId?: string,
+    @Query('createdById') createdById?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
-    @Query('reference') reference?: 'PURCHASE' | 'PRODUCTION' | 'ADJUSTMENT',
+    @Query('reference') reference?: 'PURCHASE' | 'PRODUCTION' | 'ADJUSTMENT' | 'USAGE',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
@@ -157,10 +167,12 @@ export class RawMaterialsController {
       workItemId,
       workerType,
       carpenterId,
+      createdById,
       dateFrom,
       dateTo,
       reference,
       viewerRole: user?.role as Role,
+      viewerUserId: user?.userId,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
