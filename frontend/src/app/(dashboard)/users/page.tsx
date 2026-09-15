@@ -56,6 +56,10 @@ function UsersPageContent() {
   const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
   const [sharingError, setSharingError] = useState<string | null>(null);
   const [generatingPassword, setGeneratingPassword] = useState(false);
+  // Per-user cache of a revealed password, keyed by user id - lets the
+  // show/hide eye toggle flip visibility instantly without re-fetching,
+  // and lets "WhatsApp" reuse exactly what's already shown.
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, { password: string; isNew: boolean; visible: boolean }>>({});
 
   // Inline password change directly from the table row - a lighter-weight
   // alternative to opening the full Edit modal just to set a password.
@@ -81,6 +85,13 @@ function UsersPageContent() {
       await api.patch(`/users/${u.id}`, { password: passwordEditValue });
       setPasswordEditId(null);
       setPasswordEditValue('');
+      // Any cached reveal is now stale (the password just changed).
+      setRevealedPasswords((prev) => {
+        if (!(u.id in prev)) return prev;
+        const rest = { ...prev };
+        delete rest[u.id];
+        return rest;
+      });
       mutate();
     } catch (err) {
       setPasswordEditError(err instanceof ApiError ? err.message : 'Failed to change password');
@@ -183,29 +194,54 @@ function UsersPageContent() {
     }
   }
 
-  // Click the eye icon -> reveal this user's password (their actual
-  // current one whenever it's recoverable - see the backend's
-  // shareablePassword) right there in the banner, and open WhatsApp
-  // pre-filled with it at the same time. No confirm step: revealing an
-  // existing password is non-destructive, and the rare legacy fallback
-  // (generating+setting a new one) is already called out via the "New
-  // password" vs "Current password" label on the banner itself.
-  async function revealAndShare(u: User) {
+  // Per-row password reveal: click the eye once -> fetches (their actual
+  // current password whenever it's recoverable) and shows it in place;
+  // click again -> just hides it back to dots, no re-fetch. Cached per
+  // user id so toggling back and forth never re-hits the backend.
+  async function togglePasswordVisible(u: User) {
+    const existing = revealedPasswords[u.id];
+    if (existing) {
+      setRevealedPasswords((prev) => ({ ...prev, [u.id]: { ...existing, visible: !existing.visible } }));
+      return;
+    }
     setSharingError(null);
     setGeneratingPassword(true);
     try {
       const { password, isNew } = await api.post<{ password: string; isNew: boolean }>(`/users/${u.id}/generate-temp-password`);
-      setTempPasswordBanner({ user: u, password, isNew });
-      openWhatsApp({
-        recipientName: u.name,
-        recipientPhone: u.phone ?? undefined,
-        defaultMessage: buildCredentialsMessage(u, ROLE_LABEL[u.role], password),
-      });
+      setRevealedPasswords((prev) => ({ ...prev, [u.id]: { password, isNew, visible: true } }));
+      if (isNew) setTempPasswordBanner({ user: u, password, isNew });
     } catch (err) {
       setSharingError(err instanceof ApiError ? err.message : 'Failed to retrieve login credentials');
     } finally {
       setGeneratingPassword(false);
     }
+  }
+
+  // WhatsApp reuses whatever's already been revealed for this row (so what
+  // gets sent is exactly what's shown) - fetches first only if it hasn't
+  // been revealed yet this session.
+  async function shareViaWhatsApp(u: User) {
+    let entry = revealedPasswords[u.id];
+    if (!entry) {
+      setSharingError(null);
+      setGeneratingPassword(true);
+      try {
+        const { password, isNew } = await api.post<{ password: string; isNew: boolean }>(`/users/${u.id}/generate-temp-password`);
+        entry = { password, isNew, visible: true };
+        setRevealedPasswords((prev) => ({ ...prev, [u.id]: entry! }));
+        if (isNew) setTempPasswordBanner({ user: u, password, isNew });
+      } catch (err) {
+        setSharingError(err instanceof ApiError ? err.message : 'Failed to retrieve login credentials');
+        return;
+      } finally {
+        setGeneratingPassword(false);
+      }
+    }
+    openWhatsApp({
+      recipientName: u.name,
+      recipientPhone: u.phone ?? undefined,
+      defaultMessage: buildCredentialsMessage(u, ROLE_LABEL[u.role], entry.password),
+    });
   }
 
   return (
@@ -262,6 +298,7 @@ function UsersPageContent() {
             <tr>
               <th>User</th>
               <th>Email</th>
+              <th>Password</th>
               <th>Role</th>
               <th>Status</th>
               <th>Joined</th>
@@ -271,7 +308,7 @@ function UsersPageContent() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={6} className="text-center py-8 text-brand-400">
+                <td colSpan={7} className="text-center py-8 text-brand-400">
                   Loading users...
                 </td>
               </tr>
@@ -284,6 +321,20 @@ function UsersPageContent() {
                   {u.id === me?.id && <span className="ml-2 text-xs text-brand-400">(you)</span>}
                 </td>
                 <td>{u.email}</td>
+                <td>
+                  <div className="inline-flex items-center gap-1.5 font-mono text-xs">
+                    <span>{revealedPasswords[u.id]?.visible ? revealedPasswords[u.id].password : '••••••••'}</span>
+                    <button
+                      type="button"
+                      className="text-brand-400 hover:text-brand-700 disabled:opacity-50"
+                      disabled={generatingPassword}
+                      title={revealedPasswords[u.id]?.visible ? 'Hide password' : 'Show password'}
+                      onClick={() => togglePasswordVisible(u)}
+                    >
+                      {revealedPasswords[u.id]?.visible ? '🙈' : '👁'}
+                    </button>
+                  </div>
+                </td>
                 <td>
                   <Chip color={ROLE_CHIP_COLOR[u.role]} label={ROLE_LABEL[u.role]} />
                 </td>
@@ -301,10 +352,10 @@ function UsersPageContent() {
                   <button
                     className="text-emerald-600 hover:underline text-xs disabled:opacity-50"
                     disabled={generatingPassword}
-                    title="Reveal password and share via WhatsApp"
-                    onClick={() => revealAndShare(u)}
+                    title="Share via WhatsApp"
+                    onClick={() => shareViaWhatsApp(u)}
                   >
-                    👁 WhatsApp
+                    WhatsApp
                   </button>
                   <button
                     className="text-brand-600 hover:underline text-xs"
@@ -317,7 +368,7 @@ function UsersPageContent() {
               </tr>
               {passwordEditId === u.id && (
                 <tr>
-                  <td colSpan={6} className="bg-brand-50">
+                  <td colSpan={7} className="bg-brand-50">
                     <div className="flex flex-wrap items-center gap-2 py-1">
                       <span className="text-xs text-brand-500 whitespace-nowrap">New password for {u.name}:</span>
                       <PasswordInput
