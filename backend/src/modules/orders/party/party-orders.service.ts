@@ -15,6 +15,7 @@ import { computeBalance, suggestPaymentType } from '../../../common/utils/balanc
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 import { getPdfBannerDataUri } from '../../../common/utils/pdf-banner.util';
+import { galleryImageDataUri } from '../../../common/utils/gallery-image-data-uri.util';
 import { REPORT_PDF_STYLES, renderReportHeader, renderFilterSummary, renderGeneratedFooter } from '../../../common/utils/pdf-report.util';
 import { Role } from '../../../common/enums/role.enum';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
@@ -542,6 +543,7 @@ export class PartyOrdersService {
           price: i.unitPrice != null ? Number(i.unitPrice) : null,
           modelNo: i.modelNo ?? '-',
           value: i.totalValue != null ? Number(i.totalValue) : (i.qty ?? 1) * Number(i.unitPrice ?? 0),
+          imageUrl: i.referenceImage?.url ?? null,
         }))
       : [
           {
@@ -553,13 +555,16 @@ export class PartyOrdersService {
             price: order.price != null ? Number(order.price) : null,
             modelNo: order.cotNo ?? '-',
             value: Number(order.totalAmount ?? 0),
+            imageUrl: null,
           },
         ];
 
     const rows = lines
-      .map(
-        (l, idx) => `<tr>
+      .map((l, idx) => {
+        const dataUri = l.imageUrl ? galleryImageDataUri(l.imageUrl) : null;
+        return `<tr>
           <td>${idx + 1}</td>
+          <td>${dataUri ? `<img class="row-photo" src="${dataUri}" alt="${escapeHtml(l.order)}" />` : '-'}</td>
           <td>${l.date.toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(l.order)}</td>
           <td>${escapeHtml(l.finish)}</td>
@@ -568,8 +573,8 @@ export class PartyOrdersService {
           ${isEmployee ? '' : `<td style="text-align:right">${l.price != null ? `₹${l.price.toLocaleString('en-IN')}` : '-'}</td>`}
           <td>${escapeHtml(l.modelNo)}</td>
           ${isEmployee ? '' : `<td style="text-align:right">₹${l.value.toLocaleString('en-IN')}</td>`}
-        </tr>`,
-      )
+        </tr>`;
+      })
       .join('');
 
     const totalOrderValue = Number(order.totalAmount ?? 0);
@@ -602,6 +607,7 @@ export class PartyOrdersService {
   table { width: 100%; border-collapse: collapse; font-size: 11.5px; break-inside: avoid; }
   th { background: #f4f2ec; text-align: left; padding: 7px 9px; border-bottom: 1px solid #e3e1d9; }
   td { padding: 7px 9px; border-bottom: 1px solid #efede6; }
+  .row-photo { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid #e3e1d9; display: block; }
   .summary { display: flex; gap: 20px; margin-top: 18px; }
   .summary div { flex: 1; border: 1px solid #e3e1d9; border-radius: 8px; padding: 10px 14px; }
   .summary .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }
@@ -624,7 +630,7 @@ export class PartyOrdersService {
     </div>
     <table>
       <thead>
-        <tr><th>S.No</th><th>Date</th><th>Order</th><th>Finish</th><th>Size</th><th>Pattern</th>${
+        <tr><th>S.No</th><th>Photo</th><th>Date</th><th>Order</th><th>Finish</th><th>Size</th><th>Pattern</th>${
           isEmployee ? '' : '<th style="text-align:right">Price</th>'
         }<th>Model No</th>${isEmployee ? '' : '<th style="text-align:right">Value</th>'}</tr>
       </thead>

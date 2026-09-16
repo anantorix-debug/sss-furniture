@@ -15,6 +15,7 @@ import { computeBalance, suggestPaymentType } from '../../../common/utils/balanc
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 import { getPdfBannerDataUri } from '../../../common/utils/pdf-banner.util';
+import { galleryImageDataUri } from '../../../common/utils/gallery-image-data-uri.util';
 import { Role } from '../../../common/enums/role.enum';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
@@ -556,40 +557,51 @@ export class CustomerOrdersService {
   // data instead of copied text.
   private buildPdfHtml(order: Awaited<ReturnType<CustomerOrdersService['findOne']>>, recipientType: 'customer' | 'employee' = 'customer'): string {
     const isEmployee = recipientType === 'employee';
-    const lines: { label: string; qty: number; unitPrice: number; total: number; details: string[] }[] = order.items.length
-      ? order.items.map((i) => ({
-          label: i.category || i.productName,
-          qty: i.quantity,
-          unitPrice: Number(i.unitPrice),
-          total: i.quantity * Number(i.unitPrice),
-          details: [
-            `Product : ${i.productName}`,
-            i.size ? `Size : ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : null,
-            i.color ? `Colour : ${i.color}` : null,
-            `Quantity : ${i.quantity}`,
-            isEmployee ? null : `Price : ₹${Number(i.unitPrice).toLocaleString('en-IN')}/-`,
-          ].filter((d): d is string => d !== null),
-        }))
-      : [
-          {
-            label: order.product,
-            qty: 1,
-            unitPrice: Number(order.orderValue),
-            total: Number(order.orderValue),
-            details: [`Product : ${order.product}`, isEmployee ? null : `Price : ₹${Number(order.orderValue).toLocaleString('en-IN')}/-`].filter(
-              (d): d is string => d !== null,
-            ),
-          },
-        ];
+    // Falls back to the order-wide gallery selection (older orders that
+    // predate per-line images) only when this specific line has none of its
+    // own - see the identical fallback used for the list-page thumbnail.
+    const orderFallbackImageUrl = order.galleryImages?.[0]?.url ?? null;
+    const lines: { label: string; qty: number; unitPrice: number; total: number; details: string[]; imageUrl: string | null }[] =
+      order.items.length
+        ? order.items.map((i) => ({
+            label: i.category || i.productName,
+            qty: i.quantity,
+            unitPrice: Number(i.unitPrice),
+            total: i.quantity * Number(i.unitPrice),
+            details: [
+              `Product : ${i.productName}`,
+              i.size ? `Size : ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : null,
+              i.color ? `Colour : ${i.color}` : null,
+              `Quantity : ${i.quantity}`,
+              isEmployee ? null : `Price : ₹${Number(i.unitPrice).toLocaleString('en-IN')}/-`,
+            ].filter((d): d is string => d !== null),
+            imageUrl: i.referenceImage?.url ?? orderFallbackImageUrl,
+          }))
+        : [
+            {
+              label: order.product,
+              qty: 1,
+              unitPrice: Number(order.orderValue),
+              total: Number(order.orderValue),
+              details: [`Product : ${order.product}`, isEmployee ? null : `Price : ₹${Number(order.orderValue).toLocaleString('en-IN')}/-`].filter(
+                (d): d is string => d !== null,
+              ),
+              imageUrl: orderFallbackImageUrl,
+            },
+          ];
 
     const itemBoxes = lines
-      .map(
-        (l) => `
+      .map((l) => {
+        const dataUri = l.imageUrl ? galleryImageDataUri(l.imageUrl) : null;
+        return `
         <div class="item-box">
           <div class="item-title">${escapeHtml(l.label.toUpperCase())}</div>
-          <ul>${l.details.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}</ul>
-        </div>`,
-      )
+          <div class="item-body">
+            ${dataUri ? `<img class="item-photo" src="${dataUri}" alt="${escapeHtml(l.label)}" />` : ''}
+            <ul>${l.details.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}</ul>
+          </div>
+        </div>`;
+      })
       .join('');
 
     const summaryRows = lines
@@ -626,7 +638,9 @@ export class CustomerOrdersService {
      for safety) are needed to actually stop that. */
   .item-box { border: 1px solid #e3d9c6; border-radius: 6px; margin-top: 12px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
   .item-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; }
-  .item-box ul { list-style: none; margin: 0; padding: 8px 16px 10px; font-size: 12.5px; }
+  .item-body { display: flex; align-items: flex-start; gap: 14px; padding: 8px 16px 10px; }
+  .item-photo { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1px solid #e3d9c6; flex-shrink: 0; }
+  .item-box ul { list-style: none; margin: 0; padding: 0; font-size: 12.5px; flex: 1; }
   .item-box li { padding: 2px 0; }
   .summary-section { break-inside: avoid; page-break-inside: avoid; margin-top: 20px; }
   .summary-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; border-radius: 6px 6px 0 0; }
