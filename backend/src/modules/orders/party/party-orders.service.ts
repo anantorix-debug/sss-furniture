@@ -44,6 +44,7 @@ function itemsDiffer(
     qty: number;
     unitPrice: number | string;
     modelNo?: string | null;
+    referenceImageId?: string | null;
   }[],
   incoming: PartyOrderItemDto[],
 ): boolean {
@@ -60,12 +61,13 @@ function itemsDiffer(
       qty?: number;
       unitPrice: number | string;
       modelNo?: string | null;
+      referenceImageId?: string | null;
     }[],
   ) =>
     items
       .map(
         (i) =>
-          `${i.productId ?? ''}|${i.productName}|${i.finish ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.pattern ?? ''}|${i.details ?? ''}|${i.qty ?? 1}|${Number(i.unitPrice)}|${i.modelNo ?? ''}`,
+          `${i.productId ?? ''}|${i.productName}|${i.finish ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.pattern ?? ''}|${i.details ?? ''}|${i.qty ?? 1}|${Number(i.unitPrice)}|${i.modelNo ?? ''}|${i.referenceImageId ?? ''}`,
       )
       .sort()
       .join(';');

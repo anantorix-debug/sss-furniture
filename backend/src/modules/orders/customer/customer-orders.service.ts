@@ -31,14 +31,37 @@ function escapeHtml(s: string) {
 // actually changed. Only a genuine difference should trigger the release/
 // reallocate cycle.
 function itemsDiffer(
-  current: { productId?: string | null; productName: string; category?: string | null; size?: string | null; sizeUnit?: string | null; color?: string | null; quantity: number; unitPrice: number | string }[],
+  current: {
+    productId?: string | null;
+    productName: string;
+    category?: string | null;
+    size?: string | null;
+    sizeUnit?: string | null;
+    color?: string | null;
+    quantity: number;
+    unitPrice: number | string;
+    referenceImageId?: string | null;
+  }[],
   incoming: CustomerOrderItemDto[],
 ): boolean {
   const serialize = (
-    items: { productId?: string | null; productName: string; category?: string | null; size?: string | null; sizeUnit?: string | null; color?: string | null; quantity?: number; unitPrice: number | string }[],
+    items: {
+      productId?: string | null;
+      productName: string;
+      category?: string | null;
+      size?: string | null;
+      sizeUnit?: string | null;
+      color?: string | null;
+      quantity?: number;
+      unitPrice: number | string;
+      referenceImageId?: string | null;
+    }[],
   ) =>
     items
-      .map((i) => `${i.productId ?? ''}|${i.productName}|${i.category ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.quantity ?? 1}|${Number(i.unitPrice)}`)
+      .map(
+        (i) =>
+          `${i.productId ?? ''}|${i.productName}|${i.category ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.quantity ?? 1}|${Number(i.unitPrice)}|${i.referenceImageId ?? ''}`,
+      )
       .sort()
       .join(';');
   return serialize(current) !== serialize(incoming);
