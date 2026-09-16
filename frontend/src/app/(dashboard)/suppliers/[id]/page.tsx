@@ -154,7 +154,7 @@ function SupplierDetailContent() {
               + New Purchase
             </Link>
           </div>
-          <div className="max-h-96 overflow-y-auto rounded-lg border border-brand-100">
+          <div className="max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100">
             <table className="table-shell">
               <thead>
                 <tr>
@@ -197,7 +197,7 @@ function SupplierDetailContent() {
 
         <div className="card p-5">
           <h2 className="font-semibold text-brand-900 mb-3">Payment Ledger</h2>
-          <div className="max-h-72 overflow-y-auto rounded-lg border border-brand-100 mb-4">
+          <div className="max-h-72 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
             <table className="table-shell">
               <thead>
                 <tr>

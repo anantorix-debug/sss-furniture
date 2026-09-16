@@ -286,7 +286,7 @@ Please confirm receipt.`,
 
       <div className="card p-5">
         <h2 className="font-semibold text-brand-900 mb-3">Work List</h2>
-        <div className="max-h-80 overflow-y-auto rounded-lg border border-brand-100 mb-4">
+        <div className="max-h-80 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell">
             <thead>
               <tr>
@@ -395,7 +395,7 @@ Please confirm receipt.`,
       <div className="card p-5">
         <h2 className="font-semibold text-brand-900 mb-3">Materials Used</h2>
         <p className="text-xs text-brand-400 mb-3">Every material issued against this employee&apos;s work items, most recent first.</p>
-        <div className="max-h-64 overflow-y-auto rounded-lg border border-brand-100">
+        <div className="max-h-64 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100">
           <table className="table-shell">
             <thead>
               <tr>
@@ -436,7 +436,7 @@ Please confirm receipt.`,
 
       <div className="card p-5">
         <h2 className="font-semibold text-brand-900 mb-3">Payments</h2>
-        <div className="max-h-56 overflow-y-auto rounded-lg border border-brand-100 mb-4">
+        <div className="max-h-56 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell">
             <thead>
               <tr>

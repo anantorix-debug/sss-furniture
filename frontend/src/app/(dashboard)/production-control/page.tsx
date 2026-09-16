@@ -423,7 +423,7 @@ function OverviewTab() {
             ))}
           </div>
 
-          <div className="card overflow-hidden">
+          <div className="card overflow-x-auto">
             <table className="table-shell">
               <thead>
                 <tr>
@@ -498,7 +498,7 @@ function VerificationTab() {
         <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{verifySuccess}</p>
       )}
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="table-shell">
           <thead>
             <tr>
@@ -756,7 +756,7 @@ function DispatchTab() {
     <div className="space-y-4">
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="table-shell">
           <thead>
             <tr>
