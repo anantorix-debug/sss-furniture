@@ -136,17 +136,8 @@ function CustomerOrdersContent() {
   const [assignItemTarget, setAssignItemTarget] = useState<{ order: CustomerOrder; item: CustomerOrderItem } | null>(null);
   const [viewTarget, setViewTarget] = useState<CustomerOrder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [selectedGalleryImages, setSelectedGalleryImages] = useState<GalleryImage[]>([]);
-  const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
-  // Which product row's own image picker is open, if any - separate from
-  // the order-wide gallery picker above.
+  // Which product row's own image picker is open, if any.
   const [itemImagePickerIdx, setItemImagePickerIdx] = useState<number | null>(null);
-
-  function toggleGalleryImage(image: GalleryImage) {
-    setSelectedGalleryImages((prev) =>
-      prev.some((i) => i.id === image.id) ? prev.filter((i) => i.id !== image.id) : [...prev, image],
-    );
-  }
 
   function setItemImage(idx: number, image: GalleryImage | null) {
     updateItemRow(idx, { referenceImageId: image?.id, referenceImage: image });
@@ -156,7 +147,6 @@ function CustomerOrdersContent() {
     setEditing(null);
     setForm(emptyForm);
     setItems([{ ...emptyRow }]);
-    setSelectedGalleryImages([]);
     setFormError(null);
     setFormOpen(true);
   }
@@ -190,7 +180,6 @@ function CustomerOrdersContent() {
           }))
         : [{ ...emptyRow, productName: order.product, unitPrice: String(order.orderValue ?? 0) }],
     );
-    setSelectedGalleryImages(order.galleryImages ?? []);
     setFormError(null);
     setFormOpen(true);
   }
@@ -223,7 +212,10 @@ function CustomerOrdersContent() {
             unitPrice: parseFloat(i.unitPrice),
             referenceImageId: i.referenceImageId || undefined,
           })),
-        galleryImageIds: selectedGalleryImages.map((i) => i.id),
+        // galleryImageIds intentionally omitted - the order-wide gallery
+        // picker was removed from this form (each product line has its own
+        // image instead); omitting the field leaves any pre-existing
+        // order-wide selection on an order untouched rather than clearing it.
       };
       if (editing) {
         await api.patch(`/customer-orders/${editing.id}`, payload);
@@ -677,30 +669,6 @@ function CustomerOrdersContent() {
               </FormField>
             </FormRow>
 
-            <div>
-              <label className="label">Product Images / Gallery</label>
-              <button type="button" className="btn-secondary w-full justify-start text-left" onClick={() => setGalleryPickerOpen(true)}>
-                {selectedGalleryImages.length > 0 ? `${selectedGalleryImages.length} image(s) selected` : 'Select Gallery Images...'}
-              </button>
-              {selectedGalleryImages.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {selectedGalleryImages.map((img) => (
-                    <div key={img.id} className="relative">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={assetUrl(img.url) ?? ''} alt={img.fileName} className="h-14 w-14 object-cover rounded-md border border-brand-200" />
-                      <button
-                        type="button"
-                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-[11px] leading-none"
-                        onClick={() => toggleGalleryImage(img)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <p className="text-[11px] text-brand-400 mt-1">Picked from the existing Gallery - never uploaded again.</p>
-            </div>
 
             {formError && <p className="text-sm text-red-600">{formError}</p>}
 
@@ -820,22 +788,6 @@ function CustomerOrdersContent() {
       )}
 
       {viewTarget && <OrderDetailsModal order={viewTarget} onClose={() => setViewTarget(null)} />}
-
-      {galleryPickerOpen && (
-        <Modal title="Select Gallery Images" onClose={() => setGalleryPickerOpen(false)} wide>
-          <GalleryGrid
-            canManage={false}
-            selectable
-            selectedIds={selectedGalleryImages.map((i) => i.id)}
-            onToggle={toggleGalleryImage}
-          />
-          <div className="flex justify-end pt-3">
-            <button type="button" className="btn-primary text-sm" onClick={() => setGalleryPickerOpen(false)}>
-              Done ({selectedGalleryImages.length} selected)
-            </button>
-          </div>
-        </Modal>
-      )}
 
       {itemImagePickerIdx !== null && (
         <Modal title="Select Product Image" onClose={() => setItemImagePickerIdx(null)} wide>
