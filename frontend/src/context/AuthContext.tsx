@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const res = await api.post<{ accessToken: string; user: User }>('/auth/login', { email, password });
+      const res = await api.post<{ accessToken: string; user: User }>('/auth/login', { email, password }, { silent: true });
       setAccessToken(res.accessToken);
       setUser(res.user);
       // The Dashboard is a financial overview (order values, balances,

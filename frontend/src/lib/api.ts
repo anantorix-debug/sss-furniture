@@ -1,3 +1,5 @@
+import { toast } from './toast';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 // Uploaded files (product images, etc) are served outside the /api prefix,
@@ -130,6 +132,10 @@ interface RequestOptions {
   body?: unknown;
   skipAuth?: boolean;
   isRetry?: boolean;
+  // Skip the automatic error toast for this call - for a page that already
+  // shows the error inline exactly where the user is looking (e.g. the
+  // login form) and would otherwise show it twice.
+  silent?: boolean;
 }
 
 const REQUEST_TIMEOUT_MS = 45000;
@@ -156,11 +162,11 @@ export async function apiFetch<T = unknown>(path: string, options: RequestOption
     });
   } catch (err) {
     const timedOut = err instanceof DOMException && err.name === 'AbortError';
-    throw new ApiError(
-      0,
-      timedOut ? 'The server took too long to respond. Check that the API server is running.' : 'Could not reach the server. Check your connection.',
-      null,
-    );
+    const message = timedOut
+      ? 'The server took too long to respond. Check that the API server is running.'
+      : 'Could not reach the server. Check your connection.';
+    if (!options.silent) toast.error(message);
+    throw new ApiError(0, message, null);
   } finally {
     clearTimeout(timeout);
   }
@@ -177,16 +183,23 @@ export async function apiFetch<T = unknown>(path: string, options: RequestOption
 
   if (!res.ok) {
     const message = (data && (data.message || data.error)) || res.statusText;
-    throw new ApiError(res.status, Array.isArray(message) ? message.join(', ') : message, data);
+    const finalMessage = Array.isArray(message) ? message.join(', ') : message;
+    // Surfaces every failed API call as a toast, everywhere in the app, with
+    // zero per-page wiring - a page can still keep its own inline error
+    // banner alongside this for extra context, or pass `silent: true` (e.g.
+    // the login form, which already shows the error inline right where the
+    // user is looking) to skip it.
+    if (!options.silent) toast.error(finalMessage);
+    throw new ApiError(res.status, finalMessage, data);
   }
 
   return data as T;
 }
 
 export const api = {
-  get: <T = unknown>(path: string) => apiFetch<T>(path),
-  post: <T = unknown>(path: string, body?: unknown) => apiFetch<T>(path, { method: 'POST', body }),
-  patch: <T = unknown>(path: string, body?: unknown) => apiFetch<T>(path, { method: 'PATCH', body }),
-  put: <T = unknown>(path: string, body?: unknown) => apiFetch<T>(path, { method: 'PUT', body }),
-  delete: <T = unknown>(path: string) => apiFetch<T>(path, { method: 'DELETE' }),
+  get: <T = unknown>(path: string, opts?: { silent?: boolean }) => apiFetch<T>(path, opts),
+  post: <T = unknown>(path: string, body?: unknown, opts?: { silent?: boolean }) => apiFetch<T>(path, { method: 'POST', body, ...opts }),
+  patch: <T = unknown>(path: string, body?: unknown, opts?: { silent?: boolean }) => apiFetch<T>(path, { method: 'PATCH', body, ...opts }),
+  put: <T = unknown>(path: string, body?: unknown, opts?: { silent?: boolean }) => apiFetch<T>(path, { method: 'PUT', body, ...opts }),
+  delete: <T = unknown>(path: string, opts?: { silent?: boolean }) => apiFetch<T>(path, { method: 'DELETE', ...opts }),
 };

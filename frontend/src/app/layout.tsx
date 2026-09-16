@@ -3,6 +3,7 @@ import { Roboto } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
 import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner';
+import { Toaster } from '@/components/Toaster';
 
 const roboto = Roboto({
   subsets: ['latin'],
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen antialiased font-sans">
         <AuthProvider>{children}</AuthProvider>
         <UpdateAvailableBanner />
+        <Toaster />
       </body>
     </html>
   );
