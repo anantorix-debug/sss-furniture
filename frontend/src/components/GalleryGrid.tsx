@@ -5,6 +5,8 @@ import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, assetUrl } from '@/lib/api';
 import { ConfirmDialog } from './ConfirmDialog';
+import { useAuth } from '@/context/AuthContext';
+import { useForceable } from '@/hooks/useForceable';
 import type { GalleryImage } from '@/types';
 
 // Images-only visual reference of manufactured furniture - deliberately no
@@ -28,20 +30,26 @@ export function GalleryGrid({
   selectedIds?: string[];
   onToggle?: (image: GalleryImage) => void;
 }) {
+  const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const { data: images, isLoading, mutate } = useSWR<GalleryImage[]>('/gallery', fetcher);
   const [deleteTarget, setDeleteTarget] = useState<GalleryImage | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function handleDelete() {
     if (!deleteTarget) return;
+    const target = deleteTarget;
     setDeleteError(null);
-    try {
-      await api.delete(`/gallery/${deleteTarget.id}`);
-      setDeleteTarget(null);
-      mutate();
-    } catch (err) {
-      setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete image');
-    }
+    await runForceable(async (force) => {
+      try {
+        await api.delete(`/gallery/${target.id}${force ? '?force=true' : ''}`);
+        setDeleteTarget(null);
+        mutate();
+      } catch (err) {
+        setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete image');
+        throw err;
+      }
+    }, hasRole('SUPERADMIN'));
   }
 
   if (isLoading) return <p className="text-brand-400 text-sm">Loading gallery...</p>;
@@ -105,6 +113,17 @@ export function GalleryGrid({
             setDeleteTarget(null);
             setDeleteError(null);
           }}
+        />
+      )}
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently unlinks the image from any orders that reference it. This cannot be undone.`}
+          confirmLabel="Force Delete Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
         />
       )}
       {deleteError && <p className="text-sm text-red-600 mt-2">{deleteError}</p>}

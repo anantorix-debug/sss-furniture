@@ -201,6 +201,19 @@ export default function CarpentersPage() {
     }
   }
 
+  async function handleForceDeleteWorker() {
+    if (!deleteTarget) return;
+    setError(null);
+    try {
+      await api.delete(`/carpenters/${deleteTarget.id}?force=true`);
+      setDeleteTarget(null);
+      setDeleteConflict(false);
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to force delete worker');
+    }
+  }
+
   async function handleDeactivateWorker() {
     if (!deleteTarget) return;
     setError(null);
@@ -494,22 +507,52 @@ export default function CarpentersPage() {
         </Modal>
       )}
 
-      {deleteTarget && (
+      {deleteTarget && !deleteConflict && (
         <ConfirmDialog
-          title={deleteConflict ? 'Deactivate Worker Instead' : 'Delete Worker'}
-          message={
-            deleteConflict
-              ? `"${deleteTarget.name}" has work items or payment history and can't be deleted. Deactivate instead? They'll disappear from the active worker list and can't be assigned new work, but all their past history stays intact.`
-              : `Delete "${deleteTarget.name}"? This cannot be undone.`
-          }
-          confirmLabel={deleteConflict ? 'Deactivate' : 'Delete'}
-          danger={!deleteConflict}
-          onConfirm={deleteConflict ? handleDeactivateWorker : handleDeleteWorker}
-          onCancel={() => {
+          title="Delete Worker"
+          message={`Delete "${deleteTarget.name}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDeleteWorker}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {deleteTarget && deleteConflict && (
+        <Modal
+          title="Deactivate Worker Instead"
+          onClose={() => {
             setDeleteTarget(null);
             setDeleteConflict(false);
           }}
-        />
+        >
+          <p className="text-sm text-brand-700 mb-5">
+            &quot;{deleteTarget.name}&quot; has work items or payment history and can&apos;t be deleted. Deactivate instead? They&apos;ll
+            disappear from the active worker list and can&apos;t be assigned new work, but all their past history stays intact.
+          </p>
+          <div className="flex items-center justify-between gap-2">
+            {hasRole('SUPERADMIN') && (
+              <button type="button" className="text-red-500 text-xs hover:underline" onClick={handleForceDeleteWorker}>
+                Force Delete Anyway (permanently erases their payment history)
+              </button>
+            )}
+            <div className="flex gap-2 ml-auto">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeleteConflict(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button type="button" className="btn-primary" onClick={handleDeactivateWorker}>
+                Deactivate
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

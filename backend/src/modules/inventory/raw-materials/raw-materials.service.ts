@@ -279,8 +279,8 @@ export class RawMaterialsService {
     ]);
     const hasHistory = movementCount > 0 || purchaseItemCount > 0 || supplierPurchaseCount > 0;
 
-    if (hasHistory && !(force && (viewerRole === Role.SUPERADMIN || viewerRole === Role.ADMIN))) {
-      if (force) throw new ForbiddenException('Only Super Admin or Admin can force this delete through');
+    if (hasHistory && !(force && viewerRole === Role.SUPERADMIN)) {
+      if (force) throw new ForbiddenException('Only Super Admin can force this delete through');
       throw new ConflictException(
         'This material has stock movement or purchase history and cannot be deleted. Remove those entries first if you really need to delete it.',
       );

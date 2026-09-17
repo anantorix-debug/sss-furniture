@@ -14,6 +14,8 @@ import { RoleGate } from '@/components/RoleGate';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { useForceable } from '@/hooks/useForceable';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { boardFeetPreview } from '@/lib/boardFeet';
 import type { CarpenterDetail, ProductionStage, RawMaterial, StockMovement, WorkStatus } from '@/types';
 
@@ -64,6 +66,7 @@ function CarpenterDetailContent() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const { data: carpenter, isLoading, mutate } = useSWR<CarpenterDetail>(`/carpenters/${id}`, fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
   const { data: materialsUsed } = useSWR<StockMovement[]>(`/stock-movements?type=OUT&carpenterId=${id}`, fetcher);
@@ -132,8 +135,10 @@ function CarpenterDetailContent() {
   }
 
   async function removeWork(workId: string) {
-    await api.delete(`/carpenter-work-items/${workId}`);
-    mutate();
+    await runForceable(async (force) => {
+      await api.delete(`/carpenter-work-items/${workId}${force ? '?force=true' : ''}`);
+      mutate();
+    }, hasRole('SUPERADMIN'));
   }
 
   async function resendNotify(workId: string) {
@@ -488,6 +493,17 @@ Please confirm receipt.`,
           </form>
         )}
       </div>
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently removes the connected material-usage/quality-check history rather than just losing the link to it. This cannot be undone.`}
+          confirmLabel="Force Through Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
+        />
+      )}
 
       {showModal && whatsappOptions && (
         <WhatsAppModal

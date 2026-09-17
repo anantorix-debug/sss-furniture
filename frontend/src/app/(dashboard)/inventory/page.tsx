@@ -845,7 +845,7 @@ function GalleryTab({ canEdit }: { canEdit: boolean }) {
 
 function MaterialsTab({ canEdit }: { canEdit: boolean }) {
   const { hasRole } = useAuth();
-  const { runForceable } = useForceable();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const { data: result, isLoading, mutate } = useSWR<PaginatedResult<RawMaterial>>(
@@ -1139,6 +1139,17 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
             setDeleteTarget(null);
             setDeleteError(null);
           }}
+        />
+      )}
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently deletes the material's entire stock movement/purchase history, not just the material. This cannot be undone.`}
+          confirmLabel="Force Delete Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
         />
       )}
     </div>

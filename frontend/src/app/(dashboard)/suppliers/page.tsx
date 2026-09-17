@@ -13,6 +13,7 @@ import { BalanceBadge } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
 import { downloadCsv } from '@/lib/csv';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+import { useForceable } from '@/hooks/useForceable';
 import { FilterBar } from '@/components/FilterBar';
 import { PurchasingTabs } from '@/components/PurchasingTabs';
 import type { SupplierSummary } from '@/types';
@@ -27,6 +28,7 @@ const STATUS_OPTIONS = [
 
 function SuppliersContent() {
   const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const [page, setPage] = useState(1);
   const [values, setValues] = useState<Record<string, string>>(emptyFilters);
   const [applied, setApplied] = useState<Record<string, string>>(emptyFilters);
@@ -110,15 +112,19 @@ function SuppliersContent() {
 
   async function handleDelete() {
     if (!deleteTarget) return;
+    const target = deleteTarget;
     setError(null);
-    try {
-      await api.delete(`/suppliers/${deleteTarget.id}`);
-      setDeleteTarget(null);
-      mutate();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete supplier');
-      setDeleteTarget(null);
-    }
+    await runForceable(async (force) => {
+      try {
+        await api.delete(`/suppliers/${target.id}${force ? '?force=true' : ''}`);
+        setDeleteTarget(null);
+        mutate();
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Failed to delete supplier');
+        setDeleteTarget(null);
+        throw err;
+      }
+    }, hasRole('SUPERADMIN'));
   }
 
   return (
@@ -258,6 +264,17 @@ function SuppliersContent() {
           danger
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently deletes the supplier's entire purchase/payment ledger, not just the supplier. This cannot be undone.`}
+          confirmLabel="Force Delete Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
         />
       )}
     </div>
