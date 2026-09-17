@@ -481,6 +481,31 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     throw new Error(`Unknown chat ID format: ${chatId}`);
   }
 
+  // client.getChatById() reads WhatsApp Web's internal store directly via
+  // Puppeteer and can throw a transient, non-Error value (often just the
+  // bare string "r" - a minified internal variable name from WA Web's
+  // bundle) when the store is momentarily mid-update. This is the exact
+  // same flakiness already worked around for client.getChats() elsewhere
+  // in this file; unlike getChats(), callers here have no fallback, so a
+  // short retry is the fix. Real failures (chat truly doesn't exist,
+  // client not ready) still fail after retries exhaust, with a clear
+  // message instead of the raw "r".
+  private async getChatByIdWithRetry(chatId: string, attempts = 3, delayMs = 700): Promise<any> {
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await this.client.getChatById(chatId);
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`[WA SEND] getChatById(${chatId}) attempt ${i + 1}/${attempts} failed: ${msg}`);
+        if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    throw new Error(`Could not load chat ${chatId} after ${attempts} attempts: ${msg}`);
+  }
+
   private async areStoresReady(): Promise<boolean> {
     if (!this.client) return false;
     try {
@@ -658,15 +683,23 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       const media = new MessageMedia(mimetype, buffer.toString('base64'), filename);
 
       this.logger.log(`[WA SEND] Sending media (${mimetype}, ${buffer.length} bytes) to: ${resolvedChatId}`);
-      // Use chat.sendMessage instead of client.sendMessage to avoid the
-      // "Data passed to getter must include an id property" error that
-      // newer WhatsApp Web versions throw when client.sendMessage is used
-      // with MessageMedia objects.
-      const chat = await this.client.getChatById(resolvedChatId);
-      const sendPromise = chat.sendMessage(media, {
-        ...(caption ? { caption } : {}),
-        sendMediaAsDocument: true,
-      });
+      // Prefer chat.sendMessage over client.sendMessage to avoid the "Data
+      // passed to getter must include an id property" error that newer
+      // WhatsApp Web versions throw when client.sendMessage is used with
+      // MessageMedia objects directly. But getChatById() can fail entirely
+      // for some contacts (confirmed: not just transient - retries don't
+      // help) even though client.sendMessage() works fine for the exact
+      // same contact, so fall back to it rather than give up.
+      const sendMediaOptions = { ...(caption ? { caption } : {}), sendMediaAsDocument: true };
+      let sendPromise: Promise<any>;
+      try {
+        const chat = await this.getChatByIdWithRetry(resolvedChatId);
+        sendPromise = chat.sendMessage(media, sendMediaOptions);
+      } catch (getChatErr) {
+        const getChatErrMsg = getChatErr instanceof Error ? getChatErr.message : String(getChatErr);
+        this.logger.warn(`[WA SEND] getChatById route failed (${getChatErrMsg}), falling back to client.sendMessage`);
+        sendPromise = this.client.sendMessage(resolvedChatId, media, sendMediaOptions);
+      }
       const sendTimeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error(`SendMessage timeout after ${this.sendTimeoutMs}ms`)), this.sendTimeoutMs)
       );
@@ -1038,12 +1071,19 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
         throw new Error(`Phone number ${phone} is not registered on WhatsApp`);
       }
       const media = new MessageMedia(mimetype, buffer.toString('base64'), filename);
-      // Use chat.sendMessage to avoid the "id property" memoization error
-      const chat = await this.client.getChatById(numberId._serialized);
-      await chat.sendMessage(media, {
-        ...(caption ? { caption } : {}),
-        sendMediaAsDocument: true,
-      });
+      const sendMediaOptions = { ...(caption ? { caption } : {}), sendMediaAsDocument: true };
+      // Use chat.sendMessage to avoid the "id property" memoization error,
+      // falling back to client.sendMessage if getChatById can't load this
+      // contact's chat at all (confirmed: happens for some contacts even
+      // after retries, while client.sendMessage works fine for them).
+      try {
+        const chat = await this.getChatByIdWithRetry(numberId._serialized);
+        await chat.sendMessage(media, sendMediaOptions);
+      } catch (getChatErr) {
+        const getChatErrMsg = getChatErr instanceof Error ? getChatErr.message : String(getChatErr);
+        this.logger.warn(`[WA SEND] getChatById route failed (${getChatErrMsg}), falling back to client.sendMessage`);
+        await this.client.sendMessage(numberId._serialized, media, sendMediaOptions);
+      }
     } catch (err) {
       this.logger.error(`Failed to send document: ${err}`);
       throw err;
