@@ -108,24 +108,22 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
 
   return (
     <div className="card p-4 space-y-3">
+      {item.referenceImage && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={assetUrl(item.referenceImage.url) ?? ''}
+          alt={item.referenceImage.fileName}
+          className="w-full h-64 sm:h-80 object-contain bg-brand-50 rounded-lg border border-brand-200"
+        />
+      )}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-start gap-2 min-w-0">
-          {item.referenceImage && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={assetUrl(item.referenceImage.url) ?? ''}
-              alt={item.referenceImage.fileName}
-              className="h-14 w-14 object-cover rounded-md border border-brand-200 shrink-0"
-            />
-          )}
-          <div className="min-w-0">
-            <p className="font-semibold text-brand-900">{item.productName}</p>
-            <p className="text-xs text-brand-500">
-              {item.modelNo ? `Model ${item.modelNo}` : 'Model No not set'} · Qty {item.quantity}
-              {item.size ? ` · ${item.size}${item.sizeUnit ? ` ${item.sizeUnit}` : ''}` : ''}
-            </p>
-            <p className="text-xs text-brand-400 mt-0.5">{formatDate(item.workDate)}</p>
-          </div>
+        <div className="min-w-0">
+          <p className="font-semibold text-brand-900">{item.productName}</p>
+          <p className="text-xs text-brand-500">
+            {item.modelNo ? `Model ${item.modelNo}` : 'Model No not set'} · Qty {item.quantity}
+            {item.size ? ` · ${item.size}${item.sizeUnit ? ` ${item.sizeUnit}` : ''}` : ''}
+          </p>
+          <p className="text-xs text-brand-400 mt-0.5">{formatDate(item.workDate)}</p>
         </div>
         <Chip color={STATUS_CHIP[item.status] ?? 'gray'} label={item.status.replace('_', ' ')} />
       </div>

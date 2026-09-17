@@ -84,10 +84,13 @@ export class ProductsController {
     return this.service.updateModelNo(id, dto.modelNo, user.userId, user.role as Role);
   }
 
+  // force=true (SUPERADMIN only, re-checked in the service) - see
+  // ProductsService.remove. Never bypasses the "currently reserved for a
+  // live order" block, only the "has order/production history" one.
   @Roles(Role.ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  remove(@Param('id') id: string, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.userId, force === 'true', user.role as Role);
   }
 
   // FileInterceptor with no `storage` option defaults to memory storage

@@ -38,6 +38,11 @@ export interface ReleaseParams {
   sourceCustomerOrderId?: string;
   sourcePartyOrderItemId?: string;
   userId: string;
+  // SUPERADMIN-only escape hatch - see the note on force below. Callers
+  // (CustomerOrdersService/PartyOrdersService) are responsible for only
+  // ever setting this when the acting user is actually SUPERADMIN; this
+  // service trusts the flag rather than re-checking role itself.
+  force?: boolean;
 }
 
 // The one place the stock-first split lives (spec: check Godown Stock
@@ -165,11 +170,20 @@ export class StockAllocationService {
           sourcePartyOrderItemId: params.sourcePartyOrderItemId,
         },
       });
-      for (const item of workItems) {
-        if (item.status !== 'ASSIGNED') {
-          throw new ConflictException(
-            `Cannot change this line - production for "${item.productName}" is already ${item.status.toLowerCase().replace('_', ' ')}`,
-          );
+      // force (SUPERADMIN-only, set by the caller after re-checking role -
+      // see the note on ReleaseParams.force) skips this specific check.
+      // Not the DISPATCHED one above, ever: this material has already
+      // physically left the building, so "releasing" it back into
+      // availableQuantity would fabricate stock that doesn't really exist -
+      // a materially different kind of wrong than just losing a completed
+      // work item's own record, which is what force is actually for.
+      if (!params.force) {
+        for (const item of workItems) {
+          if (item.status !== 'ASSIGNED') {
+            throw new ConflictException(
+              `Cannot change this line - production for "${item.productName}" is already ${item.status.toLowerCase().replace('_', ' ')}`,
+            );
+          }
         }
       }
 

@@ -269,12 +269,19 @@ export class CustomerOrdersService {
     }
   }
 
-  async update(id: string, dto: UpdateCustomerOrderDto, userId: string) {
+  async update(id: string, dto: UpdateCustomerOrderDto, userId: string, force = false, viewerRole?: Role) {
     const current = await this.findOne(id);
 
     if (dto.orderId) {
       const existing = await this.prisma.customerOrder.findUnique({ where: { orderId: dto.orderId } });
       if (existing && existing.id !== id) throw new ConflictException('An order with this Order ID already exists');
+    }
+
+    // force is only ever honored for SUPERADMIN - Admin still gets the
+    // normal safety block even if a stale/tampered request sends force=true.
+    const effectiveForce = force && viewerRole === Role.SUPERADMIN;
+    if (force && !effectiveForce) {
+      throw new ForbiddenException('Only Super Admin can force this change through');
     }
 
     // The Edit form always submits the full items[] array, even when the
@@ -287,8 +294,19 @@ export class CustomerOrdersService {
       // Release whatever stock/production this order previously held
       // before replacing its lines - refuses (ConflictException) if any of
       // it is already dispatched or in progress, rather than silently
-      // reallocating on top of work that's already started.
-      await this.stockAllocation.release({ sourceCustomerOrderId: id, userId });
+      // reallocating on top of work that's already started. effectiveForce
+      // (SUPERADMIN only, see above) skips the "already in progress" block
+      // but never the dispatched one - see StockAllocationService.release.
+      await this.stockAllocation.release({ sourceCustomerOrderId: id, userId, force: effectiveForce });
+      if (effectiveForce) {
+        await this.audit.log({
+          userId,
+          action: 'FORCE_EDIT_CUSTOMER_ORDER_ITEMS',
+          targetType: 'CustomerOrder',
+          targetId: id,
+          metadata: { orderId: current.orderId },
+        });
+      }
       await this.prisma.customerOrderItem.deleteMany({ where: { orderId: id } });
     }
     // Full replace, not merge - matches how items[] behaves. Explicitly
@@ -356,12 +374,27 @@ export class CustomerOrdersService {
     return { product: dto.product, orderValue: dto.orderValue };
   }
 
-  async remove(id: string, userId: string) {
-    await this.findOne(id);
+  async remove(id: string, userId: string, force = false, viewerRole?: Role) {
+    const order = await this.findOne(id);
+    const effectiveForce = force && viewerRole === Role.SUPERADMIN;
+    if (force && !effectiveForce) {
+      throw new ForbiddenException('Only Super Admin can force this delete through');
+    }
     // Release any reserved stock / undone production before deleting -
     // throws if any of it is already dispatched or in progress, blocking
-    // the cancel rather than silently orphaning it.
-    await this.stockAllocation.release({ sourceCustomerOrderId: id, userId });
+    // the cancel rather than silently orphaning it. effectiveForce
+    // (SUPERADMIN only) skips the "already in progress" block, never the
+    // dispatched one - see StockAllocationService.release.
+    await this.stockAllocation.release({ sourceCustomerOrderId: id, userId, force: effectiveForce });
+    if (effectiveForce) {
+      await this.audit.log({
+        userId,
+        action: 'FORCE_DELETE_CUSTOMER_ORDER',
+        targetType: 'CustomerOrder',
+        targetId: id,
+        metadata: { orderId: order.orderId },
+      });
+    }
     // Explicit child deletes, not a bare customerOrder.delete() relying on
     // the schema's onDelete: Cascade - confirmed live (via PartyOrder,
     // same gap) that no such FK constraint actually exists in MySQL, so
@@ -592,6 +625,7 @@ export class CustomerOrdersService {
             unitPrice: Number(i.unitPrice),
             total: i.quantity * Number(i.unitPrice),
             details: [
+              i.category ? `Category : ${i.category}` : null,
               `Product : ${i.productName}`,
               i.size ? `Size : ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : null,
               i.color ? `Colour : ${i.color}` : null,
@@ -662,7 +696,7 @@ export class CustomerOrdersService {
   .item-box { border: 1px solid #e3d9c6; border-radius: 6px; margin-top: 12px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
   .item-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; }
   .item-body { display: flex; align-items: flex-start; gap: 14px; padding: 8px 16px 10px; }
-  .item-photo { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1px solid #e3d9c6; flex-shrink: 0; }
+  .item-photo { width: 280px; height: 280px; object-fit: contain; background: #faf9f6; border-radius: 8px; border: 1px solid #e3d9c6; flex-shrink: 0; }
   .item-box ul { list-style: none; margin: 0; padding: 0; font-size: 12.5px; flex: 1; }
   .item-box li { padding: 2px 0; }
   .summary-section { break-inside: avoid; page-break-inside: avoid; margin-top: 20px; }
@@ -686,6 +720,7 @@ export class CustomerOrdersService {
       <div class="meta-box">
         <div><b>Invoice No</b> : ${escapeHtml(order.jobNumber ?? order.orderId)}</div>
         <div><b>Date</b> : ${order.orderDate.toLocaleDateString('en-IN')}</div>
+        ${order.phone ? `<div><b>Phone</b> : ${escapeHtml(order.phone)}</div>` : ''}
         ${isEmployee ? '' : `<div><b>Payment Mode</b> : ${escapeHtml(paymentMode)}</div>`}
       </div>
     </div>

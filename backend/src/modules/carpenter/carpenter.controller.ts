@@ -63,10 +63,12 @@ export class CarpenterController {
     return this.service.updateCarpenter(id, dto);
   }
 
+  // force=true (SUPERADMIN only, re-checked in the service) permanently
+  // deletes this worker's payment history too - see removeCarpenter.
   @Roles(Role.ADMIN)
   @Delete('carpenters/:id')
-  removeCarpenter(@Param('id') id: string) {
-    return this.service.removeCarpenter(id);
+  removeCarpenter(@Param('id') id: string, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.removeCarpenter(id, user.userId, force === 'true', user.role as Role);
   }
 
   @Roles(Role.ADMIN)
@@ -239,10 +241,12 @@ export class CarpenterController {
     return this.service.updateWorkItem(id, dto);
   }
 
+  // force=true (SUPERADMIN only, re-checked in the service) - see
+  // CarpenterService.removeWorkItem.
   @Roles(Role.ADMIN)
   @Delete('carpenter-work-items/:id')
-  removeWorkItem(@Param('id') id: string) {
-    return this.service.removeWorkItem(id);
+  removeWorkItem(@Param('id') id: string, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.removeWorkItem(id, user.userId, force === 'true', user.role as Role);
   }
 
   @Post('carpenter-work-items/:id/notify')

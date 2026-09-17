@@ -1,12 +1,17 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateFinishedStockDto } from './dto/create-finished-stock.dto';
 import { UpdateFinishedStockDto } from './dto/update-finished-stock.dto';
 import { paginate, toSkipTake } from '../../common/utils/pagination.util';
+import { Role } from '../../common/enums/role.enum';
 
 @Injectable()
 export class FinishedStockService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
   async findAll(params: { status?: string; page?: number; limit?: number } = {}) {
@@ -65,15 +70,31 @@ export class FinishedStockService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(id: string, userId?: string, force = false, viewerRole?: Role) {
+    const item = await this.findOne(id);
     // DispatchRecord.finishedStockId is onDelete: SetNull - deleting an
     // already-dispatched item wouldn't crash, but it would silently sever
     // "which stock item was this delivery for" from real dispatch history.
     // An undispatched (still on hand) item is safe to remove outright.
     const dispatchCount = await this.prisma.dispatchRecord.count({ where: { finishedStockId: id } });
-    if (dispatchCount > 0) {
+    if (dispatchCount > 0 && !(force && viewerRole === Role.SUPERADMIN)) {
+      if (force) throw new ForbiddenException('Only Super Admin can force this delete through');
       throw new ConflictException('This finished stock item has already been dispatched and cannot be deleted - it is part of real delivery history.');
+    }
+    if (dispatchCount > 0) {
+      // Force path (SUPERADMIN only): the DispatchRecord(s) themselves
+      // survive (date, vehicle, driver, remarks) - they just lose the link
+      // to which finished-stock batch the delivery was for.
+      await this.prisma.dispatchRecord.updateMany({ where: { finishedStockId: id }, data: { finishedStockId: null } });
+      if (userId) {
+        await this.audit.log({
+          userId,
+          action: 'FORCE_DELETE_FINISHED_STOCK',
+          targetType: 'FinishedStockItem',
+          targetId: id,
+          metadata: { productName: item.productName, jobNumber: item.jobNumber, dispatchCount },
+        });
+      }
     }
     await this.prisma.finishedStockItem.delete({ where: { id } });
     return { success: true };

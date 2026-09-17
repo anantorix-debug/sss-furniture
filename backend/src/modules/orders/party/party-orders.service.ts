@@ -270,18 +270,36 @@ export class PartyOrdersService {
     }
   }
 
-  async update(id: string, dto: UpdatePartyOrderDto, userId: string) {
+  async update(id: string, dto: UpdatePartyOrderDto, userId: string, force = false, viewerRole?: Role) {
     const current = await this.findOne(id);
     const usingItems = Boolean(dto.items?.length) && itemsDiffer(current.items ?? [], dto.items!);
+
+    // force is only ever honored for SUPERADMIN - Admin still gets the
+    // normal safety block even if a stale/tampered request sends force=true.
+    const effectiveForce = force && viewerRole === Role.SUPERADMIN;
+    if (force && !effectiveForce) {
+      throw new ForbiddenException('Only Super Admin can force this change through');
+    }
 
     if (usingItems) {
       // Release every existing line's stock/production before replacing
       // them - refuses (ConflictException) if any line is already
       // dispatched or in progress, rather than reallocating on top of
-      // work that's already started.
+      // work that's already started. effectiveForce skips the "already in
+      // progress" block, never the dispatched one - see
+      // StockAllocationService.release.
       const oldItems = await this.prisma.partyOrderItem.findMany({ where: { orderId: id } });
       for (const item of oldItems) {
-        await this.stockAllocation.release({ sourcePartyOrderItemId: item.id, userId });
+        await this.stockAllocation.release({ sourcePartyOrderItemId: item.id, userId, force: effectiveForce });
+      }
+      if (effectiveForce) {
+        await this.audit.log({
+          userId,
+          action: 'FORCE_EDIT_PARTY_ORDER_ITEMS',
+          targetType: 'PartyOrder',
+          targetId: id,
+          metadata: { shopName: current.shopName },
+        });
       }
       await this.prisma.partyOrderItem.deleteMany({ where: { orderId: id } });
     }
@@ -333,13 +351,28 @@ export class PartyOrdersService {
     return withBalance(order);
   }
 
-  async remove(id: string, userId: string) {
-    await this.findOne(id);
+  async remove(id: string, userId: string, force = false, viewerRole?: Role) {
+    const order = await this.findOne(id);
+    const effectiveForce = force && viewerRole === Role.SUPERADMIN;
+    if (force && !effectiveForce) {
+      throw new ForbiddenException('Only Super Admin can force this delete through');
+    }
     const items = await this.prisma.partyOrderItem.findMany({ where: { orderId: id } });
     // Release each line's reservation/production before deleting the order
     // - throws if any of it is already dispatched or in progress.
+    // effectiveForce (SUPERADMIN only) skips the "already in progress"
+    // block, never the dispatched one - see StockAllocationService.release.
     for (const item of items) {
-      await this.stockAllocation.release({ sourcePartyOrderItemId: item.id, userId });
+      await this.stockAllocation.release({ sourcePartyOrderItemId: item.id, userId, force: effectiveForce });
+    }
+    if (effectiveForce) {
+      await this.audit.log({
+        userId,
+        action: 'FORCE_DELETE_PARTY_ORDER',
+        targetType: 'PartyOrder',
+        targetId: id,
+        metadata: { shopName: order.shopName },
+      });
     }
     // Explicit child deletes, not a bare partyOrder.delete() relying on the
     // schema's onDelete: Cascade - confirmed live that no such FK constraint
@@ -609,7 +642,7 @@ export class PartyOrdersService {
   table { width: 100%; border-collapse: collapse; font-size: 11.5px; break-inside: avoid; }
   th { background: #f4f2ec; text-align: left; padding: 7px 9px; border-bottom: 1px solid #e3e1d9; }
   td { padding: 7px 9px; border-bottom: 1px solid #efede6; }
-  .row-photo { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid #e3e1d9; display: block; }
+  .row-photo { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1px solid #e3e1d9; display: block; }
   .summary { display: flex; gap: 20px; margin-top: 18px; }
   .summary div { flex: 1; border: 1px solid #e3e1d9; border-radius: 8px; padding: 10px 14px; }
   .summary .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }

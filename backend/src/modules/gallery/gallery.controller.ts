@@ -59,9 +59,12 @@ export class GalleryController {
     return this.service.update(id, dto);
   }
 
+  // force=true bypasses the "in use on N orders" block - see
+  // GalleryService.remove. This route is already SUPERADMIN-only, so
+  // viewerRole here is always SUPERADMIN.
   @Roles(Role.SUPERADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.userId);
+  remove(@Param('id') id: string, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.userId, force === 'true', user.role as Role);
   }
 }

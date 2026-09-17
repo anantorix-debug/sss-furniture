@@ -108,10 +108,13 @@ export class RawMaterialsController {
     return this.service.update(id, dto);
   }
 
+  // force=true (SUPERADMIN only, re-checked in the service) permanently
+  // deletes this material's whole stock movement/purchase history too,
+  // not just the material - see RawMaterialsService.remove.
   @Roles(Role.ADMIN)
   @Delete('raw-materials/:id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  remove(@Param('id') id: string, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.userId, force === 'true', user.role as Role);
   }
 
   // Stock In (recording a new purchase/receipt) is Admin+ only - employee

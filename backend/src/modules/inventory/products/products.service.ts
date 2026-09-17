@@ -157,7 +157,7 @@ export class ProductsService {
     return paginated ? paginate(movements, total, page, limit) : movements;
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId?: string, force = false, viewerRole?: Role) {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) throw new NotFoundException('Product not found');
 
@@ -166,7 +166,11 @@ export class ProductsService {
     // count), so checking quantity > 0 would block literally every product
     // ever created, including ones nobody has touched yet. reservedQuantity
     // is the real signal: it's only ever set once this piece is actually
-    // allocated to a live order (StockAllocationService).
+    // allocated to a live order (StockAllocationService) - never
+    // force-bypassable, even for Super Admin: the order still thinks it has
+    // this exact piece reserved, and deleting the row out from under it
+    // would break that order's fulfillment, not just lose history. Edit or
+    // cancel that order first.
     if (product.reservedQuantity > 0) {
       throw new ConflictException(
         'This product is currently reserved for a live order and cannot be deleted. Cancel or edit that order first, or mark this product Inactive instead.',
@@ -185,10 +189,28 @@ export class ProductsService {
       // reservation/release - is what makes this unsafe to remove.
       this.prisma.productStockMovement.count({ where: { productId: id } }),
     ]);
-    if (orderItemCount > 0 || partyOrderItemCount > 0 || workItemCount > 0 || finishedStockCount > 0 || movementCount > 1) {
+    const hasHistory = orderItemCount > 0 || partyOrderItemCount > 0 || workItemCount > 0 || finishedStockCount > 0 || movementCount > 1;
+
+    if (hasHistory && !(force && viewerRole === Role.SUPERADMIN)) {
+      if (force) throw new ForbiddenException('Only Super Admin can force this delete through');
       throw new ConflictException(
         'This product is referenced by existing orders, production, or stock history and cannot be deleted. Mark it Inactive instead to hide it from new orders.',
       );
+    }
+
+    if (hasHistory && userId) {
+      // Force path (SUPERADMIN only) - order/work-item/finished-stock
+      // references just lose the "which catalogue product" link
+      // (productId is nullable + SetNull everywhere it's referenced from);
+      // this product's own ProductStockMovement ledger cascade-deletes,
+      // same bounded category as RawMaterial's own stock ledger under force.
+      await this.audit.log({
+        userId,
+        action: 'FORCE_DELETE_PRODUCT',
+        targetType: 'Product',
+        targetId: id,
+        metadata: { name: product.name, modelNo: product.modelNo, orderItemCount, partyOrderItemCount, workItemCount, finishedStockCount, movementCount },
+      });
     }
 
     await this.prisma.product.delete({ where: { id } });

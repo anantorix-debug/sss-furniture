@@ -24,6 +24,7 @@ import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { useForceable } from '@/hooks/useForceable';
 import { sharePdf } from '@/lib/sharePdf';
 import { buildCustomerOrderMessage } from '@/lib/orderMessages';
 import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
@@ -61,6 +62,7 @@ const emptyForm = {
 
 function CustomerOrdersContent() {
   const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -188,59 +190,67 @@ function CustomerOrdersContent() {
     e.preventDefault();
     setFormError(null);
     setSubmitting(true);
-    try {
-      const payload = {
-        orderId: form.orderId,
-        orderDate: form.orderDate,
-        customerName: form.customerName,
-        phone: form.phone || undefined,
-        address: form.address || undefined,
-        size: form.size || undefined,
-        sizeUnit: form.sizeUnit || undefined,
-        actualDeliveryDate: form.actualDeliveryDate || undefined,
-        deliveryStatus: form.deliveryStatus,
-        items: items
-          .filter((i) => i.productName && i.unitPrice)
-          .map((i) => ({
-            productId: i.productId,
-            productName: i.productName,
-            category: i.category || undefined,
-            size: i.size || undefined,
-            sizeUnit: i.sizeUnit || undefined,
-            color: i.color || undefined,
-            quantity: parseInt(i.quantity, 10) || 1,
-            unitPrice: parseFloat(i.unitPrice),
-            referenceImageId: i.referenceImageId || undefined,
-          })),
-        // galleryImageIds intentionally omitted - the order-wide gallery
-        // picker was removed from this form (each product line has its own
-        // image instead); omitting the field leaves any pre-existing
-        // order-wide selection on an order untouched rather than clearing it.
-      };
-      if (editing) {
-        await api.patch(`/customer-orders/${editing.id}`, payload);
-      } else {
-        await api.post('/customer-orders', payload);
+    const payload = {
+      orderId: form.orderId,
+      orderDate: form.orderDate,
+      customerName: form.customerName,
+      phone: form.phone || undefined,
+      address: form.address || undefined,
+      size: form.size || undefined,
+      sizeUnit: form.sizeUnit || undefined,
+      actualDeliveryDate: form.actualDeliveryDate || undefined,
+      deliveryStatus: form.deliveryStatus,
+      items: items
+        .filter((i) => i.productName && i.unitPrice)
+        .map((i) => ({
+          productId: i.productId,
+          productName: i.productName,
+          category: i.category || undefined,
+          size: i.size || undefined,
+          sizeUnit: i.sizeUnit || undefined,
+          color: i.color || undefined,
+          quantity: parseInt(i.quantity, 10) || 1,
+          unitPrice: parseFloat(i.unitPrice),
+          referenceImageId: i.referenceImageId || undefined,
+        })),
+      // galleryImageIds intentionally omitted - the order-wide gallery
+      // picker was removed from this form (each product line has its own
+      // image instead); omitting the field leaves any pre-existing
+      // order-wide selection on an order untouched rather than clearing it.
+    };
+    await runForceable(async (force) => {
+      try {
+        if (editing) {
+          await api.patch(`/customer-orders/${editing.id}${force ? '?force=true' : ''}`, payload);
+        } else {
+          await api.post('/customer-orders', payload);
+        }
+        setFormOpen(false);
+        mutate();
+      } catch (err) {
+        setFormError(err instanceof ApiError ? err.message : 'Failed to save order');
+        throw err;
+      } finally {
+        setSubmitting(false);
       }
-      setFormOpen(false);
-      mutate();
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : 'Failed to save order');
-    } finally {
-      setSubmitting(false);
-    }
+    }, hasRole('SUPERADMIN'));
   }
 
   async function handleDelete() {
     if (!deleteTarget) return;
-    try {
-      await api.delete(`/customer-orders/${deleteTarget.id}`);
-      setDeleteTarget(null);
-      mutate();
-    } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : 'Failed to delete order');
-      setDeleteTarget(null);
-    }
+    const target = deleteTarget;
+    await runForceable(async (force) => {
+      try {
+        await api.delete(`/customer-orders/${target.id}${force ? '?force=true' : ''}`);
+        setDeleteTarget(null);
+        mutate();
+      } catch (err) {
+        // Global toast (lib/api.ts) already shows why - a 409 from a
+        // non-Super-Admin, or any other error, just leaves the confirm
+        // dialog open so the user can Cancel or retry.
+        throw err;
+      }
+    }, hasRole('SUPERADMIN'));
   }
 
   async function refreshPaymentsOrder(id: string) {
@@ -721,6 +731,17 @@ function CustomerOrdersContent() {
           danger
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently removes the connected production/stock history rather than just losing the link to it. This cannot be undone.`}
+          confirmLabel="Force Through Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
         />
       )}
 

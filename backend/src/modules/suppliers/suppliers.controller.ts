@@ -67,9 +67,12 @@ export class SuppliersController {
     return this.service.update(id, dto);
   }
 
+  // force=true (SUPERADMIN only, re-checked in the service) permanently
+  // deletes this supplier's purchase/payment ledger too - see
+  // SuppliersService.remove.
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  remove(@Param('id') id: string, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.userId, force === 'true', user.role as Role);
   }
 
   // No purchase-mutation routes here by design - every supplier purchase

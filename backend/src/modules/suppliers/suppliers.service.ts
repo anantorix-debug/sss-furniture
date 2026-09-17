@@ -1,18 +1,21 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PdfService } from '../pdf/pdf.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { paginate, toSkipTake } from '../../common/utils/pagination.util';
 import { escapeHtml, REPORT_PDF_STYLES, renderReportHeader, renderFilterSummary, renderGeneratedFooter } from '../../common/utils/pdf-report.util';
+import { Role } from '../../common/enums/role.enum';
 
 @Injectable()
 export class SuppliersService {
   constructor(
     private prisma: PrismaService,
     private pdf: PdfService,
+    private audit: AuditService,
   ) {}
 
   // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
@@ -97,7 +100,7 @@ export class SuppliersService {
     return this.prisma.supplier.update({ where: { id }, data: dto });
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId?: string, force = false, viewerRole?: Role) {
     const supplier = await this.findOne(id);
     // MySQL FK constraints aren't guaranteed to have actually been created
     // by `prisma db push` on every table (confirmed missing on at least one
@@ -106,11 +109,39 @@ export class SuppliersService {
     // schema's onDelete/Restrict semantics avoids silently orphaning
     // purchase/payment rows.
     const purchaseCount = await this.prisma.purchase.count({ where: { supplierId: id } });
-    if (supplier.purchases.length > 0 || supplier.payments.length > 0 || purchaseCount > 0) {
+    const hasHistory = supplier.purchases.length > 0 || supplier.payments.length > 0 || purchaseCount > 0;
+
+    if (hasHistory && !(force && viewerRole === Role.SUPERADMIN)) {
+      if (force) throw new ForbiddenException('Only Super Admin can force this delete through');
       throw new ConflictException(
         'This supplier has purchases or payment history and cannot be deleted. Remove those entries first if you really need to delete the supplier.',
       );
     }
+
+    if (hasHistory) {
+      // Force path (SUPERADMIN only): this supplier's own purchase/payment
+      // ledger is genuinely erased, not just detached - SupplierPurchase/
+      // SupplierPayment/Purchase all require a supplierId. Any StockMovement
+      // linked to a deleted Purchase/SupplierPurchase just loses that
+      // reference (both are nullable there), the movement itself survives.
+      const purchaseIds = (await this.prisma.purchase.findMany({ where: { supplierId: id }, select: { id: true } })).map((p) => p.id);
+      await this.prisma.$transaction([
+        this.prisma.purchaseItem.deleteMany({ where: { purchaseId: { in: purchaseIds } } }),
+        this.prisma.purchase.deleteMany({ where: { supplierId: id } }),
+        this.prisma.supplierPurchase.deleteMany({ where: { supplierId: id } }),
+        this.prisma.supplierPayment.deleteMany({ where: { supplierId: id } }),
+      ]);
+      if (userId) {
+        await this.audit.log({
+          userId,
+          action: 'FORCE_DELETE_SUPPLIER',
+          targetType: 'Supplier',
+          targetId: id,
+          metadata: { name: supplier.name, purchaseCount, supplierPurchaseCount: supplier.purchases.length, paymentCount: supplier.payments.length },
+        });
+      }
+    }
+
     await this.prisma.supplier.delete({ where: { id } });
     return { success: true };
   }

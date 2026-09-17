@@ -10,6 +10,7 @@ import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { Modal } from '@/components/Modal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { useForceable } from '@/hooks/useForceable';
 import { ViewField } from '@/components/ViewField';
 import { StatCard } from '@/components/StatCard';
 import { Chip } from '@/components/StatusBadge';
@@ -166,6 +167,8 @@ function InventoryPageContent() {
 }
 
 function ProductsTab({ canEdit }: { canEdit: boolean }) {
+  const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const [search, setSearch] = useState('');
   const [finishFilter, setFinishFilter] = useState('');
   const [stockStatusFilter, setStockStatusFilter] = useState<'' | 'IN_STOCK' | 'OUT_OF_STOCK'>('');
@@ -286,9 +289,12 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
 
   async function handleDelete() {
     if (!deleteTarget) return;
-    await api.delete(`/products/${deleteTarget.id}`);
-    setDeleteTarget(null);
-    mutate();
+    const target = deleteTarget;
+    await runForceable(async (force) => {
+      await api.delete(`/products/${target.id}${force ? '?force=true' : ''}`);
+      setDeleteTarget(null);
+      mutate();
+    }, hasRole('SUPERADMIN'));
   }
 
   function updateBulkRow(idx: number, patch: Partial<BulkProductRow>) {
@@ -634,6 +640,17 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
         />
       )}
 
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently removes the connected order/production/stock history rather than just losing the link to it. This cannot be undone.`}
+          confirmLabel="Force Through Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
+        />
+      )}
+
       {viewTarget && (
         <Modal title={`${viewTarget.name} - Full Details`} onClose={() => setViewTarget(null)}>
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
@@ -827,6 +844,8 @@ function GalleryTab({ canEdit }: { canEdit: boolean }) {
 }
 
 function MaterialsTab({ canEdit }: { canEdit: boolean }) {
+  const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const { data: result, isLoading, mutate } = useSWR<PaginatedResult<RawMaterial>>(
@@ -869,14 +888,18 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
 
   async function handleDelete() {
     if (!deleteTarget) return;
+    const target = deleteTarget;
     setDeleteError(null);
-    try {
-      await api.delete(`/raw-materials/${deleteTarget.id}`);
-      setDeleteTarget(null);
-      mutate();
-    } catch (err) {
-      setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete material');
-    }
+    await runForceable(async (force) => {
+      try {
+        await api.delete(`/raw-materials/${target.id}${force ? '?force=true' : ''}`);
+        setDeleteTarget(null);
+        mutate();
+      } catch (err) {
+        setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete material');
+        throw err;
+      }
+    }, hasRole('SUPERADMIN') || hasRole('ADMIN'));
   }
 
   async function handleSubmit(e: React.FormEvent) {

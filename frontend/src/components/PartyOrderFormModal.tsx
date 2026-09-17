@@ -5,7 +5,10 @@ import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
 import { formatCurrency, toDateInputValue } from '@/lib/format';
+import { useAuth } from '@/context/AuthContext';
+import { useForceable } from '@/hooks/useForceable';
 import { Modal } from './Modal';
+import { ConfirmDialog } from './ConfirmDialog';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import { ModelNoPicker } from './ModelNoPicker';
 import { GalleryGrid } from './GalleryGrid';
@@ -66,6 +69,8 @@ function itemFromExisting(i: PartyOrderItem): ItemForm {
 // Party Order" / card "Edit" action and the detail page's "Edit" button,
 // so the (fairly large) multi-product form only exists in one place.
 export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: PartyOrder | null; onClose: () => void; onSaved: () => void }) {
+  const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const { data: shops } = useSWR<Shop[]>('/shops', fetcher);
   const [form, setForm] = useState(
     editing
@@ -126,39 +131,42 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
       return;
     }
     setSubmitting(true);
-    try {
-      const payload = {
-        orderDate: form.orderDate,
-        shopId: form.shopId,
-        phone: form.phone || undefined,
-        courierTrack: form.courierTrack || undefined,
-        actualDeliveryDate: form.actualDeliveryDate || undefined,
-        deliveryStatus: form.deliveryStatus,
-        items: validItems.map((i) => ({
-          productId: i.productId,
-          productName: i.productName,
-          finish: i.finish || undefined,
-          color: i.color || undefined,
-          pattern: i.pattern || undefined,
-          details: i.details || undefined,
-          qty: parseInt(i.qty, 10) || 1,
-          unitPrice: parseFloat(i.unitPrice) || 0,
-          modelNo: i.modelNo || undefined,
-          referenceImageId: i.referenceImageId || undefined,
-        })),
-      };
-      if (editing) {
-        await api.patch(`/party-orders/${editing.id}`, payload);
-      } else {
-        await api.post('/party-orders', payload);
+    const payload = {
+      orderDate: form.orderDate,
+      shopId: form.shopId,
+      phone: form.phone || undefined,
+      courierTrack: form.courierTrack || undefined,
+      actualDeliveryDate: form.actualDeliveryDate || undefined,
+      deliveryStatus: form.deliveryStatus,
+      items: validItems.map((i) => ({
+        productId: i.productId,
+        productName: i.productName,
+        finish: i.finish || undefined,
+        color: i.color || undefined,
+        pattern: i.pattern || undefined,
+        details: i.details || undefined,
+        qty: parseInt(i.qty, 10) || 1,
+        unitPrice: parseFloat(i.unitPrice) || 0,
+        modelNo: i.modelNo || undefined,
+        referenceImageId: i.referenceImageId || undefined,
+      })),
+    };
+    await runForceable(async (force) => {
+      try {
+        if (editing) {
+          await api.patch(`/party-orders/${editing.id}${force ? '?force=true' : ''}`, payload);
+        } else {
+          await api.post('/party-orders', payload);
+        }
+        onSaved();
+        onClose();
+      } catch (err) {
+        setFormError(err instanceof ApiError ? err.message : 'Failed to save order');
+        throw err;
+      } finally {
+        setSubmitting(false);
       }
-      onSaved();
-      onClose();
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : 'Failed to save order');
-    } finally {
-      setSubmitting(false);
-    }
+    }, hasRole('SUPERADMIN'));
   }
 
   return (
@@ -340,6 +348,17 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
             </button>
           </div>
         </Modal>
+      )}
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently removes the connected production/stock history rather than just losing the link to it. This cannot be undone.`}
+          confirmLabel="Force Through Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
+        />
       )}
     </Modal>
   );

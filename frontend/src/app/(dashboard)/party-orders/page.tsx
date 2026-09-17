@@ -16,6 +16,7 @@ import { downloadCsv } from '@/lib/csv';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { useForceable } from '@/hooks/useForceable';
 import { sharePdf } from '@/lib/sharePdf';
 import { buildPartyOrderMessage } from '@/lib/orderMessages';
 import type { PartyOrder, Shop, GalleryImage } from '@/types';
@@ -68,6 +69,7 @@ function OrderThumbnail({ order }: { order: PartyOrder }) {
 
 function PartyOrdersContent() {
   const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const [page, setPage] = useState(1);
   const [values, setValues] = useState<Record<string, string>>(emptyFilters);
   const [applied, setApplied] = useState<Record<string, string>>(emptyFilters);
@@ -129,14 +131,16 @@ function PartyOrdersContent() {
 
   async function handleDelete() {
     if (!deleteTarget) return;
-    try {
-      await api.delete(`/party-orders/${deleteTarget.id}`);
-      setDeleteTarget(null);
-      mutate();
-    } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : 'Failed to delete order');
-      setDeleteTarget(null);
-    }
+    const target = deleteTarget;
+    await runForceable(async (force) => {
+      try {
+        await api.delete(`/party-orders/${target.id}${force ? '?force=true' : ''}`);
+        setDeleteTarget(null);
+        mutate();
+      } catch (err) {
+        throw err;
+      }
+    }, hasRole('SUPERADMIN'));
   }
 
   async function downloadOrderPdf(order: PartyOrder) {
@@ -391,6 +395,17 @@ function PartyOrdersContent() {
           danger
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently removes the connected production/stock history rather than just losing the link to it. This cannot be undone.`}
+          confirmLabel="Force Through Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
         />
       )}
 

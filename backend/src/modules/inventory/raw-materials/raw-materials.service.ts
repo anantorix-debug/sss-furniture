@@ -263,8 +263,8 @@ export class RawMaterialsService {
     return this.prisma.rawMaterial.update({ where: { id }, data: { ...dto, measurementKind: measurementKind as any, unit } });
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(id: string, userId?: string, force = false, viewerRole?: Role) {
+    const material = await this.findOne(id);
     // Same defensive check as SuppliersService.remove() - don't rely on the
     // schema's onDelete behavior alone (MySQL FK constraints aren't
     // guaranteed to have actually been created by every `prisma db push`
@@ -277,11 +277,43 @@ export class RawMaterialsService {
       this.prisma.purchaseItem.count({ where: { rawMaterialId: id } }),
       this.prisma.supplierPurchase.count({ where: { rawMaterialId: id } }),
     ]);
-    if (movementCount > 0 || purchaseItemCount > 0 || supplierPurchaseCount > 0) {
+    const hasHistory = movementCount > 0 || purchaseItemCount > 0 || supplierPurchaseCount > 0;
+
+    if (hasHistory && !(force && (viewerRole === Role.SUPERADMIN || viewerRole === Role.ADMIN))) {
+      if (force) throw new ForbiddenException('Only Super Admin or Admin can force this delete through');
       throw new ConflictException(
         'This material has stock movement or purchase history and cannot be deleted. Remove those entries first if you really need to delete it.',
       );
     }
+
+    if (hasHistory) {
+      // Force path (SUPERADMIN only): actually remove the connected data
+      // too, not just the material - the whole point of "force" here is
+      // permanently erasing this material's stock ledger, not leaving it
+      // dangling. StockMovement's rawMaterialId is required with
+      // onDelete: Cascade so it would go anyway, but this project's own
+      // history shows that FK isn't always actually present in MySQL - so
+      // delete it explicitly rather than trust the cascade. PurchaseItem is
+      // likewise required (delete just this material's line, not the whole
+      // Purchase - its other lines are unrelated). SupplierPurchase keeps
+      // its rawMaterialId nullable specifically so a real financial/payment
+      // ledger row never has to be deleted - just detach it.
+      await this.prisma.$transaction([
+        this.prisma.stockMovement.deleteMany({ where: { rawMaterialId: id } }),
+        this.prisma.purchaseItem.deleteMany({ where: { rawMaterialId: id } }),
+        this.prisma.supplierPurchase.updateMany({ where: { rawMaterialId: id }, data: { rawMaterialId: null } }),
+      ]);
+      if (userId) {
+        await this.audit.log({
+          userId,
+          action: 'FORCE_DELETE_RAW_MATERIAL',
+          targetType: 'RawMaterial',
+          targetId: id,
+          metadata: { name: material.name, movementCount, purchaseItemCount, supplierPurchaseCount },
+        });
+      }
+    }
+
     await this.prisma.rawMaterial.delete({ where: { id } });
     return { success: true };
   }

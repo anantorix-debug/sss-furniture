@@ -19,6 +19,7 @@ import { RoleGate } from '@/components/RoleGate';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { useForceable } from '@/hooks/useForceable';
 import { sharePdf } from '@/lib/sharePdf';
 import { buildPartyOrderMessage } from '@/lib/orderMessages';
 import type { PartyOrder, PartyOrderItem, CarpenterWorkItem } from '@/types';
@@ -65,6 +66,7 @@ function PartyOrderDetailContent() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const { data: order, isLoading, mutate } = useSWR<PartyOrder>(`/party-orders/${id}`, fetcher);
   const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
 
@@ -127,13 +129,16 @@ function PartyOrderDetailContent() {
 
   async function handleDelete() {
     if (!order) return;
-    try {
-      await api.delete(`/party-orders/${order.id}`);
-      router.push('/party-orders');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete order');
-      setDeleteConfirmOpen(false);
-    }
+    await runForceable(async (force) => {
+      try {
+        await api.delete(`/party-orders/${order.id}${force ? '?force=true' : ''}`);
+        router.push('/party-orders');
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Failed to delete order');
+        setDeleteConfirmOpen(false);
+        throw err;
+      }
+    }, hasRole('SUPERADMIN'));
   }
 
   if (isLoading || !order) return <p className="text-brand-400 text-sm">Loading order...</p>;
@@ -311,6 +316,17 @@ function PartyOrderDetailContent() {
           danger
           onConfirm={handleDelete}
           onCancel={() => setDeleteConfirmOpen(false)}
+        />
+      )}
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently removes the connected production/stock history rather than just losing the link to it. This cannot be undone.`}
+          confirmLabel="Force Through Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
         />
       )}
 

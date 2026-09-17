@@ -76,14 +76,16 @@ export class PartyOrdersController {
 
   @Roles(Role.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdatePartyOrderDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, user.userId);
+  update(@Param('id') id: string, @Body() dto: UpdatePartyOrderDto, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.update(id, dto, user.userId, force === 'true', user.role as Role);
   }
 
+  // force=true (SUPERADMIN only, re-checked in the service) bypasses the
+  // "production already in progress/completed" block.
   @Roles(Role.ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.remove(id, user.userId);
+  remove(@Param('id') id: string, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user.userId, force === 'true', user.role as Role);
   }
 
   @Roles(Role.ADMIN)

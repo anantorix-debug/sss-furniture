@@ -166,8 +166,8 @@ export class CarpenterService {
     return this.prisma.carpenter.findUnique({ where: { userId } });
   }
 
-  async removeCarpenter(id: string) {
-    await this.findOneCarpenter(id);
+  async removeCarpenter(id: string, userId?: string, force = false, viewerRole?: Role) {
+    const carpenter = await this.findOneCarpenter(id);
     // Same defensive check as SuppliersService.remove: don't rely on the
     // schema's onDelete behavior alone (MySQL FK constraints aren't
     // guaranteed to have actually been created by every `prisma db push`
@@ -177,11 +177,39 @@ export class CarpenterService {
       this.prisma.carpenterWorkItem.count({ where: { carpenterId: id } }),
       this.prisma.carpenterPayment.count({ where: { carpenterId: id } }),
     ]);
-    if (workItemCount > 0 || paymentCount > 0) {
+    const hasHistory = workItemCount > 0 || paymentCount > 0;
+
+    if (hasHistory && !(force && viewerRole === Role.SUPERADMIN)) {
+      if (force) throw new ForbiddenException('Only Super Admin can force this delete through');
       throw new ConflictException(
         'This worker has work items or payment history and cannot be deleted. Remove those first if you really need to delete the worker.',
       );
     }
+
+    if (hasHistory) {
+      // Force path (SUPERADMIN only). Work items keep their own production/
+      // material-usage history intact - carpenterId is nullable, so they
+      // just lose the "who did it" link rather than being deleted. Payments
+      // are a real wage-payment ledger with a required carpenterId
+      // (onDelete: Cascade) - there's no way to keep those and still delete
+      // the worker, so force here does genuinely erase that payment
+      // history, not just a reference to it. Audited with the exact counts
+      // either way.
+      await this.prisma.$transaction([
+        this.prisma.carpenterWorkItem.updateMany({ where: { carpenterId: id }, data: { carpenterId: null } }),
+        this.prisma.carpenterPayment.deleteMany({ where: { carpenterId: id } }),
+      ]);
+      if (userId) {
+        await this.audit.log({
+          userId,
+          action: 'FORCE_DELETE_CARPENTER',
+          targetType: 'Carpenter',
+          targetId: id,
+          metadata: { name: carpenter.name, workItemCount, paymentCount },
+        });
+      }
+    }
+
     await this.prisma.carpenter.delete({ where: { id } });
     return { success: true };
   }
@@ -739,7 +767,7 @@ export class CarpenterService {
     return { ...workItem, whatsapp };
   }
 
-  async removeWorkItem(id: string) {
+  async removeWorkItem(id: string, userId?: string, force = false, viewerRole?: Role) {
     const existing = await this.prisma.carpenterWorkItem.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Work item not found');
 
@@ -752,7 +780,10 @@ export class CarpenterService {
     // by design (see createHistoricalEntry), that's not "real progress" in
     // the live-workflow sense; the movement/QC check right below still
     // applies to them exactly the same as everything else.
-    if (existing.entryType === 'LIVE' && existing.status !== 'ASSIGNED') {
+    const statusBlocked = existing.entryType === 'LIVE' && existing.status !== 'ASSIGNED';
+    const canForce = force && viewerRole === Role.SUPERADMIN;
+    if (statusBlocked && !canForce) {
+      if (force) throw new ForbiddenException('Only Super Admin can force this delete through');
       throw new ConflictException(
         `This work item is already ${existing.status.toLowerCase().replace('_', ' ')} and cannot be deleted - it has real production history. Use Cancel/Rework instead if it needs to be undone.`,
       );
@@ -761,8 +792,28 @@ export class CarpenterService {
       this.prisma.stockMovement.count({ where: { workItemId: id } }),
       this.prisma.qualityCheck.count({ where: { workItemId: id } }),
     ]);
-    if (movementCount > 0 || qcCount > 0) {
+    const hasLinkedRecords = movementCount > 0 || qcCount > 0;
+    if (hasLinkedRecords && !canForce) {
+      if (force) throw new ForbiddenException('Only Super Admin can force this delete through');
       throw new ConflictException('This work item has material usage or quality check history and cannot be deleted.');
+    }
+    if (hasLinkedRecords) {
+      // Force path (SUPERADMIN only): the material-usage/QC records
+      // themselves survive - workItemId is nullable + SetNull on both -
+      // they just lose the "which job was this for" link.
+      await this.prisma.$transaction([
+        this.prisma.stockMovement.updateMany({ where: { workItemId: id }, data: { workItemId: null } }),
+        this.prisma.qualityCheck.updateMany({ where: { workItemId: id }, data: { workItemId: null } }),
+      ]);
+    }
+    if ((statusBlocked || hasLinkedRecords) && userId) {
+      await this.audit.log({
+        userId,
+        action: 'FORCE_DELETE_WORK_ITEM',
+        targetType: 'CarpenterWorkItem',
+        targetId: id,
+        metadata: { productName: existing.productName, status: existing.status, movementCount, qcCount },
+      });
     }
 
     await this.prisma.carpenterWorkItem.delete({ where: { id } });
