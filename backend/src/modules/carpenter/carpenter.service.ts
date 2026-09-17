@@ -726,6 +726,25 @@ export class CarpenterService {
   async removeWorkItem(id: string) {
     const existing = await this.prisma.carpenterWorkItem.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Work item not found');
+
+    // Once work has actually started (materials issued, quality-checked, or
+    // finished), deleting the row would silently erase that trail rather
+    // than just cancelling a not-yet-started assignment - block it the same
+    // way every other "real history exists" delete in this app does.
+    // ASSIGNED (nothing done yet) is the only status this is safe for.
+    if (existing.status !== 'ASSIGNED') {
+      throw new ConflictException(
+        `This work item is already ${existing.status.toLowerCase().replace('_', ' ')} and cannot be deleted - it has real production history. Use Cancel/Rework instead if it needs to be undone.`,
+      );
+    }
+    const [movementCount, qcCount] = await Promise.all([
+      this.prisma.stockMovement.count({ where: { workItemId: id } }),
+      this.prisma.qualityCheck.count({ where: { workItemId: id } }),
+    ]);
+    if (movementCount > 0 || qcCount > 0) {
+      throw new ConflictException('This work item has material usage or quality check history and cannot be deleted.');
+    }
+
     await this.prisma.carpenterWorkItem.delete({ where: { id } });
     return { success: true };
   }

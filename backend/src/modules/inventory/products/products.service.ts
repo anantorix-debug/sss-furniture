@@ -158,7 +158,39 @@ export class ProductsService {
   }
 
   async remove(id: string) {
-    await this.findOne(id);
+    const product = await this.prisma.product.findUnique({ where: { id } });
+    if (!product) throw new NotFoundException('Product not found');
+
+    // Every Product row starts life at quantity/availableQuantity: 1 (see
+    // create() - "one Model No = one physical piece", not a multi-unit
+    // count), so checking quantity > 0 would block literally every product
+    // ever created, including ones nobody has touched yet. reservedQuantity
+    // is the real signal: it's only ever set once this piece is actually
+    // allocated to a live order (StockAllocationService).
+    if (product.reservedQuantity > 0) {
+      throw new ConflictException(
+        'This product is currently reserved for a live order and cannot be deleted. Cancel or edit that order first, or mark this product Inactive instead.',
+      );
+    }
+    const [orderItemCount, partyOrderItemCount, workItemCount, finishedStockCount, movementCount] = await Promise.all([
+      this.prisma.customerOrderItem.count({ where: { productId: id } }),
+      this.prisma.partyOrderItem.count({ where: { productId: id } }),
+      this.prisma.carpenterWorkItem.count({ where: { productId: id } }),
+      this.prisma.finishedStockItem.count({ where: { productId: id } }),
+      // > 1, not > 0 - every product gets exactly one "Added to stock" IN
+      // movement at creation (see create()); that alone doesn't mean
+      // anything has actually happened to this piece since. Deleting
+      // cascades that history away (schema: onDelete Cascade), so any
+      // movement beyond the creation one - a dispatch, adjustment, or
+      // reservation/release - is what makes this unsafe to remove.
+      this.prisma.productStockMovement.count({ where: { productId: id } }),
+    ]);
+    if (orderItemCount > 0 || partyOrderItemCount > 0 || workItemCount > 0 || finishedStockCount > 0 || movementCount > 1) {
+      throw new ConflictException(
+        'This product is referenced by existing orders, production, or stock history and cannot be deleted. Mark it Inactive instead to hide it from new orders.',
+      );
+    }
+
     await this.prisma.product.delete({ where: { id } });
     return { success: true };
   }

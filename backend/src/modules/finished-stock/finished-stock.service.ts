@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFinishedStockDto } from './dto/create-finished-stock.dto';
 import { UpdateFinishedStockDto } from './dto/update-finished-stock.dto';
@@ -67,6 +67,14 @@ export class FinishedStockService {
 
   async remove(id: string) {
     await this.findOne(id);
+    // DispatchRecord.finishedStockId is onDelete: SetNull - deleting an
+    // already-dispatched item wouldn't crash, but it would silently sever
+    // "which stock item was this delivery for" from real dispatch history.
+    // An undispatched (still on hand) item is safe to remove outright.
+    const dispatchCount = await this.prisma.dispatchRecord.count({ where: { finishedStockId: id } });
+    if (dispatchCount > 0) {
+      throw new ConflictException('This finished stock item has already been dispatched and cannot be deleted - it is part of real delivery history.');
+    }
     await this.prisma.finishedStockItem.delete({ where: { id } });
     return { success: true };
   }

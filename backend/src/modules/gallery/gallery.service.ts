@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { extname, join } from 'path';
@@ -78,6 +78,25 @@ export class GalleryService {
 
   async remove(id: string, userId: string) {
     const image = await this.findOne(id);
+
+    // referenceImageId is onDelete: SetNull on both order-item relations, so
+    // this wouldn't crash - but it WOULD silently strip a product's photo
+    // off every order/PDF/WhatsApp send/employee dashboard that currently
+    // shows it, with no way to tell the image was ever there. Block instead
+    // and say exactly how many places are using it, same as every other
+    // "real usage exists" guard in this app.
+    const [orderGalleryCount, customerItemCount, partyItemCount] = await Promise.all([
+      this.prisma.customerOrderGalleryImage.count({ where: { galleryImageId: id } }),
+      this.prisma.customerOrderItem.count({ where: { referenceImageId: id } }),
+      this.prisma.partyOrderItem.count({ where: { referenceImageId: id } }),
+    ]);
+    const usageCount = orderGalleryCount + customerItemCount + partyItemCount;
+    if (usageCount > 0) {
+      throw new ConflictException(
+        `This image is currently used on ${usageCount} order${usageCount === 1 ? '' : 's'}/product line${usageCount === 1 ? '' : 's'} and cannot be deleted. Remove it from those orders first if you really need to delete it.`,
+      );
+    }
+
     await this.prisma.galleryImage.delete({ where: { id } });
     await fs.unlink(join(UPLOAD_DIR, image.url.split('/').pop()!)).catch(() => undefined);
 
