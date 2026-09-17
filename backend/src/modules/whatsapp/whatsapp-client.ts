@@ -302,11 +302,9 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   }
 
   isOperational(): boolean {
-    if (!this.client) return false;
-    // If authenticated, allow chat retrieval attempt even during LOADING_SCREEN
-    // The stores might be accessible even if not fully initialized
-    if (this.authenticated) return true;
-    return false;
+    // Do not attempt sends while WhatsApp Web is only authenticated/loading.
+    // sendMessage should only run after the client has emitted READY.
+    return !!this.client && this.state === 'READY' && this.ready;
   }
 
   async resolveChatIdForSending(chatId: string): Promise<string> {
@@ -613,7 +611,26 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
         return result;
       } catch (sendErr) {
         const sendErrorMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+        const sendErrorStack = sendErr instanceof Error ? sendErr.stack : undefined;
+
+        // whatsapp-web.js / WhatsApp Web can sometimes throw very small or
+        // non-standard errors (for example just `r`). Log every available
+        // property so the real failure is visible in PM2/server logs.
+        let rawError = '';
+        try {
+          rawError = JSON.stringify(sendErr, Object.getOwnPropertyNames(sendErr));
+        } catch {
+          rawError = String(sendErr);
+        }
+
         this.logger.error(`[WA SEND] Send operation failed: ${sendErrorMsg}`);
+        this.logger.error(`[WA SEND] Raw error: ${rawError}`);
+        if (sendErrorStack) {
+          this.logger.error(`[WA SEND] Stack: ${sendErrorStack}`);
+        }
+        this.logger.error(`[WA SEND] Target: ${resolvedChatId}`);
+        this.logger.error(`[WA SEND] State: ${this.state}, authenticated=${this.authenticated}, ready=${this.ready}`);
+
         throw new Error(`Failed to send message: ${sendErrorMsg}`);
       }
     } catch (err) {
@@ -799,62 +816,62 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       this.logger.log(`[CHATS] Attempting safe fallback using browser context`);
       const chatsFromFallback = await Promise.race([
         this.client.pupPage.evaluate(async () => {
-        try {
-          const w = window as any;
-
-          // Safely check for WAWebCollections
-          const require = w.require;
-          if (typeof require !== 'function') {
-            throw new Error('window.require not available');
-          }
-
-          let WAWebCollections: any;
           try {
-            WAWebCollections = require('WAWebCollections');
-          } catch {
-            throw new Error('WAWebCollections not found');
-          }
+            const w = window as any;
 
-          // Safely check for Chat
-          if (!WAWebCollections || typeof WAWebCollections !== 'object') {
-            throw new Error('WAWebCollections is not an object');
-          }
+            // Safely check for WAWebCollections
+            const require = w.require;
+            if (typeof require !== 'function') {
+              throw new Error('window.require not available');
+            }
 
-          const ChatStore = WAWebCollections.Chat;
-          if (!ChatStore || typeof ChatStore !== 'object') {
-            throw new Error('WAWebCollections.Chat not found or invalid');
-          }
+            let WAWebCollections: any;
+            try {
+              WAWebCollections = require('WAWebCollections');
+            } catch {
+              throw new Error('WAWebCollections not found');
+            }
 
-          // Safely get models array
-          if (typeof ChatStore.getModelsArray !== 'function') {
-            throw new Error('ChatStore.getModelsArray is not a function');
-          }
+            // Safely check for Chat
+            if (!WAWebCollections || typeof WAWebCollections !== 'object') {
+              throw new Error('WAWebCollections is not an object');
+            }
 
-          const chatModels = ChatStore.getModelsArray();
-          if (!Array.isArray(chatModels)) {
-            throw new Error(`getModelsArray returned ${typeof chatModels}, expected array`);
-          }
+            const ChatStore = WAWebCollections.Chat;
+            if (!ChatStore || typeof ChatStore !== 'object') {
+              throw new Error('WAWebCollections.Chat not found or invalid');
+            }
 
-          // Map chats safely
-          return chatModels.map((chat: any) => {
-            if (!chat || !chat.id) return null;
-            const chatId = chat.id?._serialized || chat.id || '';
-            return {
-              id: chatId,
-              name: chat.name || chat.subject || chat.formattedTitle || 'WhatsApp Chat',
-              isGroup: chatId.endsWith('@g.us') || chat.isGroup === true,
-              isLid: chatId.endsWith('@lid'),
-              phoneNumber: null,
-              unread: chat.unreadCount || 0,
-              timestamp: chat.timestamp || null,
-              archived: !!chat.archived,
-              pinned: !!chat.pinned,
-              isReadOnly: !!(chat.groupMetadata?.announce),
-            };
-          }).filter((c: any) => c && c.id);
-        } catch (fallbackErr: any) {
-          throw new Error(`Fallback failed: ${fallbackErr?.message || String(fallbackErr)}`);
-        }
+            // Safely get models array
+            if (typeof ChatStore.getModelsArray !== 'function') {
+              throw new Error('ChatStore.getModelsArray is not a function');
+            }
+
+            const chatModels = ChatStore.getModelsArray();
+            if (!Array.isArray(chatModels)) {
+              throw new Error(`getModelsArray returned ${typeof chatModels}, expected array`);
+            }
+
+            // Map chats safely
+            return chatModels.map((chat: any) => {
+              if (!chat || !chat.id) return null;
+              const chatId = chat.id?._serialized || chat.id || '';
+              return {
+                id: chatId,
+                name: chat.name || chat.subject || chat.formattedTitle || 'WhatsApp Chat',
+                isGroup: chatId.endsWith('@g.us') || chat.isGroup === true,
+                isLid: chatId.endsWith('@lid'),
+                phoneNumber: null,
+                unread: chat.unreadCount || 0,
+                timestamp: chat.timestamp || null,
+                archived: !!chat.archived,
+                pinned: !!chat.pinned,
+                isReadOnly: !!(chat.groupMetadata?.announce),
+              };
+            }).filter((c: any) => c && c.id);
+          } catch (fallbackErr: any) {
+            throw new Error(`Fallback failed: ${fallbackErr?.message || String(fallbackErr)}`);
+          }
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('store fallback timed out after 10s')), 10000)),
       ]) as any[];
