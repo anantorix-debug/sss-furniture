@@ -8,10 +8,12 @@ import { formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { Modal } from '@/components/Modal';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { RoleGate } from '@/components/RoleGate';
 import { ModelNoPicker } from '@/components/ModelNoPicker';
 import { UnitSelect } from '@/components/UnitSelect';
 import { ViewField } from '@/components/ViewField';
+import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import type {
   ProductionDashboard,
   CarpenterWorkItem,
@@ -21,6 +23,12 @@ import type {
   FinishedStockItem,
   DispatchRecord,
   QcResult,
+  HistoricalBatch,
+  ProductionStage,
+  ProductionSource,
+  CustomerOrder,
+  PartyOrder,
+  WorkerType,
 } from '@/types';
 
 const STATUS_CHIP: Record<string, ChipColor> = {
@@ -840,14 +848,570 @@ function DispatchTab() {
   );
 }
 
-// --- Page shell: one menu entry, three tabs ---
+// --- Historical / Offline Entry tab -----------------------------------
+// Manually recording old paper production records - deliberately NOT the
+// live Assign -> Start -> End flow above (see the backend's
+// CarpenterService "Historical / Offline Entry" section). One record here
+// = however many employee/stage lines the old paper entry covers, saved
+// together and shown/edited/deleted as one row.
 
-type TopTab = 'overview' | 'dispatch' | 'verification';
+const HIST_STAGE_LABEL: Record<ProductionStage, string> = { CARPENTER: 'Carpenter', CARVING: 'Carving', POLISH: 'Polish' };
+const HIST_STAGE_WORKER_TYPE: Record<ProductionStage, WorkerType> = { CARPENTER: 'CARPENTER', CARVING: 'CARVER', POLISH: 'POLISHER' };
+const HIST_SOURCE_LABEL: Record<ProductionSource, string> = {
+  CUSTOMER_ORDER: 'Customer Order',
+  PARTY_ORDER: 'Party Order',
+  STOCK: 'Stock',
+  OTHER: 'Other / Unlinked',
+};
+
+interface HistLineForm {
+  carpenterId: string;
+  stage: ProductionStage;
+  quantity: string;
+  notes: string;
+}
+const emptyHistLine: HistLineForm = { carpenterId: '', stage: 'CARPENTER', quantity: '1', notes: '' };
+
+interface HistFormState {
+  workDate: string;
+  modelNo: string;
+  productName: string;
+  pattern: string;
+  size: string;
+  sizeUnit: string;
+  source: ProductionSource;
+  sourceCustomerOrderId: string;
+  sourceCustomerOrderLabel: string;
+  sourcePartyOrderItemId: string;
+  sourcePartyOrderItemLabel: string;
+}
+const emptyHistForm: HistFormState = {
+  workDate: new Date().toISOString().slice(0, 10),
+  modelNo: '',
+  productName: '',
+  pattern: '',
+  size: '',
+  sizeUnit: '',
+  source: 'OTHER',
+  sourceCustomerOrderId: '',
+  sourceCustomerOrderLabel: '',
+  sourcePartyOrderItemId: '',
+  sourcePartyOrderItemLabel: '',
+};
+
+function batchToForm(b: HistoricalBatch): HistFormState {
+  return {
+    workDate: b.workDate.slice(0, 10),
+    modelNo: b.modelNo ?? '',
+    productName: b.productName,
+    pattern: b.pattern ?? '',
+    size: b.size ?? '',
+    sizeUnit: b.sizeUnit ?? '',
+    source: b.source,
+    sourceCustomerOrderId: b.sourceCustomerOrderId ?? '',
+    sourceCustomerOrderLabel: b.sourceCustomerOrder ? `${b.sourceCustomerOrder.orderId} - ${b.sourceCustomerOrder.customerName}` : '',
+    sourcePartyOrderItemId: b.sourcePartyOrderItemId ?? '',
+    sourcePartyOrderItemLabel: b.sourcePartyOrderItem
+      ? `${b.sourcePartyOrderItem.order.shopName} - ${b.sourcePartyOrderItem.productName}`
+      : '',
+  };
+}
+
+// Simple type-to-search picker, reused for both Customer and Party Order
+// references - same "search box + dropdown of matches" shape already used
+// by ModelNoPicker, just against a different endpoint.
+function OrderSearchPicker<T>({
+  placeholder,
+  searchPath,
+  renderLabel,
+  onSelect,
+  selectedLabel,
+  onClear,
+}: {
+  placeholder: string;
+  searchPath: (q: string) => string;
+  renderLabel: (item: T) => string;
+  onSelect: (item: T) => void;
+  selectedLabel: string;
+  onClear: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const { data } = useSWR<PaginatedResult<T> | T[]>(open && query.trim() ? searchPath(query.trim()) : null, fetcher);
+  const results = data ? ('data' in data ? data.data : data) : [];
+
+  if (selectedLabel) {
+    return (
+      <div className="input flex items-center justify-between gap-2 bg-brand-50">
+        <span className="truncate text-sm">{selectedLabel}</span>
+        <button type="button" className="text-red-500 text-xs shrink-0" onClick={onClear}>
+          Clear
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <input
+        className="input"
+        placeholder={placeholder}
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && query.trim() && (
+        <div className="absolute z-20 mt-1 w-full max-h-52 overflow-y-auto card p-1 shadow-lg">
+          {results.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-brand-400 italic">No matches</p>
+          ) : (
+            results.map((item, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="w-full text-left px-3 py-2 rounded-md hover:bg-brand-50 text-sm truncate"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onSelect(item);
+                  setOpen(false);
+                  setQuery('');
+                }}
+              >
+                {renderLabel(item)}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoricalEntryFormModal({
+  editing,
+  onClose,
+  onSaved,
+}: {
+  editing: HistoricalBatch | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { data: carpenters } = useSWR<CarpenterSummary[]>('/carpenters?includeInactive=false', fetcher);
+  const [form, setForm] = useState<HistFormState>(editing ? batchToForm(editing) : emptyHistForm);
+  const [lines, setLines] = useState<HistLineForm[]>(
+    editing && editing.entries.length > 0
+      ? editing.entries.map((e) => ({ carpenterId: e.carpenterId, stage: e.stage, quantity: String(e.quantity), notes: e.notes ?? '' }))
+      : [{ ...emptyHistLine }],
+  );
+  const [partyOrderId, setPartyOrderId] = useState<string>('');
+  const { data: partyOrderDetail } = useSWR<PartyOrder>(partyOrderId ? `/party-orders/${partyOrderId}` : null, fetcher);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  function updateLine(idx: number, patch: Partial<HistLineForm>) {
+    setLines((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+  function workersForStage(stage: ProductionStage) {
+    return (carpenters ?? []).filter((c) => c.workerType === HIST_STAGE_WORKER_TYPE[stage]);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const validLines = lines.filter((l) => l.carpenterId);
+    if (validLines.length === 0) {
+      setError('Add at least one employee/stage line.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const payload = {
+        workDate: form.workDate,
+        modelNo: form.modelNo || undefined,
+        productName: form.productName,
+        pattern: form.pattern || undefined,
+        size: form.size || undefined,
+        sizeUnit: form.sizeUnit || undefined,
+        source: form.source,
+        sourceCustomerOrderId: form.source === 'CUSTOMER_ORDER' ? form.sourceCustomerOrderId || undefined : undefined,
+        sourcePartyOrderItemId: form.source === 'PARTY_ORDER' ? form.sourcePartyOrderItemId || undefined : undefined,
+        entries: validLines.map((l) => ({
+          carpenterId: l.carpenterId,
+          stage: l.stage,
+          quantity: parseInt(l.quantity, 10) || 1,
+          notes: l.notes || undefined,
+        })),
+      };
+      if (editing) {
+        await api.patch(`/carpenter-work-items/historical/${editing.batchId}`, payload);
+      } else {
+        await api.post('/carpenter-work-items/historical', payload);
+      }
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to save historical record');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title={editing ? 'Edit Historical Record' : 'New Historical Record'} onClose={onClose} wide>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Date</label>
+            <input type="date" className="input" required value={form.workDate} onChange={(e) => setForm((f) => ({ ...f, workDate: e.target.value }))} />
+          </div>
+          <div>
+            <label className="label">Model No</label>
+            <ModelNoPicker modelNo={form.modelNo} onChangeModelNo={(v) => setForm((f) => ({ ...f, modelNo: v }))} onSelect={() => undefined} />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Product / Model Name</label>
+            <input
+              className="input"
+              required
+              placeholder="e.g. Rauter Box"
+              value={form.productName}
+              onChange={(e) => setForm((f) => ({ ...f, productName: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="label">Pattern</label>
+            <input className="input" placeholder="e.g. B.Cat" value={form.pattern} onChange={(e) => setForm((f) => ({ ...f, pattern: e.target.value }))} />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Size</label>
+            <input className="input" placeholder="e.g. 78x84" value={form.size} onChange={(e) => setForm((f) => ({ ...f, size: e.target.value }))} />
+          </div>
+          <div>
+            <label className="label">Size Unit</label>
+            <input className="input" placeholder="e.g. Inch" value={form.sizeUnit} onChange={(e) => setForm((f) => ({ ...f, sizeUnit: e.target.value }))} />
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Source Type</label>
+          <div className="flex flex-wrap gap-3 mb-2">
+            {(Object.keys(HIST_SOURCE_LABEL) as ProductionSource[]).map((s) => (
+              <label key={s} className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="radio"
+                  checked={form.source === s}
+                  onChange={() =>
+                    setForm((f) => ({
+                      ...f,
+                      source: s,
+                      sourceCustomerOrderId: '',
+                      sourceCustomerOrderLabel: '',
+                      sourcePartyOrderItemId: '',
+                      sourcePartyOrderItemLabel: '',
+                    }))
+                  }
+                />
+                {HIST_SOURCE_LABEL[s]}
+              </label>
+            ))}
+          </div>
+          {form.source === 'CUSTOMER_ORDER' && (
+            <OrderSearchPicker<CustomerOrder>
+              placeholder="Search Customer Order (Order ID / Customer Name)..."
+              searchPath={(q) => `/customer-orders?search=${encodeURIComponent(q)}&limit=10`}
+              renderLabel={(o) => `${o.orderId} - ${o.customerName}`}
+              selectedLabel={form.sourceCustomerOrderLabel}
+              onSelect={(o) => setForm((f) => ({ ...f, sourceCustomerOrderId: o.id, sourceCustomerOrderLabel: `${o.orderId} - ${o.customerName}` }))}
+              onClear={() => setForm((f) => ({ ...f, sourceCustomerOrderId: '', sourceCustomerOrderLabel: '' }))}
+            />
+          )}
+          {form.source === 'PARTY_ORDER' && !form.sourcePartyOrderItemLabel && (
+            <>
+              <OrderSearchPicker<PartyOrder>
+                placeholder="Search Party Order (Shop Name)..."
+                searchPath={(q) => `/party-orders?search=${encodeURIComponent(q)}&limit=10`}
+                renderLabel={(o) => `${o.shopName} - ${o.jobNumber ?? o.id.slice(0, 8)}`}
+                selectedLabel=""
+                onSelect={(o) => setPartyOrderId(o.id)}
+                onClear={() => setPartyOrderId('')}
+              />
+              {partyOrderId && partyOrderDetail && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-brand-500">{partyOrderDetail.shopName} - pick which product line:</p>
+                  {partyOrderDetail.items.map((it) => (
+                    <button
+                      key={it.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 rounded-md border border-brand-100 hover:bg-brand-50 text-sm"
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          sourcePartyOrderItemId: it.id,
+                          sourcePartyOrderItemLabel: `${partyOrderDetail.shopName} - ${it.productName}`,
+                        }))
+                      }
+                    >
+                      {it.productName} {it.size ? `(${it.size}${it.sizeUnit ?? ''})` : ''}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {form.source === 'PARTY_ORDER' && form.sourcePartyOrderItemLabel && (
+            <div className="input flex items-center justify-between gap-2 bg-brand-50">
+              <span className="truncate text-sm">{form.sourcePartyOrderItemLabel}</span>
+              <button
+                type="button"
+                className="text-red-500 text-xs shrink-0"
+                onClick={() => {
+                  setPartyOrderId('');
+                  setForm((f) => ({ ...f, sourcePartyOrderItemId: '', sourcePartyOrderItemLabel: '' }));
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="label mb-0">Employee Work Records</label>
+            <button type="button" className="text-brand-600 text-xs hover:underline" onClick={() => setLines((rows) => [...rows, { ...emptyHistLine }])}>
+              + Add employee/stage
+            </button>
+          </div>
+          <div className="space-y-2">
+            {lines.map((line, idx) => (
+              <div key={idx} className="grid grid-cols-1 sm:grid-cols-[110px_1fr_70px_1fr_auto] gap-2 items-center border border-brand-100 rounded-lg p-2">
+                <select
+                  className="input"
+                  value={line.stage}
+                  onChange={(e) => updateLine(idx, { stage: e.target.value as ProductionStage, carpenterId: '' })}
+                >
+                  {(Object.keys(HIST_STAGE_LABEL) as ProductionStage[]).map((s) => (
+                    <option key={s} value={s}>
+                      {HIST_STAGE_LABEL[s]}
+                    </option>
+                  ))}
+                </select>
+                <select className="input" required value={line.carpenterId} onChange={(e) => updateLine(idx, { carpenterId: e.target.value })}>
+                  <option value="">Select employee...</option>
+                  {workersForStage(line.stage).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min="1"
+                  className="input"
+                  placeholder="Qty"
+                  value={line.quantity}
+                  onChange={(e) => updateLine(idx, { quantity: e.target.value })}
+                />
+                <input
+                  className="input"
+                  placeholder="Remarks"
+                  value={line.notes}
+                  onChange={(e) => updateLine(idx, { notes: e.target.value })}
+                />
+                <button type="button" className="text-red-500 text-xs" disabled={lines.length === 1} onClick={() => setLines((rows) => rows.filter((_, i) => i !== idx))}>
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-primary">
+            {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Save Historical Record'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function HistoricalTab() {
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<HistoricalBatch | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<HistoricalBatch | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<HistoricalBatch>>(
+    `/carpenter-work-items/historical?${new URLSearchParams({ ...(search ? { search } : {}), page: String(page), limit: '15' })}`,
+    fetcher,
+  );
+  const data = result?.data;
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    try {
+      await api.delete(`/carpenter-work-items/historical/${deleteTarget.batchId}`);
+      setDeleteTarget(null);
+      setNotice('Historical record deleted.');
+      mutate();
+    } catch {
+      // Global toast (see lib/api.ts) already surfaces why - e.g. blocked
+      // by real material-usage/QC history - dialog just stays open so the
+      // user can Cancel or retry.
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-brand-600 max-w-xl">
+            Manually record old paper production entries here - these are marked Historical and never enter the live Assign
+            &rarr; Start &rarr; End workflow or count as pending work.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-primary text-sm shrink-0"
+          onClick={() => {
+            setEditing(null);
+            setFormOpen(true);
+          }}
+        >
+          + New Historical Record
+        </button>
+      </div>
+
+      <input
+        className="input max-w-xs"
+        placeholder="Search Model No / Product..."
+        value={search}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setPage(1);
+        }}
+      />
+
+      {notice && <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">{notice}</p>}
+
+      <div className="card overflow-x-auto">
+        <table className="table-shell">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Model No</th>
+              <th>Product</th>
+              <th>Pattern</th>
+              <th>Size</th>
+              <th>Source</th>
+              <th>Employees</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && (
+              <tr>
+                <td colSpan={8} className="text-center py-8 text-brand-400">
+                  Loading...
+                </td>
+              </tr>
+            )}
+            {!isLoading && data?.length === 0 && (
+              <tr>
+                <td colSpan={8} className="text-center py-8 text-brand-400">
+                  No historical records yet
+                </td>
+              </tr>
+            )}
+            {data?.map((b) => (
+              <tr key={b.batchId}>
+                <td>{formatDate(b.workDate)}</td>
+                <td className="text-xs">{b.modelNo ?? '-'}</td>
+                <td>{b.productName}</td>
+                <td className="text-brand-500">{b.pattern ?? '-'}</td>
+                <td className="text-brand-500">{b.size ? `${b.size}${b.sizeUnit ?? ''}` : '-'}</td>
+                <td className="text-xs text-brand-500">
+                  {HIST_SOURCE_LABEL[b.source]}
+                  {b.sourceCustomerOrder && <div className="text-[10px]">{b.sourceCustomerOrder.orderId}</div>}
+                  {b.sourcePartyOrderItem && <div className="text-[10px]">{b.sourcePartyOrderItem.order.shopName}</div>}
+                </td>
+                <td className="text-xs">
+                  {b.entries.map((e) => `${HIST_STAGE_LABEL[e.stage]}: ${e.carpenter?.name ?? '-'}`).join(', ')}
+                </td>
+                <td>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="text-brand-600 hover:underline text-xs"
+                      onClick={() => {
+                        setEditing(b);
+                        setFormOpen(true);
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button type="button" className="text-red-500 hover:underline text-xs" onClick={() => setDeleteTarget(b)}>
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {result && <Pagination page={result.page} totalPages={result.totalPages} total={result.total} limit={result.limit} onPageChange={setPage} />}
+      </div>
+
+      {formOpen && (
+        <HistoricalEntryFormModal
+          editing={editing}
+          onClose={() => setFormOpen(false)}
+          onSaved={() => {
+            setNotice(editing ? 'Historical record updated.' : 'Historical record saved.');
+            mutate();
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete Historical Record"
+          message={`Delete this historical record for ${deleteTarget.productName}${deleteTarget.modelNo ? ` (Model ${deleteTarget.modelNo})` : ''}? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- Page shell: one menu entry, four tabs ---
+
+type TopTab = 'overview' | 'dispatch' | 'verification' | 'historical';
 
 const TOP_TABS: { key: TopTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'dispatch', label: 'Dispatch Pipeline' },
   { key: 'verification', label: 'Ready for Verification' },
+  { key: 'historical', label: 'Historical Entry' },
 ];
 
 function ProductionControlContent() {
@@ -879,6 +1443,7 @@ function ProductionControlContent() {
       {tab === 'overview' && <OverviewTab />}
       {tab === 'dispatch' && <DispatchTab />}
       {tab === 'verification' && <VerificationTab />}
+      {tab === 'historical' && <HistoricalTab />}
     </div>
   );
 }

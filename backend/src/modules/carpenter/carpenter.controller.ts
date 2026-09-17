@@ -4,6 +4,7 @@ import { CreateCarpenterDto } from './dto/create-carpenter.dto';
 import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
 import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
+import { CreateHistoricalWorkItemDto } from './dto/create-historical-work-item.dto';
 import { UpdateWorkStatusDto } from './dto/update-work-status.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
 import { CreateProductionTeamDto } from './dto/create-production-team.dto';
@@ -122,6 +123,7 @@ export class CarpenterController {
     @Query('batchId') batchId?: string,
     @Query('sourceCustomerOrderId') sourceCustomerOrderId?: string,
     @Query('sourcePartyOrderItemId') sourcePartyOrderItemId?: string,
+    @Query('entryType') entryType?: 'LIVE' | 'HISTORICAL',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @CurrentUser() user?: AuthUser,
@@ -135,6 +137,7 @@ export class CarpenterController {
       batchId,
       sourceCustomerOrderId,
       sourcePartyOrderItemId,
+      entryType,
       viewerRole: user?.role as Role,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
@@ -147,6 +150,58 @@ export class CarpenterController {
   @Get('carpenter-work-items/dashboard')
   getDashboard() {
     return this.service.getDashboard();
+  }
+
+  // Historical / Offline Entry - manually recording old paper production
+  // records. Deliberately separate from the live create/assign/status
+  // endpoints above (see CarpenterService's "Historical / Offline Entry"
+  // section) - Admin-only data entry, not something a worker's login
+  // creates or progresses through. Static routes, so they must come before
+  // the dynamic :id routes below.
+  @Roles(Role.ADMIN)
+  @Get('carpenter-work-items/historical')
+  findAllHistoricalBatches(
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('carpenterId') carpenterId?: string,
+    @Query('source') source?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.findAllHistoricalBatches({
+      search,
+      dateFrom,
+      dateTo,
+      carpenterId,
+      source,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Roles(Role.ADMIN)
+  @Post('carpenter-work-items/historical')
+  createHistoricalEntry(@Body() dto: CreateHistoricalWorkItemDto, @CurrentUser() user: AuthUser) {
+    return this.service.createHistoricalEntry(dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Get('carpenter-work-items/historical/:batchId')
+  findOneHistoricalBatch(@Param('batchId') batchId: string) {
+    return this.service.findOneHistoricalBatch(batchId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Patch('carpenter-work-items/historical/:batchId')
+  updateHistoricalBatch(@Param('batchId') batchId: string, @Body() dto: CreateHistoricalWorkItemDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateHistoricalBatch(batchId, dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Delete('carpenter-work-items/historical/:batchId')
+  removeHistoricalBatch(@Param('batchId') batchId: string, @CurrentUser() user: AuthUser) {
+    return this.service.removeHistoricalBatch(batchId, user.userId);
   }
 
   @Get('carpenter-work-items/:id')

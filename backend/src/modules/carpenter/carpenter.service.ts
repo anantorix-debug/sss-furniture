@@ -9,6 +9,7 @@ import { CreateCarpenterDto } from './dto/create-carpenter.dto';
 import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
 import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
+import { CreateHistoricalWorkItemDto } from './dto/create-historical-work-item.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
 import { CreateProductionTeamDto } from './dto/create-production-team.dto';
 import { UpdateProductionTeamDto } from './dto/update-production-team.dto';
@@ -27,6 +28,15 @@ const ROLE_FOR_STAGE: Record<Stage, Role> = {
   CARPENTER: Role.CARPENTER,
   CARVING: Role.CARVER,
   POLISH: Role.POLISHER,
+};
+
+// Same stage->team mapping as ROLE_FOR_STAGE, but against Carpenter.workerType
+// (the payee record) rather than User.role - Historical Entry picks an
+// existing worker record per stage/line, not a login.
+const WORKER_TYPE_FOR_STAGE: Record<Stage, WorkerType> = {
+  CARPENTER: WorkerType.CARPENTER,
+  CARVING: WorkerType.CARVER,
+  POLISH: WorkerType.POLISHER,
 };
 
 function stripWorkItemMoney<T extends { price: any; extra: any; total: any; stockMovements?: { unitCost: any }[] }>(
@@ -253,6 +263,11 @@ export class CarpenterService {
     batchId?: string;
     sourceCustomerOrderId?: string;
     sourcePartyOrderItemId?: string;
+    // Unset = every existing caller's behavior is unchanged (both LIVE and
+    // HISTORICAL, as before entryType existed) - lets Reports/Production
+    // Control opt into filtering to just one kind without affecting
+    // anything else that already calls this.
+    entryType?: 'LIVE' | 'HISTORICAL';
     viewerRole?: Role;
     page?: number;
     limit?: number;
@@ -269,6 +284,7 @@ export class CarpenterService {
       batchId: params.batchId,
       sourceCustomerOrderId: params.sourceCustomerOrderId,
       sourcePartyOrderItemId: params.sourcePartyOrderItemId,
+      entryType: params.entryType as any,
       carpenter: params.workerType ? { workerType: params.workerType as any } : undefined,
     };
     const [items, total] = await Promise.all([
@@ -732,7 +748,11 @@ export class CarpenterService {
     // than just cancelling a not-yet-started assignment - block it the same
     // way every other "real history exists" delete in this app does.
     // ASSIGNED (nothing done yet) is the only status this is safe for.
-    if (existing.status !== 'ASSIGNED') {
+    // Historical entries are exempt - they're created directly as COMPLETED
+    // by design (see createHistoricalEntry), that's not "real progress" in
+    // the live-workflow sense; the movement/QC check right below still
+    // applies to them exactly the same as everything else.
+    if (existing.entryType === 'LIVE' && existing.status !== 'ASSIGNED') {
       throw new ConflictException(
         `This work item is already ${existing.status.toLowerCase().replace('_', ' ')} and cannot be deleted - it has real production history. Use Cancel/Rework instead if it needs to be undone.`,
       );
@@ -788,6 +808,278 @@ export class CarpenterService {
     });
     if (!workItem) throw new NotFoundException('Work item not found');
     return stripWorkItemMoney(workItem, hide);
+  }
+
+  // --- Historical / Offline Entry ------------------------------------------
+  // Deliberately NOT the live Assign -> Start -> End pipeline (see
+  // createWorkItemRow/assignSourceProduction below) - this is a bulk, after-
+  // the-fact recording of an old paper record. One historical "record" is
+  // however many employee/stage lines it covers, all sharing one batchId
+  // (the same field the live sequential handoff already uses to group a
+  // Carpenter -> Carving -> Polish run) so they render and delete together.
+  // Created directly as COMPLETED with no startedAt/finishedAt - that's what
+  // keeps them out of every "active/pending" dashboard count and out of
+  // Weekly Labour eligibility (finishedAt-gated / entryType-gated
+  // respectively) without needing special-case filtering everywhere.
+
+  private async validateHistoricalEntries(entries: CreateHistoricalWorkItemDto['entries']) {
+    const carpenterIds = [...new Set(entries.map((e) => e.carpenterId))];
+    const carpenters = await this.prisma.carpenter.findMany({ where: { id: { in: carpenterIds } } });
+    const byId = new Map(carpenters.map((c) => [c.id, c]));
+    for (const entry of entries) {
+      const carpenter = byId.get(entry.carpenterId);
+      if (!carpenter) throw new NotFoundException(`Worker not found for one of the entries (id: ${entry.carpenterId})`);
+      const expectedType = WORKER_TYPE_FOR_STAGE[entry.stage as Stage];
+      if (carpenter.workerType !== expectedType) {
+        throw new BadRequestException(
+          `${carpenter.name} is a ${carpenter.workerType.toLowerCase()} worker and can't be entered under the ${this.stageLabel(entry.stage)} stage.`,
+        );
+      }
+    }
+    return byId;
+  }
+
+  async createHistoricalEntry(dto: CreateHistoricalWorkItemDto, userId: string) {
+    await this.validateHistoricalEntries(dto.entries);
+
+    if (dto.sourceCustomerOrderId) {
+      const order = await this.prisma.customerOrder.findUnique({ where: { id: dto.sourceCustomerOrderId } });
+      if (!order) throw new NotFoundException('Customer order not found');
+    }
+    if (dto.sourcePartyOrderItemId) {
+      const item = await this.prisma.partyOrderItem.findUnique({ where: { id: dto.sourcePartyOrderItemId } });
+      if (!item) throw new NotFoundException('Party order item not found');
+    }
+
+    const batchId = randomUUID();
+    const shared = {
+      workDate: new Date(dto.workDate),
+      modelNo: dto.modelNo,
+      productName: dto.productName,
+      pattern: dto.pattern,
+      size: dto.size,
+      sizeUnit: dto.sizeUnit,
+      source: dto.source as any,
+      sourceCustomerOrderId: dto.source === 'CUSTOMER_ORDER' ? dto.sourceCustomerOrderId : undefined,
+      sourceCustomerOrderItemId: dto.source === 'CUSTOMER_ORDER' ? dto.sourceCustomerOrderItemId : undefined,
+      sourcePartyOrderItemId: dto.source === 'PARTY_ORDER' ? dto.sourcePartyOrderItemId : undefined,
+      batchId,
+      entryType: 'HISTORICAL' as const,
+      status: 'COMPLETED' as const,
+      price: 0,
+      extra: 0,
+      createdById: userId,
+    };
+
+    await this.prisma.$transaction(
+      dto.entries.map((entry) =>
+        this.prisma.carpenterWorkItem.create({
+          data: {
+            ...shared,
+            carpenterId: entry.carpenterId,
+            stage: entry.stage as any,
+            quantity: entry.quantity ?? 1,
+            total: 0,
+            notes: entry.notes,
+          },
+        }),
+      ),
+    );
+
+    await this.audit.log({
+      userId,
+      action: 'HISTORICAL_WORK_ENTRY_CREATED',
+      targetType: 'CarpenterWorkItem',
+      targetId: batchId,
+      metadata: { modelNo: dto.modelNo, productName: dto.productName, lineCount: dto.entries.length },
+    });
+
+    return this.findOneHistoricalBatch(batchId);
+  }
+
+  private groupHistoricalBatches(items: Awaited<ReturnType<typeof this.prisma.carpenterWorkItem.findMany>>) {
+    const batches = new Map<string, any[]>();
+    for (const item of items as any[]) {
+      const key = item.batchId ?? item.id;
+      if (!batches.has(key)) batches.set(key, []);
+      batches.get(key)!.push(item);
+    }
+    return [...batches.entries()].map(([batchId, entries]) => {
+      const first = entries[0];
+      return {
+        batchId,
+        workDate: first.workDate,
+        modelNo: first.modelNo,
+        productName: first.productName,
+        pattern: first.pattern,
+        size: first.size,
+        sizeUnit: first.sizeUnit,
+        source: first.source,
+        sourceCustomerOrderId: first.sourceCustomerOrderId,
+        sourceCustomerOrder: first.sourceCustomerOrder,
+        sourceCustomerOrderItemId: first.sourceCustomerOrderItemId,
+        sourcePartyOrderItemId: first.sourcePartyOrderItemId,
+        sourcePartyOrderItem: first.sourcePartyOrderItem,
+        createdBy: first.createdBy,
+        createdAt: first.createdAt,
+        entries: entries.map((e) => ({
+          id: e.id,
+          carpenterId: e.carpenterId,
+          carpenter: e.carpenter,
+          stage: e.stage,
+          quantity: e.quantity,
+          notes: e.notes,
+        })),
+      };
+    });
+  }
+
+  private readonly historicalInclude = {
+    carpenter: { select: { id: true, name: true, phone: true, workerType: true } },
+    sourceCustomerOrder: { select: { id: true, orderId: true, customerName: true } },
+    sourcePartyOrderItem: { select: { id: true, productName: true, order: { select: { id: true, shopName: true } } } },
+    createdBy: { select: { id: true, name: true } },
+  } as const;
+
+  async findAllHistoricalBatches(params: {
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    carpenterId?: string;
+    source?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+
+    const items = await this.prisma.carpenterWorkItem.findMany({
+      where: {
+        entryType: 'HISTORICAL',
+        carpenterId: params.carpenterId || undefined,
+        source: (params.source as any) || undefined,
+        workDate:
+          params.dateFrom || params.dateTo
+            ? { gte: params.dateFrom ? new Date(params.dateFrom) : undefined, lte: params.dateTo ? new Date(params.dateTo) : undefined }
+            : undefined,
+        OR: params.search
+          ? [{ modelNo: { contains: params.search } }, { productName: { contains: params.search } }]
+          : undefined,
+      },
+      include: this.historicalInclude,
+      orderBy: { workDate: 'desc' },
+    });
+
+    const batches = this.groupHistoricalBatches(items).sort((a, b) => b.workDate.getTime() - a.workDate.getTime());
+    if (!paginated) return batches;
+    const { skip, take } = toSkipTake(page, limit);
+    return paginate(batches.slice(skip, skip + take), batches.length, page, limit);
+  }
+
+  async findOneHistoricalBatch(batchId: string) {
+    const items = await this.prisma.carpenterWorkItem.findMany({
+      where: { batchId, entryType: 'HISTORICAL' },
+      include: this.historicalInclude,
+    });
+    if (items.length === 0) throw new NotFoundException('Historical record not found');
+    return this.groupHistoricalBatches(items)[0];
+  }
+
+  // Full replace, not a per-line diff - same "resubmit the whole set"
+  // pattern CustomerOrdersService uses for items[]/galleryImageIds. Deletes
+  // every existing line for this batch and recreates them fresh, still
+  // under the same batchId, so it keeps behaving as one record.
+  async updateHistoricalBatch(batchId: string, dto: CreateHistoricalWorkItemDto, userId: string) {
+    const existing = await this.prisma.carpenterWorkItem.findMany({ where: { batchId, entryType: 'HISTORICAL' } });
+    if (existing.length === 0) throw new NotFoundException('Historical record not found');
+
+    await this.validateHistoricalEntries(dto.entries);
+    if (dto.sourceCustomerOrderId) {
+      const order = await this.prisma.customerOrder.findUnique({ where: { id: dto.sourceCustomerOrderId } });
+      if (!order) throw new NotFoundException('Customer order not found');
+    }
+    if (dto.sourcePartyOrderItemId) {
+      const item = await this.prisma.partyOrderItem.findUnique({ where: { id: dto.sourcePartyOrderItemId } });
+      if (!item) throw new NotFoundException('Party order item not found');
+    }
+
+    const ids = existing.map((e) => e.id);
+    const shared = {
+      workDate: new Date(dto.workDate),
+      modelNo: dto.modelNo,
+      productName: dto.productName,
+      pattern: dto.pattern,
+      size: dto.size,
+      sizeUnit: dto.sizeUnit,
+      source: dto.source as any,
+      sourceCustomerOrderId: dto.source === 'CUSTOMER_ORDER' ? dto.sourceCustomerOrderId : undefined,
+      sourceCustomerOrderItemId: dto.source === 'CUSTOMER_ORDER' ? dto.sourceCustomerOrderItemId : undefined,
+      sourcePartyOrderItemId: dto.source === 'PARTY_ORDER' ? dto.sourcePartyOrderItemId : undefined,
+      batchId,
+      entryType: 'HISTORICAL' as const,
+      status: 'COMPLETED' as const,
+      price: 0,
+      extra: 0,
+      createdById: userId,
+    };
+
+    await this.prisma.$transaction([
+      // These rows were created directly as COMPLETED with no real
+      // downstream history (see removeWorkItem's historical carve-out) -
+      // safe to delete outright as part of the same "replace on save" edit.
+      this.prisma.stockMovement.updateMany({ where: { workItemId: { in: ids } }, data: { workItemId: null } }),
+      this.prisma.qualityCheck.deleteMany({ where: { workItemId: { in: ids } } }),
+      this.prisma.carpenterWorkItem.deleteMany({ where: { id: { in: ids } } }),
+      ...dto.entries.map((entry) =>
+        this.prisma.carpenterWorkItem.create({
+          data: {
+            ...shared,
+            carpenterId: entry.carpenterId,
+            stage: entry.stage as any,
+            quantity: entry.quantity ?? 1,
+            total: 0,
+            notes: entry.notes,
+          },
+        }),
+      ),
+    ]);
+
+    await this.audit.log({
+      userId,
+      action: 'HISTORICAL_WORK_ENTRY_UPDATED',
+      targetType: 'CarpenterWorkItem',
+      targetId: batchId,
+      metadata: { modelNo: dto.modelNo, productName: dto.productName, lineCount: dto.entries.length },
+    });
+
+    return this.findOneHistoricalBatch(batchId);
+  }
+
+  async removeHistoricalBatch(batchId: string, userId: string) {
+    const existing = await this.prisma.carpenterWorkItem.findMany({ where: { batchId, entryType: 'HISTORICAL' } });
+    if (existing.length === 0) throw new NotFoundException('Historical record not found');
+
+    const ids = existing.map((e) => e.id);
+    const [movementCount, qcCount] = await Promise.all([
+      this.prisma.stockMovement.count({ where: { workItemId: { in: ids } } }),
+      this.prisma.qualityCheck.count({ where: { workItemId: { in: ids } } }),
+    ]);
+    if (movementCount > 0 || qcCount > 0) {
+      throw new ConflictException('This historical record has material usage or quality check history and cannot be deleted.');
+    }
+
+    await this.prisma.carpenterWorkItem.deleteMany({ where: { id: { in: ids } } });
+
+    await this.audit.log({
+      userId,
+      action: 'HISTORICAL_WORK_ENTRY_DELETED',
+      targetType: 'CarpenterWorkItem',
+      targetId: batchId,
+      metadata: { modelNo: existing[0].modelNo, productName: existing[0].productName, lineCount: existing.length },
+    });
+
+    return { success: true };
   }
 
   async updateWorkStatus(id: string, dto: { status: string; qcNote?: string; force?: boolean }, viewerRole?: Role, userId?: string) {

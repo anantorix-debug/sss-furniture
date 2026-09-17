@@ -135,6 +135,25 @@ enum ProductionSource {
   CUSTOMER_ORDER
   PARTY_ORDER
   STOCK
+  // Historical/offline entry only - the old paper record doesn't say (or it
+  // genuinely isn't) a customer order, party order, or stock-production run.
+  // Never used by the live create/assign flow.
+  OTHER
+}
+
+// LIVE = went through the real Assign -> Start -> End workflow. HISTORICAL =
+// manually entered from an old paper record after the fact (see Historical
+// Entry) - created directly as COMPLETED, never touches the live
+// assignment/notification/stock-completion pipeline. Kept on the same
+// CarpenterWorkItem table (not a separate one) specifically so historical
+// work shows up in the same employee/production history views for free;
+// every place that must NOT count historical as live-pending work already
+// excludes it by construction (it's never ASSIGNED/IN_PROGRESS and never
+// gets a finishedAt), except Weekly Labour eligibility, which excludes it
+// explicitly (see WeeklyLaborService).
+enum EntryType {
+  LIVE
+  HISTORICAL
 }
 
 enum StockOrderType {
@@ -646,6 +665,7 @@ model CarpenterWorkItem {
   stage         ProductionStageType @default(CARPENTER)
   productName   String // e.g. "HEARTEN"
   category      String? // e.g. "BOTTOM COT", "FULL BOX"
+  pattern       String? // e.g. "B.Cat" - matches Product/PartyOrderItem.pattern; only really used by Historical Entry, the live flow has never needed it
   size          String? // e.g. "5"
   sizeUnit      String? // e.g. "FT" - paired with size, same split as CustomerOrder/PartyOrder/Product
   price         Decimal             @db.Decimal(12, 2)
@@ -656,6 +676,7 @@ model CarpenterWorkItem {
   qcNote        String? // note left when moved to QUALITY_CHECK or REWORK
   photoUrl      String? // uploaded cot / finished-work photo
   labourClaimed Boolean             @default(false) // true once included in a Weekly Labour batch, to prevent double payment
+  entryType     EntryType           @default(LIVE) // LIVE (real workflow) vs HISTORICAL (old paper record, manually entered) - see EntryType
 
   // Shared across the Carpenter/Carving/Polish rows of one production run -
   // generated once when the first stage is created, copied forward by the

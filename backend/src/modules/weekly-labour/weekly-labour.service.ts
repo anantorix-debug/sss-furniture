@@ -30,9 +30,13 @@ export class WeeklyLabourService {
   // Powers the "pick which completed cots go in this week's batch" step -
   // only cots that are COMPLETED and not already paid out show up, matching
   // "Only Completed Cots Appear in Labour List" in the reference workflow.
+  // entryType: 'LIVE' - a Historical/Offline entry represents old, already-
+  // settled paper-record work (see CarpenterService.createHistoricalEntry,
+  // which always sets price/total to 0 and never labourClaimed) and must
+  // never be pulled into a new live payment batch.
   findEligibleWorkItems(carpenterId: string) {
     return this.prisma.carpenterWorkItem.findMany({
-      where: { carpenterId, status: 'COMPLETED', labourClaimed: false },
+      where: { carpenterId, status: 'COMPLETED', labourClaimed: false, entryType: 'LIVE' },
       orderBy: { workDate: 'desc' },
     });
   }

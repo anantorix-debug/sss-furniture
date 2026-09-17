@@ -279,7 +279,10 @@ export interface ProductionTeam {
 }
 
 export type ProductionStage = 'CARPENTER' | 'CARVING' | 'POLISH';
-export type ProductionSource = 'CUSTOMER_ORDER' | 'PARTY_ORDER' | 'STOCK';
+export type ProductionSource = 'CUSTOMER_ORDER' | 'PARTY_ORDER' | 'STOCK' | 'OTHER';
+// LIVE = went through the real Assign -> Start -> End workflow. HISTORICAL =
+// manually entered from an old paper record (see Historical Entry).
+export type EntryType = 'LIVE' | 'HISTORICAL';
 
 export interface CarpenterWorkItem {
   id: string;
@@ -290,8 +293,10 @@ export interface CarpenterWorkItem {
   modelNo?: string | null;
   productName: string;
   category?: string | null;
+  pattern?: string | null;
   size?: string | null;
   sizeUnit?: string | null;
+  entryType?: EntryType;
   // Which colour to polish this piece - only meaningful at the POLISH
   // stage, required whenever production is explicitly assigned there.
   color?: string | null;
@@ -326,6 +331,36 @@ export interface CarpenterWorkItem {
   notes?: string | null;
   assignedById?: string | null;
   assignedBy?: { name: string } | null;
+}
+
+// Historical / Offline Entry - one old paper record, grouped from however
+// many employee/stage lines it covers (GET/POST /carpenter-work-items/historical).
+export interface HistoricalEntryLine {
+  id: string;
+  carpenterId: string;
+  carpenter?: { id: string; name: string; phone?: string | null; workerType?: WorkerType } | null;
+  stage: ProductionStage;
+  quantity: number;
+  notes?: string | null;
+}
+
+export interface HistoricalBatch {
+  batchId: string;
+  workDate: string;
+  modelNo?: string | null;
+  productName: string;
+  pattern?: string | null;
+  size?: string | null;
+  sizeUnit?: string | null;
+  source: ProductionSource;
+  sourceCustomerOrderId?: string | null;
+  sourceCustomerOrder?: { id: string; orderId: string; customerName: string } | null;
+  sourceCustomerOrderItemId?: string | null;
+  sourcePartyOrderItemId?: string | null;
+  sourcePartyOrderItem?: { id: string; productName: string; order: { id: string; shopName: string } } | null;
+  createdBy?: { id: string; name: string };
+  createdAt: string;
+  entries: HistoricalEntryLine[];
 }
 
 // Production Control Center - GET /carpenter-work-items/dashboard
