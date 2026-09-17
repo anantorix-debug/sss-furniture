@@ -630,7 +630,7 @@ export class CustomerOrdersService {
               i.size ? `Size : ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : null,
               i.color ? `Colour : ${i.color}` : null,
               `Quantity : ${i.quantity}`,
-              isEmployee ? null : `Price : ₹${Number(i.unitPrice).toLocaleString('en-IN')}/-`,
+              isEmployee ? null : `Price : Rs. ${Number(i.unitPrice).toLocaleString('en-IN')}/-`,
             ].filter((d): d is string => d !== null),
             imageUrl: i.referenceImage?.url ?? orderFallbackImageUrl,
           }))
@@ -640,7 +640,7 @@ export class CustomerOrdersService {
               qty: 1,
               unitPrice: Number(order.orderValue),
               total: Number(order.orderValue),
-              details: [`Product : ${order.product}`, isEmployee ? null : `Price : ₹${Number(order.orderValue).toLocaleString('en-IN')}/-`].filter(
+              details: [`Product : ${order.product}`, isEmployee ? null : `Price : Rs. ${Number(order.orderValue).toLocaleString('en-IN')}/-`].filter(
                 (d): d is string => d !== null,
               ),
               imageUrl: orderFallbackImageUrl,
@@ -666,7 +666,7 @@ export class CustomerOrdersService {
         (l, i) => `<tr>
           <td>${i + 1}</td>
           <td>${escapeHtml(l.label)}${l.qty > 1 ? ` (${l.qty} Nos)` : ''}</td>
-          <td style="text-align:right">₹${l.total.toLocaleString('en-IN')}/-</td>
+          <td style="text-align:right">Rs. ${l.total.toLocaleString('en-IN')}/-</td>
         </tr>`,
       )
       .join('');
@@ -740,9 +740,9 @@ export class CustomerOrdersService {
         <thead><tr><th style="width:40px">S.No</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>
           ${summaryRows}
-          <tr class="grand-total"><td colspan="2" style="text-align:right">GRAND TOTAL</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}/-</td></tr>
-          <tr><td colspan="2" style="text-align:right">Amount Received</td><td style="text-align:right">₹${Number(order.totalReceived).toLocaleString('en-IN')}/-</td></tr>
-          <tr class="grand-total"><td colspan="2" style="text-align:right">BALANCE DUE</td><td style="text-align:right">₹${Number(order.balanceAmount).toLocaleString('en-IN')}/-</td></tr>
+          <tr class="grand-total"><td colspan="2" style="text-align:right">GRAND TOTAL</td><td style="text-align:right">Rs. ${Number(order.orderValue).toLocaleString('en-IN')}/-</td></tr>
+          <tr><td colspan="2" style="text-align:right">Amount Received</td><td style="text-align:right">Rs. ${Number(order.totalReceived).toLocaleString('en-IN')}/-</td></tr>
+          <tr class="grand-total"><td colspan="2" style="text-align:right">BALANCE DUE</td><td style="text-align:right">Rs. ${Number(order.balanceAmount).toLocaleString('en-IN')}/-</td></tr>
         </tbody>
       </table>
     </div>`

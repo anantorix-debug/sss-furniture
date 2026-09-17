@@ -605,9 +605,9 @@ export class PartyOrdersService {
           <td>${escapeHtml(l.finish)}</td>
           <td>${escapeHtml(l.size)}</td>
           <td>${escapeHtml(l.pattern)}</td>
-          ${isEmployee ? '' : `<td style="text-align:right">${l.price != null ? `₹${l.price.toLocaleString('en-IN')}` : '-'}</td>`}
+          ${isEmployee ? '' : `<td style="text-align:right">${l.price != null ? `Rs. ${l.price.toLocaleString('en-IN')}` : '-'}</td>`}
           <td>${escapeHtml(l.modelNo)}</td>
-          ${isEmployee ? '' : `<td style="text-align:right">₹${l.value.toLocaleString('en-IN')}</td>`}
+          ${isEmployee ? '' : `<td style="text-align:right">Rs. ${l.value.toLocaleString('en-IN')}</td>`}
         </tr>`;
       })
       .join('');
@@ -675,9 +675,9 @@ export class PartyOrdersService {
       isEmployee
         ? ''
         : `<div class="summary">
-      <div><div class="label">Total Order Value</div><div class="value">₹${totalOrderValue.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Received</div><div class="value" style="color:#15803d">₹${received.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">₹${balance.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Total Order Value</div><div class="value">Rs. ${totalOrderValue.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Received</div><div class="value" style="color:#15803d">Rs. ${received.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">Rs. ${balance.toLocaleString('en-IN')}</div></div>
     </div>`
     }
     ${deliveryBlock}
@@ -724,9 +724,9 @@ export class PartyOrdersService {
           <td>${escapeHtml(o.shopName)}</td>
           <td>${new Date(o.orderDate).toLocaleDateString('en-IN')}</td>
           <td>${o.items?.length ?? 0}</td>
-          <td style="text-align:right">₹${Number(o.totalAmount ?? 0).toLocaleString('en-IN')}</td>
-          <td style="text-align:right">₹${Number(o.receivedAmount ?? 0).toLocaleString('en-IN')}</td>
-          <td style="text-align:right">₹${Number(o.balanceAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${Number(o.totalAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${Number(o.receivedAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${Number(o.balanceAmount ?? 0).toLocaleString('en-IN')}</td>
           <td>${escapeHtml(String(o.deliveryStatus).replace(/_/g, ' '))}</td>
         </tr>`,
       )

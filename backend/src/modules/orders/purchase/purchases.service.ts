@@ -289,13 +289,13 @@ export class PurchasesService {
         // print it back out as the /CFT rate actually agreed with the
         // supplier.
         const isBoardFeet = i.rawMaterial.measurementKind === 'BOARD_FEET';
-        const rateLabel = isBoardFeet ? `₹${(Number(i.unitPrice) * 12).toLocaleString('en-IN')}/CFT` : `₹${Number(i.unitPrice).toLocaleString('en-IN')}`;
+        const rateLabel = isBoardFeet ? `Rs. ${(Number(i.unitPrice) * 12).toLocaleString('en-IN')}/CFT` : `Rs. ${Number(i.unitPrice).toLocaleString('en-IN')}`;
         return `<tr>
           <td>${escapeHtml(i.rawMaterial.name)}</td>
           <td style="text-align:right">${Number(i.quantity)}</td>
           <td>${escapeHtml(i.rawMaterial.unit)}</td>
           <td style="text-align:right">${rateLabel}</td>
-          <td style="text-align:right">₹${(Number(i.quantity) * Number(i.unitPrice)).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${(Number(i.quantity) * Number(i.unitPrice)).toLocaleString('en-IN')}</td>
         </tr>`;
       })
       .join('');
@@ -337,7 +337,7 @@ export class PurchasesService {
       <thead><tr><th>Material</th><th style="text-align:right">Qty</th><th>Unit</th><th style="text-align:right">Rate</th><th style="text-align:right">Line Total</th></tr></thead>
       <tbody>
         ${rows}
-        <tr class="total-row"><td colspan="4" style="text-align:right">Total</td><td style="text-align:right">₹${purchase.totalValue.toLocaleString('en-IN')}</td></tr>
+        <tr class="total-row"><td colspan="4" style="text-align:right">Total</td><td style="text-align:right">Rs. ${purchase.totalValue.toLocaleString('en-IN')}</td></tr>
       </tbody>
     </table>
     ${purchase.notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(purchase.notes)}</div>` : ''}
@@ -376,7 +376,7 @@ export class PurchasesService {
           <td>${p.purchaseDate.toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(p.supplier?.name ?? '-')}</td>
           <td>${p.items.length}</td>
-          <td style="text-align:right">₹${p.totalValue.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${p.totalValue.toLocaleString('en-IN')}</td>
           <td>${escapeHtml(String(p.status))}</td>
         </tr>`,
       )
