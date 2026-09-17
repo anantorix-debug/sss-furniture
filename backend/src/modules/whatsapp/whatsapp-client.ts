@@ -641,7 +641,12 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       const media = new MessageMedia(mimetype, buffer.toString('base64'), filename);
 
       this.logger.log(`[WA SEND] Sending media (${mimetype}, ${buffer.length} bytes) to: ${resolvedChatId}`);
-      const sendPromise = this.client.sendMessage(resolvedChatId, media, caption ? { caption } : undefined);
+      // Use chat.sendMessage instead of client.sendMessage to avoid the
+      // "Data passed to getter must include an id property" error that
+      // newer WhatsApp Web versions throw when client.sendMessage is used
+      // with MessageMedia objects.
+      const chat = await this.client.getChatById(resolvedChatId);
+      const sendPromise = chat.sendMessage(media, caption ? { caption } : undefined);
       const sendTimeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error(`SendMessage timeout after ${this.sendTimeoutMs}ms`)), this.sendTimeoutMs)
       );
@@ -1013,7 +1018,9 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
         throw new Error(`Phone number ${phone} is not registered on WhatsApp`);
       }
       const media = new MessageMedia(mimetype, buffer.toString('base64'), filename);
-      await this.client.sendMessage(numberId._serialized, media, caption ? { caption } : undefined);
+      // Use chat.sendMessage to avoid the "id property" memoization error
+      const chat = await this.client.getChatById(numberId._serialized);
+      await chat.sendMessage(media, caption ? { caption } : undefined);
     } catch (err) {
       this.logger.error(`Failed to send document: ${err}`);
       throw err;
