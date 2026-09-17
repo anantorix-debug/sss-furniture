@@ -4,6 +4,7 @@
   "private": true,
   "description": "SSS Company - production ERP API (auth, roles, orders, ledgers)",
   "scripts": {
+    "postinstall": "patch-package",
     "build": "nest build",
     "start": "nest start",
     "dev": "nest start --watch",
@@ -59,6 +60,7 @@
     "@types/qrcode": "^1.5.5",
     "@types/supertest": "^6.0.2",
     "jest": "^29.7.0",
+    "patch-package": "^8.0.1",
     "prisma": "^5.22.0",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
