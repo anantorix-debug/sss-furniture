@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError, getAccessToken, assetUrl } from '@/lib/api';
+import { api, getAccessToken, assetUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';

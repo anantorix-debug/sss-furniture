@@ -845,7 +845,7 @@ function GalleryTab({ canEdit }: { canEdit: boolean }) {
 
 function MaterialsTab({ canEdit }: { canEdit: boolean }) {
   const { hasRole } = useAuth();
-  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
+  const { runForceable } = useForceable();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const { data: result, isLoading, mutate } = useSWR<PaginatedResult<RawMaterial>>(
