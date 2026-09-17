@@ -646,7 +646,10 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       // newer WhatsApp Web versions throw when client.sendMessage is used
       // with MessageMedia objects.
       const chat = await this.client.getChatById(resolvedChatId);
-      const sendPromise = chat.sendMessage(media, caption ? { caption } : undefined);
+      const sendPromise = chat.sendMessage(media, {
+        ...(caption ? { caption } : {}),
+        sendMediaAsDocument: true,
+      });
       const sendTimeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error(`SendMessage timeout after ${this.sendTimeoutMs}ms`)), this.sendTimeoutMs)
       );
@@ -1020,7 +1023,10 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       const media = new MessageMedia(mimetype, buffer.toString('base64'), filename);
       // Use chat.sendMessage to avoid the "id property" memoization error
       const chat = await this.client.getChatById(numberId._serialized);
-      await chat.sendMessage(media, caption ? { caption } : undefined);
+      await chat.sendMessage(media, {
+        ...(caption ? { caption } : {}),
+        sendMediaAsDocument: true,
+      });
     } catch (err) {
       this.logger.error(`Failed to send document: ${err}`);
       throw err;
