@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { useForceable } from '@/hooks/useForceable';
 import { formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
@@ -55,10 +57,14 @@ function WorkRow({
   item,
   onAssign,
   onSetColor,
+  onDelete,
+  canDelete,
 }: {
   item: CarpenterWorkItem;
   onAssign: (item: CarpenterWorkItem) => void;
   onSetColor: (item: CarpenterWorkItem) => void;
+  onDelete: (item: CarpenterWorkItem) => void;
+  canDelete: boolean;
 }) {
   return (
     <tr>
@@ -74,16 +80,23 @@ function WorkRow({
       <td><Chip color={STATUS_CHIP[item.status] ?? 'gray'} label={item.status.replace('_', ' ')} /></td>
       <td>{formatDate(item.workDate)}</td>
       <td>
-        {!item.carpenter && item.status === 'ASSIGNED' && (
-          <button className="btn-secondary text-xs" onClick={() => onAssign(item)}>
-            Assign
-          </button>
-        )}
-        {item.carpenter && item.stage === 'POLISH' && !item.color && item.status !== 'COMPLETED' && (
-          <button className="btn-secondary text-xs" onClick={() => onSetColor(item)}>
-            Set Colour
-          </button>
-        )}
+        <div className="flex gap-2 items-center">
+          {!item.carpenter && item.status === 'ASSIGNED' && (
+            <button className="btn-secondary text-xs" onClick={() => onAssign(item)}>
+              Assign
+            </button>
+          )}
+          {item.carpenter && item.stage === 'POLISH' && !item.color && item.status !== 'COMPLETED' && (
+            <button className="btn-secondary text-xs" onClick={() => onSetColor(item)}>
+              Set Colour
+            </button>
+          )}
+          {canDelete && (
+            <button className="text-red-600 hover:underline text-xs" onClick={() => onDelete(item)}>
+              Delete
+            </button>
+          )}
+        </div>
       </td>
     </tr>
   );
@@ -388,14 +401,36 @@ function StartStockProductionModal({ onClose, onCreated }: { onClose: () => void
 // --- Overview tab (Production Control's original content: KPIs + grouped work lists) ---
 
 function OverviewTab() {
+  const { hasRole } = useAuth();
+  const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const { data, isLoading, mutate } = useSWR<ProductionDashboard>('/carpenter-work-items/dashboard', fetcher, { refreshInterval: 30000 });
   const [groupTab, setGroupTab] = useState<GroupKey>('todaysWork');
   const [startOpen, setStartOpen] = useState(false);
   const [assignTarget, setAssignTarget] = useState<CarpenterWorkItem | null>(null);
   const [colorTarget, setColorTarget] = useState<CarpenterWorkItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CarpenterWorkItem | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteError(null);
+    await runForceable(async (force) => {
+      try {
+        await api.delete(`/carpenter-work-items/${target.id}${force ? '?force=true' : ''}`);
+        setDeleteTarget(null);
+        mutate();
+      } catch (err) {
+        setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete this entry');
+        setDeleteTarget(null);
+        throw err;
+      }
+    }, hasRole('SUPERADMIN'));
+  }
 
   return (
     <div className="space-y-4">
+      {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
       <div className="flex justify-end">
         <button className="btn-primary" onClick={() => setStartOpen(true)}>
           + Start Stock Production
@@ -452,7 +487,14 @@ function OverviewTab() {
                   <tr><td colSpan={10} className="text-center text-brand-400 py-6">Nothing here right now.</td></tr>
                 )}
                 {data.groups[groupTab].map((item) => (
-                  <WorkRow key={item.id} item={item} onAssign={setAssignTarget} onSetColor={setColorTarget} />
+                  <WorkRow
+                    key={item.id}
+                    item={item}
+                    onAssign={setAssignTarget}
+                    onSetColor={setColorTarget}
+                    onDelete={setDeleteTarget}
+                    canDelete={hasRole('ADMIN')}
+                  />
                 ))}
               </tbody>
             </table>
@@ -466,6 +508,31 @@ function OverviewTab() {
       )}
       {colorTarget && (
         <SetColorModal item={colorTarget} onClose={() => setColorTarget(null)} onSaved={mutate} />
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete Production Entry"
+          message={`Delete this ${deleteTarget.stage.toLowerCase()} entry for "${deleteTarget.productName}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }}
+        />
+      )}
+
+      {forcePrompt && (
+        <ConfirmDialog
+          title="Force This Through?"
+          message={`${forcePrompt.message}\n\nAs Super Admin you can force this through anyway - this permanently removes the connected material usage/QC history rather than just losing the link to it. This cannot be undone.`}
+          confirmLabel="Force Delete Anyway"
+          danger
+          onConfirm={forcePrompt.onForce}
+          onCancel={closeForcePrompt}
+        />
       )}
     </div>
   );
