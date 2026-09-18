@@ -41,6 +41,13 @@ async function bootstrap() {
   // Health check — used by Docker HEALTHCHECK and deployment platforms
   app.getHttpAdapter().get('/api/health', (_req: Request, res: Response) => res.send('ok'));
 
+  // Process start time as a cheap version marker - changes every time the
+  // backend restarts (i.e. every backend deploy, since that always ends in
+  // `pm2 restart sss-backend`). Lets the frontend's UpdateAvailableBanner
+  // detect a backend-only deploy too, not just a frontend rebuild.
+  const startedAt = Date.now().toString();
+  app.getHttpAdapter().get('/api/version', (_req: Request, res: Response) => res.json({ startedAt }));
+
   const port = process.env.PORT ?? 4000;
   await app.listen(port);
   // eslint-disable-next-line no-console
