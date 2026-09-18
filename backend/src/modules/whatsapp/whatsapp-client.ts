@@ -669,7 +669,13 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       // must include an id property" __x_id collision - is patched in
       // node_modules/whatsapp-web.js (see patches/), so this is now the
       // safe path, not the broken one.
-      const sendMediaOptions = { ...(caption ? { caption } : {}), sendMediaAsDocument: true };
+      // Images send as native inline photos; everything else (PDFs, docs)
+      // sends as a downloadable document - matches how a normal WhatsApp
+      // user would share each type.
+      const sendMediaOptions = {
+        ...(caption ? { caption } : {}),
+        sendMediaAsDocument: !mimetype.startsWith('image/'),
+      };
       const sendPromise = this.client.sendMessage(resolvedChatId, media, sendMediaOptions);
       const sendTimeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error(`SendMessage timeout after ${this.sendTimeoutMs}ms`)), this.sendTimeoutMs)
@@ -1042,7 +1048,10 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
         throw new Error(`Phone number ${phone} is not registered on WhatsApp`);
       }
       const media = new MessageMedia(mimetype, buffer.toString('base64'), filename);
-      const sendMediaOptions = { ...(caption ? { caption } : {}), sendMediaAsDocument: true };
+      const sendMediaOptions = {
+        ...(caption ? { caption } : {}),
+        sendMediaAsDocument: !mimetype.startsWith('image/'),
+      };
       // See the matching comment in sendMediaToChat: getChatById() forces
       // WhatsApp Web's own chat.serialize(), which crashes with a bare "r"
       // for some chats - client.sendMessage() skips that entirely, and the
