@@ -690,13 +690,34 @@ export class CarpenterService {
   // IN_PROGRESS) picks up the new one - simple load balancing, not a
   // round-robin queue. Returns null (leave unassigned, manual "Assign" on
   // Production Control still works) when no worker of that type exists.
-  private async pickLeastBusyWorker(workerType: WorkerType) {
+  //
+  // When teamName is given (the finishing worker's own team), candidates
+  // are scoped to that same team name first - a "Carpenter Team B" and a
+  // "Carving Team B" are separate ProductionTeam rows (one per workerType),
+  // matched here by name so work stays inside one team's pipeline instead
+  // of silently jumping to whichever team happens to be less busy. Falls
+  // through to the company-wide pool if that team has no active worker of
+  // the needed type - a carpenter with no team, or whose team has no
+  // matching next-stage team, behaves exactly as before.
+  private async pickLeastBusyWorker(workerType: WorkerType, teamName?: string) {
+    function pick<T extends { workItems: { id: string }[]; name: string }>(candidates: T[]): T | null {
+      return candidates.length === 0 ? null : candidates.sort((a, b) => a.workItems.length - b.workItems.length || a.name.localeCompare(b.name))[0];
+    }
+
+    if (teamName) {
+      const teamCandidates = await this.prisma.carpenter.findMany({
+        where: { workerType, isActive: true, team: { name: teamName } },
+        include: { workItems: { where: { status: { in: ['ASSIGNED', 'IN_PROGRESS'] } }, select: { id: true } } },
+      });
+      const teamPick = pick(teamCandidates);
+      if (teamPick) return teamPick;
+    }
+
     const candidates = await this.prisma.carpenter.findMany({
       where: { workerType, isActive: true },
       include: { workItems: { where: { status: { in: ['ASSIGNED', 'IN_PROGRESS'] } }, select: { id: true } } },
     });
-    if (candidates.length === 0) return null;
-    return candidates.sort((a, b) => a.workItems.length - b.workItems.length || a.name.localeCompare(b.name))[0];
+    return pick(candidates);
   }
 
   async updateWorkItem(id: string, dto: UpdateWorkItemDto) {
@@ -1148,7 +1169,7 @@ export class CarpenterService {
   async updateWorkStatus(id: string, dto: { status: string; qcNote?: string; force?: boolean }, viewerRole?: Role, userId?: string) {
     const existing = await this.prisma.carpenterWorkItem.findUnique({
       where: { id },
-      include: { carpenter: { select: { name: true } } },
+      include: { carpenter: { select: { name: true, team: { select: { name: true } } } } },
     });
     if (!existing) throw new NotFoundException('Work item not found');
 
@@ -1214,7 +1235,7 @@ export class CarpenterService {
         // Control - auto and manual assignment are both always available,
         // auto is just the first attempt.
         const nextStage = STAGE_ORDER[STAGE_ORDER.indexOf(existing.stage as Stage) + 1];
-        const autoWorker = await this.pickLeastBusyWorker(ROLE_FOR_STAGE[nextStage] as unknown as WorkerType);
+        const autoWorker = await this.pickLeastBusyWorker(ROLE_FOR_STAGE[nextStage] as unknown as WorkerType, existing.carpenter?.team?.name);
         const created = await this.prisma.carpenterWorkItem.create({
           data: {
             stage: nextStage as any,

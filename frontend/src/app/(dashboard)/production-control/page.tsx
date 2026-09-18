@@ -130,7 +130,7 @@ function AssignWorkerModal({ item, onClose, onAssigned }: { item: CarpenterWorkI
             <option value="">Select worker</option>
             {carpenters?.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name} {c.phone ? `(${c.phone})` : ''}
+                {c.name} ({c.team?.name ?? c.workerType})
               </option>
             ))}
           </select>
