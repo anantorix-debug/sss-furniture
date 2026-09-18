@@ -198,7 +198,12 @@ export class SearchService {
         quantity: w.quantity,
         status: w.status,
         assignedDate: w.workDate,
-        completedDate: w.status === 'COMPLETED' ? w.updatedAt : null,
+        // Real work-timeline dates (same fields the Work Timeline popups use
+        // elsewhere) - not derived from updatedAt, which drifts on any edit
+        // and misses QUALITY_CHECK (a stage whose own work is genuinely done,
+        // just awaiting verification).
+        startedAt: w.startedAt,
+        finishedAt: w.finishedAt,
         qcNote: w.qcNote,
         photoUrl: w.photoUrl,
         carpenter: w.carpenter ? { name: w.carpenter.name, phone: w.carpenter.phone, workerType: w.carpenter.workerType } : null,
@@ -262,8 +267,8 @@ export class SearchService {
           <td>${escapeHtml(w.carpenter?.name ?? 'Unassigned')}</td>
           <td>${w.quantity}</td>
           <td>${escapeHtml(w.status.replace('_', ' '))}</td>
-          <td>${fmt(w.assignedDate)}</td>
-          <td>${fmt(w.completedDate)}</td>
+          <td>${fmt(w.startedAt)}</td>
+          <td>${fmt(w.finishedAt)}</td>
         </tr>`,
       )
       .join('');
@@ -298,7 +303,7 @@ export class SearchService {
     ${
       workItemRows
         ? `<h3>Production / Employee History</h3><table>
-      <thead><tr><th>Stage</th><th>Product</th><th>Employee</th><th>Qty</th><th>Status</th><th>Assigned Date</th><th>Completed Date</th></tr></thead>
+      <thead><tr><th>Stage</th><th>Product</th><th>Employee</th><th>Qty</th><th>Status</th><th>Work Started</th><th>Work Finished</th></tr></thead>
       <tbody>${workItemRows}</tbody>
     </table>`
         : ''

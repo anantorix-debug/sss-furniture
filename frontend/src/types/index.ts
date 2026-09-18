@@ -688,7 +688,8 @@ export interface TrackWorkItem {
   quantity: number;
   status: WorkStatus;
   assignedDate: string;
-  completedDate?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
   qcNote?: string | null;
   photoUrl?: string | null;
   carpenter?: { name: string; phone?: string | null; workerType?: WorkerType } | null;

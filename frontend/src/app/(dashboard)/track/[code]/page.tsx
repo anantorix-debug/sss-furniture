@@ -231,7 +231,8 @@ export default function TrackPage() {
                       </div>
                       <div className="text-xs text-brand-500 mt-1 space-y-0.5">
                         <p>Assigned: {formatDate(w.assignedDate)}</p>
-                        <p>Completed: {w.completedDate ? formatDate(w.completedDate) : '-'}</p>
+                        <p>Work Started: {w.startedAt ? formatDate(w.startedAt) : 'Not started yet'}</p>
+                        <p>Work Finished: {w.finishedAt ? formatDate(w.finishedAt) : w.status === 'IN_PROGRESS' ? 'In progress' : 'Pending'}</p>
                         {w.total !== undefined && <p>Work Value: {formatCurrency(w.total)}</p>}
                       </div>
                       {w.qcNote && <p className="text-xs text-brand-600 mt-1">QC Note: {w.qcNote}</p>}
