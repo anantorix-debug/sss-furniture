@@ -14,6 +14,7 @@ import { PaymentsPanel } from '@/components/PaymentsPanel';
 import { PartyOrderFormModal } from '@/components/PartyOrderFormModal';
 import { AssignEmployeeModal } from '@/components/AssignEmployeeModal';
 import { AssignProductionModal, type AssignProductionPayload } from '@/components/AssignProductionModal';
+import { WorkTimelineModal } from '@/components/WorkTimelineModal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { RoleGate } from '@/components/RoleGate';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
@@ -74,6 +75,7 @@ function PartyOrderDetailContent() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [assignEmployeeOpen, setAssignEmployeeOpen] = useState(false);
   const [assignProductionItem, setAssignProductionItem] = useState<PartyOrderItem | null>(null);
+  const [workTimelineOpen, setWorkTimelineOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -179,6 +181,9 @@ function PartyOrderDetailContent() {
             />
             <button className="btn-secondary" onClick={downloadOrderPdf}>
               Download PDF
+            </button>
+            <button className="btn-secondary" onClick={() => setWorkTimelineOpen(true)}>
+              Work Timeline
             </button>
             <button className="btn-secondary" onClick={handleSendPdfViaWhatsApp}>
               Send PDF via WhatsApp
@@ -307,6 +312,14 @@ function PartyOrderDetailContent() {
       </div>
 
       {editOpen && <PartyOrderFormModal editing={order} onClose={() => setEditOpen(false)} onSaved={() => mutate()} />}
+
+      {workTimelineOpen && (
+        <WorkTimelineModal
+          orderLabel={order.jobNumber ?? order.shopName}
+          items={order.items.map((item) => ({ id: item.id, productName: item.productName }))}
+          onClose={() => setWorkTimelineOpen(false)}
+        />
+      )}
 
       {deleteConfirmOpen && (
         <ConfirmDialog

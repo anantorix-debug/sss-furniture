@@ -13,6 +13,7 @@ import { ViewField } from '@/components/ViewField';
 import { PaymentsPanel } from '@/components/PaymentsPanel';
 import { FormRow, FormField } from '@/components/orders/OrderFormFields';
 import { AssignProductionModal, type AssignProductionPayload } from '@/components/AssignProductionModal';
+import { WorkItemTimelineCard } from '@/components/WorkItemTimelineCard';
 import { ActionsMenu } from '@/components/ActionsMenu';
 import { RoleGate } from '@/components/RoleGate';
 import { ModelNoPicker } from '@/components/ModelNoPicker';
@@ -63,6 +64,7 @@ const emptyForm = {
 function CustomerOrdersContent() {
   const { hasRole } = useAuth();
   const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
+  const [editModelNoDateFor, setEditModelNoDateFor] = useState<CustomerOrder | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -427,8 +429,20 @@ function CustomerOrdersContent() {
                     <>
                       <span className="font-medium text-ink">{order.cotTrack}</span>
                       {order.modelNoUpdatedBy && (
-                        <div className="text-brand-400 text-[10px]">
-                          by {order.modelNoUpdatedBy.name} &middot; {formatDate(order.modelNoUpdatedAt)}
+                        <div className="text-brand-400 text-[10px] flex items-center gap-1">
+                          <span>
+                            by {order.modelNoUpdatedBy.name} &middot; {formatDate(order.modelNoUpdatedAt)}
+                          </span>
+                          {hasRole('SUPERADMIN') && (
+                            <button
+                              type="button"
+                              className="text-brand-500 hover:underline"
+                              title="Correct this date"
+                              onClick={() => setEditModelNoDateFor(order)}
+                            >
+                              Edit
+                            </button>
+                          )}
                         </div>
                       )}
                     </>
@@ -810,6 +824,10 @@ function CustomerOrdersContent() {
 
       {viewTarget && <OrderDetailsModal order={viewTarget} onClose={() => setViewTarget(null)} />}
 
+      {editModelNoDateFor && (
+        <EditModelNoDateModal order={editModelNoDateFor} onClose={() => setEditModelNoDateFor(null)} onSaved={() => mutate()} />
+      )}
+
       {itemImagePickerIdx !== null && (
         <Modal title="Select Product Image" onClose={() => setItemImagePickerIdx(null)} wide>
           <GalleryGrid
@@ -967,7 +985,8 @@ function OrderThumbnail({ order }: { order: CustomerOrder }) {
 // underway. This pulls the real Carpenter/Carving/Polish job(s) for the
 // order so that question has a real answer.
 function OrderDetailsModal({ order, onClose }: { order: CustomerOrder; onClose: () => void }) {
-  const { data: workItems, isLoading } = useSWR<CarpenterWorkItem[]>(
+  const { hasRole } = useAuth();
+  const { data: workItems, isLoading, mutate: mutateWorkItems } = useSWR<CarpenterWorkItem[]>(
     `/carpenter-work-items?sourceCustomerOrderId=${order.id}`,
     fetcher,
   );
@@ -1014,15 +1033,7 @@ function OrderDetailsModal({ order, onClose }: { order: CustomerOrder; onClose: 
           )}
           <div className="space-y-2">
             {workItems?.map((w) => (
-              <div key={w.id} className="border border-brand-100 rounded-lg p-3">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-sm">
-                  <ViewField label="Stage" value={<Chip color={STAGE_CHIP[w.stage] ?? 'gray'} label={w.stage} />} />
-                  <ViewField label="Employee" value={w.carpenter?.name ?? 'Unassigned'} />
-                  <ViewField label="Qty" value={String(w.quantity)} />
-                  {w.stage === 'POLISH' && <ViewField label="Colour" value={w.color ?? 'Not set'} />}
-                  <ViewField label="Status" value={<Chip color={STATUS_CHIP[w.status] ?? 'gray'} label={w.status.replace('_', ' ')} />} />
-                </div>
-              </div>
+              <WorkItemTimelineCard key={w.id} workItem={w} canEditDates={hasRole('ADMIN')} onUpdated={() => mutateWorkItems()} />
             ))}
           </div>
         </div>
@@ -1033,6 +1044,55 @@ function OrderDetailsModal({ order, onClose }: { order: CustomerOrder; onClose: 
           </button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+// SUPERADMIN-only correction of when the Model No was recorded as entered -
+// for fixing a wrong/late timestamp after the fact. Never touches the
+// Model No value itself or who entered it (see the backend note on
+// CustomerOrdersService.updateModelNoDate).
+function EditModelNoDateModal({ order, onClose, onSaved }: { order: CustomerOrder; onClose: () => void; onSaved: () => void }) {
+  const [date, setDate] = useState(toDateInputValue(order.modelNoUpdatedAt));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      await api.patch(`/customer-orders/${order.id}/model-no-date`, { modelNoUpdatedAt: date });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update date');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={`Correct Model No Date - ${order.orderId}`} onClose={onClose}>
+      <form onSubmit={handleSave} className="space-y-3">
+        <p className="text-sm text-brand-500">
+          Model No entered by <span className="font-medium text-ink">{order.modelNoUpdatedBy?.name}</span>. This only corrects the date shown -
+          it does not change the Model No or who entered it.
+        </p>
+        <div>
+          <label className="label">Model No Entry Date</label>
+          <input className="input" type="date" required value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving} className="btn-primary">
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }

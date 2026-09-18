@@ -7,6 +7,7 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { AssignProductionDto } from './dto/assign-production.dto';
 import { AssignEmployeeDto } from './dto/assign-employee.dto';
 import { UpdateModelNoDto } from './dto/update-model-no.dto';
+import { UpdateModelNoDateDto } from './dto/update-model-no-date.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -105,6 +106,12 @@ export class CustomerOrdersController {
   @Post(':id/model-no')
   updateModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
     return this.service.updateModelNo(id, dto, user);
+  }
+
+  @Roles(Role.SUPERADMIN)
+  @Patch(':id/model-no-date')
+  updateModelNoDate(@Param('id') id: string, @Body() dto: UpdateModelNoDateDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateModelNoDate(id, dto, user);
   }
 
   @Roles(Role.ADMIN)

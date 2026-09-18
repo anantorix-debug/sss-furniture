@@ -720,6 +720,16 @@ export class CarpenterService {
       throw new BadRequestException('Colour is required when assigning a worker at the Polish stage.');
     }
 
+    // Manual correction of the work timeline (see UpdateWorkItemDto) -
+    // deliberately overwrites rather than the "set once" guard
+    // updateWorkStatus uses, since this is an explicit admin edit, not the
+    // automatic status-transition side effect.
+    const effectiveStartedAt = dto.startedAt ? new Date(dto.startedAt) : existing.startedAt;
+    const effectiveFinishedAt = dto.finishedAt ? new Date(dto.finishedAt) : existing.finishedAt;
+    if (effectiveStartedAt && effectiveFinishedAt && effectiveFinishedAt < effectiveStartedAt) {
+      throw new BadRequestException('Work Finished date cannot be before Work Started date.');
+    }
+
     const workItem = await this.prisma.carpenterWorkItem.update({
       where: { id },
       data: {
@@ -736,6 +746,8 @@ export class CarpenterService {
         quantity: dto.quantity,
         color: dto.color?.trim() || undefined,
         total: priceChanged ? (price + extra) * quantity : undefined,
+        startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
+        finishedAt: dto.finishedAt ? new Date(dto.finishedAt) : undefined,
       },
       include: { carpenter: { include: { team: true } } },
     });

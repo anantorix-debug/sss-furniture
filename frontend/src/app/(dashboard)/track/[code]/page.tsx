@@ -1,14 +1,17 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { ApiError } from '@/lib/api';
+import { ApiError, getAccessToken } from '@/lib/api';
 import { Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
 import { StatCard } from '@/components/StatCard';
 import { InlineLoader } from '@/components/PageLoader';
 import { formatCurrency, formatDate } from '@/lib/format';
 import type { TrackResult, TrackWorkItem } from '@/types';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 const STAGE_ORDER = ['CARPENTER', 'CARVING', 'POLISH'] as const;
 const STAGE_LABEL: Record<string, string> = { CARPENTER: 'Carpenter', CARVING: 'Carving', POLISH: 'Polishing' };
@@ -30,6 +33,27 @@ export default function TrackPage() {
   const router = useRouter();
   const decoded = decodeURIComponent(code);
   const { data, isLoading, error, mutate } = useSWR<TrackResult>(`/search/track?q=${encodeURIComponent(decoded)}`, fetcher);
+  const [downloading, setDownloading] = useState(false);
+
+  async function downloadPdf() {
+    setDownloading(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/search/track/pdf?q=${encodeURIComponent(decoded)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Track - ${decoded}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   const stages: { stage: string; items: TrackWorkItem[] }[] = STAGE_ORDER.map((stage) => ({
     stage,
@@ -44,12 +68,17 @@ export default function TrackPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.back()}>
-          &larr; Back
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.back()}>
+            &larr; Back
+          </button>
+          <h1 className="text-2xl font-bold text-brand-900">Model No &ldquo;{decoded}&rdquo;</h1>
+          <p className="text-sm text-brand-500 mt-1">Complete order &rarr; production &rarr; employee &rarr; delivery history for this Model No.</p>
+        </div>
+        <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
+          {downloading ? 'Preparing...' : 'Download PDF'}
         </button>
-        <h1 className="text-2xl font-bold text-brand-900">Model No &ldquo;{decoded}&rdquo;</h1>
-        <p className="text-sm text-brand-500 mt-1">Complete order &rarr; production &rarr; employee &rarr; delivery history for this Model No.</p>
       </div>
 
       {isLoading && <InlineLoader label="Searching..." />}

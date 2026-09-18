@@ -11,6 +11,7 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { AssignProductionDto } from './dto/assign-production.dto';
 import { AssignEmployeeDto } from './dto/assign-employee.dto';
 import { UpdateModelNoDto } from './dto/update-model-no.dto';
+import { UpdateModelNoDateDto } from './dto/update-model-no-date.dto';
 import { computeBalance, suggestPaymentType } from '../../../common/utils/balance.util';
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
@@ -600,6 +601,40 @@ export class CustomerOrdersService {
         previousModelNo,
         modelNo,
         employeeName: employee?.name,
+      },
+    });
+
+    return this.findOne(updated.id, user.role as Role);
+  }
+
+  // SUPERADMIN-only correction of when the Model No was recorded as entered
+  // - separate from updateModelNo() above, which is the normal
+  // employee-entry flow and always stamps "now". This exists purely to fix
+  // a wrong/late timestamp after the fact (e.g. entered late, or backfilled
+  // from a paper record) - it never touches the Model No value itself or
+  // who entered it.
+  async updateModelNoDate(id: string, dto: UpdateModelNoDateDto, user: AuthUser) {
+    const order = await this.findOne(id);
+    if (!order.modelNoUpdatedAt) {
+      throw new BadRequestException('This order has no Model No entry date to correct yet.');
+    }
+
+    const previousDate = order.modelNoUpdatedAt;
+    const updated = await this.prisma.customerOrder.update({
+      where: { id },
+      data: { modelNoUpdatedAt: new Date(dto.modelNoUpdatedAt) },
+    });
+
+    await this.audit.log({
+      userId: user.userId,
+      action: 'MODEL_NO_DATE_CORRECTED',
+      targetType: 'CustomerOrder',
+      targetId: id,
+      metadata: {
+        orderId: order.orderId,
+        customerName: order.customerName,
+        previousDate,
+        newDate: updated.modelNoUpdatedAt,
       },
     });
 

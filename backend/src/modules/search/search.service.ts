@@ -1,13 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PdfService } from '../pdf/pdf.service';
 import { Role } from '../../common/enums/role.enum';
 import { computeBalance } from '../../common/utils/balance.util';
+import { escapeHtml, REPORT_PDF_STYLES, renderReportHeader, renderGeneratedFooter } from '../../common/utils/pdf-report.util';
 
 const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.CARVER, Role.POLISHER];
 
 @Injectable()
 export class SearchService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private pdf: PdfService,
+  ) {}
 
   // Global Search is Model No-only: it matches CustomerOrder.cotTrack,
   // PartyOrder.cotNo (legacy single-product rows) / PartyOrderItem.modelNo
@@ -20,9 +25,13 @@ export class SearchService {
     const trimmed = modelNo.trim();
 
     const [product, customerOrders, partyOrders, partyOrderItems, workItems] = await Promise.all([
-      this.prisma.product.findFirst({ where: { modelNo: trimmed } }),
+      this.prisma.product.findFirst({ where: { modelNo: { contains: trimmed } } }),
       this.prisma.customerOrder.findMany({
-        where: { cotTrack: trimmed },
+        // cotTrack can be a combined value (e.g. "JOB-2026-00008, 309" when
+        // an order has multiple items, each with its own Model No joined
+        // back into one string) - contains, not equals, so searching for
+        // just one of those Model Nos still finds the order.
+        where: { cotTrack: { contains: trimmed } },
         include: {
           payments: true,
           createdBy: { select: { name: true } },
@@ -32,7 +41,7 @@ export class SearchService {
         orderBy: { orderDate: 'desc' },
       }),
       this.prisma.partyOrder.findMany({
-        where: { cotNo: trimmed },
+        where: { cotNo: { contains: trimmed } },
         include: {
           payments: true,
           createdBy: { select: { name: true } },
@@ -42,7 +51,7 @@ export class SearchService {
         orderBy: { orderDate: 'desc' },
       }),
       this.prisma.partyOrderItem.findMany({
-        where: { modelNo: trimmed },
+        where: { modelNo: { contains: trimmed } },
         include: {
           order: { include: { payments: true, createdBy: { select: { name: true } } } },
           modelNoUpdatedBy: { select: { name: true } },
@@ -50,7 +59,7 @@ export class SearchService {
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.carpenterWorkItem.findMany({
-        where: { modelNo: trimmed },
+        where: { modelNo: { contains: trimmed } },
         include: {
           carpenter: { select: { name: true, phone: true, workerType: true } },
           createdBy: { select: { name: true } },
@@ -213,5 +222,91 @@ export class SearchService {
         })),
       })),
     };
+  }
+
+  // Same "order -> production -> employee -> delivery" data the Track page
+  // itself shows, just as a PDF - reuses track() rather than re-querying, so
+  // the PDF can never drift from what's on screen.
+  async generateTrackPdf(modelNo: string, viewerRole?: Role): Promise<Buffer> {
+    const result = await this.track(modelNo, viewerRole);
+    const fmt = (d: string | Date | null | undefined) => (d ? new Date(d).toLocaleDateString('en-IN') : '-');
+
+    const customerOrderRows = result.customerOrders
+      .map(
+        (o) => `<tr>
+          <td>${escapeHtml(o.orderId)}</td>
+          <td>${escapeHtml(o.customerName)}</td>
+          <td>${escapeHtml(o.product)}</td>
+          <td>${fmt(o.orderDate)}</td>
+          <td>${escapeHtml(o.deliveryStatus)}</td>
+          <td>${fmt(o.actualDeliveryDate)}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const partyOrderRows = [...result.partyOrders, ...result.partyOrderItems]
+      .map((o: any) => `<tr>
+          <td>${escapeHtml(o.shopName)}</td>
+          <td>${escapeHtml(o.productName ?? o.model ?? '-')}</td>
+          <td>${fmt(o.orderDate)}</td>
+          <td>${escapeHtml(o.deliveryStatus)}</td>
+          <td>${fmt(o.actualDeliveryDate)}</td>
+        </tr>`)
+      .join('');
+
+    const workItemRows = result.workItems
+      .map(
+        (w) => `<tr>
+          <td>${escapeHtml(w.stage)}</td>
+          <td>${escapeHtml(w.productName)}</td>
+          <td>${escapeHtml(w.carpenter?.name ?? 'Unassigned')}</td>
+          <td>${w.quantity}</td>
+          <td>${escapeHtml(w.status.replace('_', ' '))}</td>
+          <td>${fmt(w.assignedDate)}</td>
+          <td>${fmt(w.completedDate)}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${renderReportHeader(`Model No "${escapeHtml(result.query)}"`)}
+  <div class="body">
+    ${
+      result.product
+        ? `<h3>Product</h3><table><tbody><tr><td><b>Model No</b></td><td>${escapeHtml(result.product.modelNo ?? '-')}</td></tr><tr><td><b>Name</b></td><td>${escapeHtml(result.product.name)}</td></tr><tr><td><b>Category</b></td><td>${escapeHtml(result.product.category ?? '-')}</td></tr></tbody></table>`
+        : ''
+    }
+    ${
+      customerOrderRows
+        ? `<h3>Customer Orders</h3><table>
+      <thead><tr><th>Order ID</th><th>Customer</th><th>Product</th><th>Order Date</th><th>Delivery Status</th><th>Delivery Date</th></tr></thead>
+      <tbody>${customerOrderRows}</tbody>
+    </table>`
+        : ''
+    }
+    ${
+      partyOrderRows
+        ? `<h3>Party Orders</h3><table>
+      <thead><tr><th>Shop</th><th>Product</th><th>Order Date</th><th>Delivery Status</th><th>Delivery Date</th></tr></thead>
+      <tbody>${partyOrderRows}</tbody>
+    </table>`
+        : ''
+    }
+    ${
+      workItemRows
+        ? `<h3>Production / Employee History</h3><table>
+      <thead><tr><th>Stage</th><th>Product</th><th>Employee</th><th>Qty</th><th>Status</th><th>Assigned Date</th><th>Completed Date</th></tr></thead>
+      <tbody>${workItemRows}</tbody>
+    </table>`
+        : ''
+    }
+    ${!result.found ? '<p style="color:#9ca3af">No order, product, or production record found for this Model No.</p>' : ''}
+    ${renderGeneratedFooter(result.customerOrders.length + result.partyOrders.length + result.partyOrderItems.length, 'matching record')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html);
   }
 }
