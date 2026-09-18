@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { PdfService } from '../../pdf/pdf.service';
+import { AuditService } from '../../audit/audit.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
@@ -19,6 +20,7 @@ export class PurchasesService {
     private prisma: PrismaService,
     private whatsapp: WhatsappService,
     private pdf: PdfService,
+    private audit: AuditService,
   ) {}
 
   private withTotal<T extends { items: { quantity: any; unitPrice: any }[] }>(purchase: T) {
@@ -79,6 +81,8 @@ export class PurchasesService {
           items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } },
           supplier: { select: { id: true, name: true } },
           createdBy: { select: { name: true } },
+          approvedBy: { select: { name: true } },
+          receivedBy: { select: { name: true } },
         },
         orderBy: { purchaseDate: 'desc' },
         ...(paginated ? toSkipTake(page, limit) : {}),
@@ -96,60 +100,172 @@ export class PurchasesService {
         items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } },
         supplier: true,
         createdBy: { select: { name: true } },
+        approvedBy: { select: { name: true } },
+        receivedBy: { select: { name: true } },
       },
     });
     if (!purchase) throw new NotFoundException('Purchase not found');
     return this.withTotal(purchase);
   }
 
+  // Admin raises a Purchase Order - PENDING_APPROVAL only. No stock or
+  // supplier-payable effect happens here at all; that's entirely deferred
+  // to approve() below, which only a Super Admin can call.
   async create(dto: CreatePurchaseDto, userId: string) {
     const items = await this.resolveItemsInput(dto.items);
     const purchaseNumber = await generatePurchaseNumber(this.prisma);
     const purchaseDate = new Date(dto.purchaseDate);
 
-    const purchase = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.purchase.create({
+    const purchase = await this.prisma.purchase.create({
+      data: {
+        purchaseNumber,
+        supplierId: dto.supplierId,
+        purchaseDate,
+        notes: dto.notes,
+        status: 'PENDING_APPROVAL',
+        createdById: userId,
+        items: { create: items },
+      },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+    });
+
+    await this.audit.log({
+      userId,
+      action: 'PURCHASE_ORDER_CREATED',
+      targetType: 'Purchase',
+      targetId: purchase.id,
+      metadata: { purchaseNumber, supplierId: dto.supplierId },
+    });
+
+    return this.withTotal(purchase);
+  }
+
+  // Super Admin approval - books the supplier payable/ledger (the
+  // financial commitment) and triggers the supplier WhatsApp PDF. Does NOT
+  // touch stock - approving a PO doesn't mean the material has physically
+  // arrived yet, so stock only updates once receive() below is called.
+  // Atomic and idempotent: the updateMany's `status: PENDING_APPROVAL`
+  // guard only lets ONE concurrent call actually claim the approval and
+  // run the ledger write, so a double-click (or two admins racing) can
+  // never book the payable twice. Calling this again on an already-
+  // approved (or cancelled) purchase is a safe no-op that just returns the
+  // current state.
+  async approve(id: string, userId: string) {
+    const existing = await this.prisma.purchase.findUnique({
+      where: { id },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+    });
+    if (!existing) throw new NotFoundException('Purchase not found');
+    if (existing.status === 'CANCELLED') {
+      throw new BadRequestException('A cancelled purchase cannot be approved');
+    }
+    if (existing.status !== 'PENDING_APPROVAL') {
+      // Already approved - idempotent no-op, no reprocessing.
+      return this.findOne(id);
+    }
+
+    const totalValue = existing.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
+    const particulars = existing.items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
+
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.purchase.updateMany({
+        where: { id, status: 'PENDING_APPROVAL' },
+        data: { status: 'APPROVED', approvedById: userId, approvedAt: new Date(), whatsappStatus: 'PENDING' },
+      });
+      if (claim.count === 0) return false; // lost the race - someone else's call already approved it
+
+      await tx.supplierPurchase.create({
         data: {
-          purchaseNumber,
-          supplierId: dto.supplierId,
-          purchaseDate,
-          notes: dto.notes,
+          supplierId: existing.supplierId,
+          date: existing.purchaseDate,
+          particulars,
+          value: totalValue,
+          purchaseId: id,
           createdById: userId,
-          items: { create: items },
         },
-        include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
       });
 
+      return true;
+    });
+
+    if (claimed) {
+      await this.audit.log({
+        userId,
+        action: 'PURCHASE_ORDER_APPROVED',
+        targetType: 'Purchase',
+        targetId: id,
+        metadata: { purchaseNumber: existing.purchaseNumber, supplierId: existing.supplierId, totalValue },
+      });
+      // Fire-and-forget - the approval itself is already fully committed
+      // (payable + status), so the HTTP response doesn't wait on
+      // WhatsApp's queue (which can take several seconds). The frontend
+      // polls the purchase to watch whatsappStatus move PENDING -> SENDING
+      // -> SENT/FAILED.
+      void this.sendPurchaseWhatsapp(id, userId).catch(() => undefined);
+    }
+
+    return this.findOne(id);
+  }
+
+  // Goods receipt - the one place stock actually gets touched, once the
+  // physically-received material is confirmed (separate from approve()
+  // above, which only books the payable). Same atomic-claim idempotency
+  // pattern as approve(): the updateMany's `status: APPROVED` guard means
+  // a double-click can never add stock twice. Calling this on an already-
+  // received (or not-yet-approved, or cancelled) purchase is a safe no-op.
+  async receive(id: string, userId: string) {
+    const existing = await this.prisma.purchase.findUnique({
+      where: { id },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+    });
+    if (!existing) throw new NotFoundException('Purchase not found');
+    if (existing.status === 'PENDING_APPROVAL') {
+      throw new BadRequestException('This purchase must be approved before it can be marked as received');
+    }
+    if (existing.status === 'CANCELLED') {
+      throw new BadRequestException('A cancelled purchase cannot be received');
+    }
+    if (existing.status !== 'APPROVED') {
+      // Already received - idempotent no-op, no reprocessing.
+      return this.findOne(id);
+    }
+
+    const receivedDate = new Date();
+
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.purchase.updateMany({
+        where: { id, status: 'APPROVED' },
+        data: { status: 'RECORDED', receivedById: userId, receivedAt: receivedDate },
+      });
+      if (claim.count === 0) return false; // lost the race - someone else's call already received it
+
       await tx.stockMovement.createMany({
-        data: created.items.map((item) => ({
+        data: existing.items.map((item) => ({
           rawMaterialId: item.rawMaterialId,
           type: 'IN' as const,
           quantity: item.quantity,
           unitCost: item.unitPrice,
           reason: 'Purchase',
-          purchaseId: created.id,
-          date: purchaseDate,
+          purchaseId: id,
+          date: receivedDate,
           createdById: userId,
         })),
       });
 
-      const totalValue = created.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
-      const particulars = created.items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
-      await tx.supplierPurchase.create({
-        data: {
-          supplierId: dto.supplierId,
-          date: purchaseDate,
-          particulars,
-          value: totalValue,
-          purchaseId: created.id,
-          createdById: userId,
-        },
-      });
-
-      return created;
+      return true;
     });
 
-    return this.withTotal(purchase);
+    if (claimed) {
+      await this.audit.log({
+        userId,
+        action: 'PURCHASE_ORDER_RECEIVED',
+        targetType: 'Purchase',
+        targetId: id,
+        metadata: { purchaseNumber: existing.purchaseNumber },
+      });
+    }
+
+    return this.findOne(id);
   }
 
   // "Safely reverse the old transaction and apply the new values" - never
@@ -158,6 +274,16 @@ export class PurchasesService {
   // expressed as a reversing ADJUSTMENT for each old line plus a fresh IN
   // for each new line. Net stock impact = the new quantity only, exactly
   // matching the rule that editing 20->30 must land on +30, not +50.
+  //
+  // Three different edit behaviors depending on how far the purchase has
+  // progressed:
+  // - PENDING_APPROVAL: neither stock nor supplierPurchase exist yet (see
+  //   approve()/receive()) - editing just replaces the item rows directly.
+  // - APPROVED (payable booked, not yet received): supplierPurchase exists
+  //   but stock doesn't - editing updates the ledger row only, no stock
+  //   movements.
+  // - RECORDED (received): both exist - editing does the full reverse
+  //   ADJUSTMENT + fresh IN + ledger update, same as always.
   async update(id: string, dto: UpdatePurchaseDto, userId: string) {
     const existing = await this.prisma.purchase.findUnique({
       where: { id },
@@ -171,9 +297,15 @@ export class PurchasesService {
     const newItems = dto.items ? await this.resolveItemsInput(dto.items) : undefined;
     const purchaseDate = dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate;
     const supplierId = dto.supplierId ?? existing.supplierId;
+    const isPending = existing.status === 'PENDING_APPROVAL';
+    const isReceived = existing.status === 'RECORDED';
+    const hasPayable = existing.status === 'APPROVED' || isReceived;
 
     const purchase = await this.prisma.$transaction(async (tx) => {
-      if (newItems) {
+      if (newItems && isPending) {
+        await tx.purchaseItem.deleteMany({ where: { purchaseId: id } });
+        await tx.purchase.update({ where: { id }, data: { items: { create: newItems } } });
+      } else if (newItems && isReceived) {
         // Reverse every old line via an offsetting ADJUSTMENT (never delete
         // the original IN movement) before replacing the item rows.
         if (existing.items.length > 0) {
@@ -220,7 +352,24 @@ export class PurchasesService {
           where: { purchaseId: id },
           data: { supplierId, date: purchaseDate, particulars, value: totalValue },
         });
-      } else if (dto.supplierId || dto.purchaseDate) {
+      } else if (newItems) {
+        // APPROVED but not yet received - payable exists, stock doesn't.
+        // Replace the item rows and update the ledger's total, no stock
+        // movements either way.
+        await tx.purchaseItem.deleteMany({ where: { purchaseId: id } });
+        await tx.purchase.update({ where: { id }, data: { items: { create: newItems } } });
+
+        const created = await tx.purchase.findUniqueOrThrow({
+          where: { id },
+          include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+        });
+        const totalValue = created.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
+        const particulars = created.items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
+        await tx.supplierPurchase.updateMany({
+          where: { purchaseId: id },
+          data: { supplierId, date: purchaseDate, particulars, value: totalValue },
+        });
+      } else if (hasPayable && (dto.supplierId || dto.purchaseDate)) {
         await tx.supplierPurchase.updateMany({ where: { purchaseId: id }, data: { supplierId, date: purchaseDate } });
       }
 
@@ -238,6 +387,10 @@ export class PurchasesService {
   // physically delete historical financial/stock transactions" - a
   // cancellation is an offsetting ADJUSTMENT per line plus an offsetting
   // negative SupplierPurchase entry, never a delete of the originals.
+  //
+  // A still-PENDING_APPROVAL purchase never had stock/supplierPurchase
+  // applied (see approve()), so cancelling one is just a status flip - no
+  // reversal needed since there's nothing to reverse.
   async cancel(id: string, userId: string) {
     const existing = await this.prisma.purchase.findUnique({
       where: { id },
@@ -247,9 +400,14 @@ export class PurchasesService {
     if (existing.status === 'CANCELLED') {
       throw new BadRequestException('This purchase is already cancelled');
     }
+    // RECORDED (received) has both stock and payable applied; APPROVED has
+    // only the payable (see approve()/receive()); PENDING_APPROVAL has
+    // neither - each needs its own reversal.
+    const hadStock = existing.status === 'RECORDED';
+    const hadPayable = existing.status === 'APPROVED' || existing.status === 'RECORDED';
 
     await this.prisma.$transaction(async (tx) => {
-      if (existing.items.length > 0) {
+      if (hadStock && existing.items.length > 0) {
         await tx.stockMovement.createMany({
           data: existing.items.map((item) => ({
             rawMaterialId: item.rawMaterialId,
@@ -264,16 +422,18 @@ export class PurchasesService {
       }
 
       const totalValue = existing.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
-      await tx.supplierPurchase.create({
-        data: {
-          supplierId: existing.supplierId,
-          date: new Date(),
-          particulars: `Purchase ${existing.purchaseNumber} cancelled`,
-          value: -totalValue,
-          purchaseId: id,
-          createdById: userId,
-        },
-      });
+      if (hadPayable) {
+        await tx.supplierPurchase.create({
+          data: {
+            supplierId: existing.supplierId,
+            date: new Date(),
+            particulars: `Purchase ${existing.purchaseNumber} cancelled`,
+            value: -totalValue,
+            purchaseId: id,
+            createdById: userId,
+          },
+        });
+      }
 
       await tx.purchase.update({ where: { id }, data: { status: 'CANCELLED' } });
     });
@@ -363,6 +523,41 @@ export class PurchasesService {
       mimetype: 'application/pdf',
       caption: `Purchase ${purchase.purchaseNumber} - SSS Company`,
     });
+  }
+
+  // Tracks whatsappStatus/whatsappSentAt/whatsappError on the Purchase
+  // itself, so the frontend's process animation always reads real
+  // committed state (PENDING -> SENDING -> SENT/FAILED) instead of an
+  // optimistic guess - used identically whether this run is the automatic
+  // send approve() fires after a successful approval, or a manual "Send PO
+  // PDF via WhatsApp" / "Retry WhatsApp" click. Never touches PO status,
+  // stock, or supplier payable - purely a downstream notification.
+  async sendPurchaseWhatsapp(id: string, userId: string): Promise<{ sent: boolean; reason?: string }> {
+    await this.prisma.purchase.update({ where: { id }, data: { whatsappStatus: 'SENDING' } });
+    try {
+      const result = await this.sendPdfToSupplier(id);
+      await this.prisma.purchase.update({
+        where: { id },
+        data: result.sent
+          ? { whatsappStatus: 'SENT', whatsappSentAt: new Date(), whatsappError: null }
+          : { whatsappStatus: 'FAILED', whatsappError: result.reason ?? 'send_failed' },
+      });
+      await this.audit.log({
+        userId,
+        action: result.sent ? 'PURCHASE_WHATSAPP_SENT' : 'PURCHASE_WHATSAPP_FAILED',
+        targetType: 'Purchase',
+        targetId: id,
+        metadata: result.sent ? {} : { reason: result.reason },
+      });
+      return result;
+    } catch (err) {
+      const message = (err as Error).message;
+      await this.prisma.purchase.update({ where: { id }, data: { whatsappStatus: 'FAILED', whatsappError: message } }).catch(() => undefined);
+      await this.audit
+        .log({ userId, action: 'PURCHASE_WHATSAPP_FAILED', targetType: 'Purchase', targetId: id, metadata: { error: message } })
+        .catch(() => undefined);
+      return { sent: false, reason: message };
+    }
   }
 
   // Purchase list PDF - exactly the filtered rows the list page is

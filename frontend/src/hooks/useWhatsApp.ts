@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import type { MessageRecipientType } from '@/types';
 
-interface UseWhatsAppOptions {
+export interface UseWhatsAppOptions {
   recipientName: string;
   recipientPhone?: string;
   defaultMessage?: string;

@@ -224,27 +224,49 @@ export class SuppliersService {
     return this.pdf.renderHtmlToPdf(html);
   }
 
-  // Supplier detail PDF - this one supplier only: its info, its own
-  // Purchases, its own Payment Ledger, never another supplier's data.
+  // Supplier detail PDF - the complete supplier purchasing statement: this
+  // one supplier's info, every Purchase Item line (never just a one-row-
+  // per-purchase aggregate), and the full Payment Ledger, all read fresh
+  // from findOne()/purchase.findMany() on every call - so a payment that
+  // was just added or edited is reflected immediately, never a stale
+  // frontend total. Read-only: no write happens anywhere in this method.
   async generateDetailPdf(id: string): Promise<Buffer> {
     const supplier = await this.findOne(id);
     const purchases = await this.prisma.purchase.findMany({
       where: { supplierId: id },
-      include: { items: true },
+      include: { items: { include: { rawMaterial: { select: { name: true, unit: true } } } } },
       orderBy: { purchaseDate: 'desc' },
     });
 
-    const poRows = purchases
-      .map((p) => {
-        const total = p.items.reduce((s, i) => s + Number(i.quantity) * Number(i.unitPrice), 0);
-        return `<tr>
-          <td>${escapeHtml(p.purchaseNumber)}</td>
-          <td>${p.purchaseDate.toLocaleDateString('en-IN')}</td>
-          <td>${p.items.length}</td>
-          <td style="text-align:right">₹${total.toLocaleString('en-IN')}</td>
-          <td>${escapeHtml(p.status)}</td>
-        </tr>`;
-      })
+    const rupees = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    // One row per PurchaseItem (not one per Purchase) - each line has its
+    // own Quantity/Unit/Purchase Rate, per the required column set.
+    const itemRows = purchases
+      .flatMap((p) =>
+        p.items.map((i) => ({
+          purchaseNumber: p.purchaseNumber,
+          date: p.purchaseDate,
+          material: i.rawMaterial.name,
+          quantity: Number(i.quantity),
+          unit: i.rawMaterial.unit,
+          rate: Number(i.unitPrice),
+          total: Number(i.quantity) * Number(i.unitPrice),
+          status: p.status,
+        })),
+      )
+      .map(
+        (r) => `<tr>
+          <td>${escapeHtml(r.purchaseNumber)}</td>
+          <td>${r.date.toLocaleDateString('en-IN')}</td>
+          <td>${escapeHtml(r.material)}</td>
+          <td style="text-align:right">${r.quantity.toLocaleString('en-IN')}</td>
+          <td>${escapeHtml(r.unit)}</td>
+          <td style="text-align:right">${rupees(r.rate)}</td>
+          <td style="text-align:right">${rupees(r.total)}</td>
+          <td>${escapeHtml(r.status)}</td>
+        </tr>`,
+      )
       .join('');
 
     const paymentRows = supplier.payments
@@ -252,12 +274,20 @@ export class SuppliersService {
         (p: any) => `<tr>
           <td>${new Date(p.date).toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(p.voucherNo ?? '-')}</td>
-          <td style="text-align:right">₹${Number(p.amount).toLocaleString('en-IN')}</td>
-          <td style="text-align:right">₹${p.balanceAfter != null ? Number(p.balanceAfter).toLocaleString('en-IN') : '-'}</td>
+          <td style="text-align:right">${rupees(Number(p.amount))}</td>
+          <td style="text-align:right">${p.balanceAfter != null ? rupees(Number(p.balanceAfter)) : '-'}</td>
           <td>${escapeHtml(p.mode ?? '-')}</td>
         </tr>`,
       )
       .join('');
+
+    const summaryBlock = `<div class="summary">
+      <div><div class="label">Total Purchases</div><div class="value">${rupees(supplier.totalPurchaseValue)}</div></div>
+      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">${rupees(supplier.totalPaid)}</div></div>
+      <div><div class="label">Balance Payable</div><div class="value" style="color:#b91c1c">${rupees(supplier.balance)}</div></div>
+    </div>`;
+
+    const itemCount = purchases.reduce((s, p) => s + p.items.length, 0);
 
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
@@ -266,24 +296,30 @@ export class SuppliersService {
   ${renderReportHeader(supplier.name)}
   <div class="body">
     <p style="margin:0 0 14px;color:#6b7280;font-size:12px">${supplier.phone ? escapeHtml(supplier.phone) : ''}</p>
-    <div class="summary">
-      <div><div class="label">Total Purchases</div><div class="value">₹${supplier.totalPurchaseValue.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">₹${supplier.totalPaid.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Balance Payable</div><div class="value" style="color:#b91c1c">₹${supplier.balance.toLocaleString('en-IN')}</div></div>
-    </div>
-    <h3 style="font-size:13px;margin:18px 0 8px">Purchases</h3>
+    <h3 style="font-size:13px;margin:0 0 8px">Purchase Summary</h3>
+    ${summaryBlock}
+    <h3 style="font-size:13px;margin:18px 0 8px">Purchase Details</h3>
     <table>
-      <thead><tr><th>Purchase No</th><th>Date</th><th>Items</th><th style="text-align:right">Total</th><th>Status</th></tr></thead>
-      <tbody>${poRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No purchases</td></tr>'}</tbody>
+      <thead><tr><th>Purchase No</th><th>Date</th><th>Item</th><th style="text-align:right">Quantity</th><th>Unit</th><th style="text-align:right">Purchase Rate</th><th style="text-align:right">Total</th><th>Status</th></tr></thead>
+      <tbody>${itemRows || '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:16px">No purchases</td></tr>'}</tbody>
     </table>
     <h3 style="font-size:13px;margin:18px 0 8px">Payment Ledger</h3>
     <table>
       <thead><tr><th>Date</th><th>Voucher No</th><th style="text-align:right">Amount</th><th style="text-align:right">Balance</th><th>Mode</th></tr></thead>
-      <tbody>${paymentRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No payments</td></tr>'}</tbody>
+      <tbody>
+        ${paymentRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No payments</td></tr>'}
+        ${
+          supplier.payments.length > 0
+            ? `<tr style="font-weight:bold"><td colspan="2">Total Paid</td><td style="text-align:right">${rupees(supplier.totalPaid)}</td><td></td><td></td></tr>`
+            : ''
+        }
+      </tbody>
     </table>
-    ${renderGeneratedFooter(purchases.length, 'purchase')}
+    <h3 style="font-size:13px;margin:18px 0 8px">Financial Summary</h3>
+    ${summaryBlock}
+    ${renderGeneratedFooter(itemCount, 'purchase item')}
   </div>
 </body></html>`;
-    return this.pdf.renderHtmlToPdf(html);
+    return this.pdf.renderHtmlToPdf(html, { pageNumbers: true });
   }
 }

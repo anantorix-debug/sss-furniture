@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
@@ -8,13 +8,25 @@ import { Modal } from './Modal';
 import { ConfirmDialog } from './ConfirmDialog';
 import type { Shop } from '@/types';
 
-const emptyForm = { name: '', contactPhone: '', address: '' };
+const emptyForm = { name: '', contactPerson: '', contactPhone: '', whatsapp: '', address: '' };
 
 // Shop Name CRUD, embedded directly on the Party Orders page (not tucked
 // under Settings) - Super Admin adds/edits/deletes shops here, and the New
 // Party Order form's Shop dropdown reads from the same /shops list.
-export function ShopManagerModal({ onClose, onChange }: { onClose: () => void; onChange?: () => void }) {
-  const [search, setSearch] = useState('');
+// initialSearch/focusShopId let the Shop Dashboard's "Edit Shop" action jump
+// straight to that shop's edit form instead of showing the full list first.
+export function ShopManagerModal({
+  onClose,
+  onChange,
+  initialSearch,
+  focusShopId,
+}: {
+  onClose: () => void;
+  onChange?: () => void;
+  initialSearch?: string;
+  focusShopId?: string;
+}) {
+  const [search, setSearch] = useState(initialSearch ?? '');
   const { data: shops, isLoading, mutate } = useSWR<Shop[]>('/shops?includeInactive=true', fetcher);
 
   const [editing, setEditing] = useState<Shop | null>(null);
@@ -24,6 +36,7 @@ export function ShopManagerModal({ onClose, onChange }: { onClose: () => void; o
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Shop | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [autoOpened, setAutoOpened] = useState(false);
 
   function openCreate() {
     setEditing(null);
@@ -33,17 +46,38 @@ export function ShopManagerModal({ onClose, onChange }: { onClose: () => void; o
   }
   function openEdit(shop: Shop) {
     setEditing(shop);
-    setForm({ name: shop.name, contactPhone: shop.contactPhone ?? '', address: shop.address ?? '' });
+    setForm({
+      name: shop.name,
+      contactPerson: shop.contactPerson ?? '',
+      contactPhone: shop.contactPhone ?? '',
+      whatsapp: shop.whatsapp ?? '',
+      address: shop.address ?? '',
+    });
     setError(null);
     setFormOpen(true);
   }
+
+  useEffect(() => {
+    if (!focusShopId || autoOpened || !shops) return;
+    const target = shops.find((s) => s.id === focusShopId);
+    if (target) {
+      setAutoOpened(true);
+      openEdit(target);
+    }
+  }, [focusShopId, autoOpened, shops]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const payload = { name: form.name, contactPhone: form.contactPhone || undefined, address: form.address || undefined };
+      const payload = {
+        name: form.name,
+        contactPerson: form.contactPerson || undefined,
+        contactPhone: form.contactPhone || undefined,
+        whatsapp: form.whatsapp || undefined,
+        address: form.address || undefined,
+      };
       if (editing) {
         await api.patch(`/shops/${editing.id}`, payload);
       } else {
@@ -97,7 +131,9 @@ export function ShopManagerModal({ onClose, onChange }: { onClose: () => void; o
             <div key={shop.id} className="flex items-center justify-between px-3 py-2.5 border-b border-brand-50 last:border-0">
               <div className="min-w-0">
                 <p className={`font-medium truncate ${shop.isActive ? 'text-ink' : 'text-brand-400 line-through'}`}>{shop.name}</p>
-                <p className="text-xs text-brand-400 truncate">{[shop.contactPhone, shop.address].filter(Boolean).join(' · ') || '-'}</p>
+                <p className="text-xs text-brand-400 truncate">
+                  {[shop.contactPerson, shop.contactPhone, shop.address].filter(Boolean).join(' · ') || '-'}
+                </p>
               </div>
               <div className="flex items-center gap-3 shrink-0 text-xs">
                 <button type="button" className="text-brand-600 hover:underline" onClick={() => openEdit(shop)}>
@@ -123,8 +159,16 @@ export function ShopManagerModal({ onClose, onChange }: { onClose: () => void; o
               <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
             </div>
             <div>
+              <label className="label">Contact Person</label>
+              <input className="input" value={form.contactPerson} onChange={(e) => setForm((f) => ({ ...f, contactPerson: e.target.value }))} />
+            </div>
+            <div>
               <label className="label">Contact Phone</label>
               <input className="input" value={form.contactPhone} onChange={(e) => setForm((f) => ({ ...f, contactPhone: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">WhatsApp</label>
+              <input className="input" value={form.whatsapp} onChange={(e) => setForm((f) => ({ ...f, whatsapp: e.target.value }))} />
             </div>
             <div>
               <label className="label">Address</label>

@@ -18,6 +18,8 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/a
 const emptyPaymentForm = { date: new Date().toISOString().slice(0, 10), particulars: '', voucherNo: '', amount: '', mode: 'CASH' };
 
 const STATUS_CHIP: Record<PurchaseStatus, ChipColor> = {
+  PENDING_APPROVAL: 'amber',
+  APPROVED: 'blue',
   RECORDED: 'green',
   CANCELLED: 'red',
 };

@@ -53,11 +53,155 @@ export class PartyOrdersController {
     @Query('dateTo') dateTo?: string,
     @Query('shopId') shopId?: string,
     @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
+    @CurrentUser() user?: AuthUser,
   ) {
-    const buffer = await this.service.generateListPdf({ status, search, dateFrom, dateTo, shopId, paymentStatus });
+    const buffer = await this.service.generateListPdf({
+      status,
+      search,
+      dateFrom,
+      dateTo,
+      shopId,
+      paymentStatus,
+      viewerRole: user?.role as Role,
+    });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="party-orders-${new Date().toISOString().slice(0, 10)}.pdf"`);
     res.send(buffer);
+  }
+
+  // Complete filtered dataset, never just the current page - see the note
+  // on PartyOrdersService.generateListCsv.
+  @Get('export')
+  async exportCsv(
+    @Res() res: Response,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('shopId') shopId?: string,
+    @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
+    @CurrentUser() user?: AuthUser,
+  ) {
+    const csv = await this.service.generateListCsv({
+      status,
+      search,
+      dateFrom,
+      dateTo,
+      shopId,
+      paymentStatus,
+      viewerRole: user?.role as Role,
+    });
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="party-orders-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  }
+
+  // Static route - must come before the dynamic :id route below. Powers the
+  // shop-centric main page (one card per shop).
+  @Get('shops-summary')
+  getShopSummaries(
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('shopId') shopId?: string,
+    @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.service.getShopSummaries({
+      status,
+      search,
+      dateFrom,
+      dateTo,
+      shopId,
+      paymentStatus,
+      viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  // Static route - must come before the dynamic :id route below. Powers the
+  // Shop Dashboard (one shop's overall + filtered summary and order list).
+  @Get('shops-summary/:shopId')
+  getShopDashboard(
+    @Param('shopId') shopId: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.service.getShopDashboard(shopId, {
+      status,
+      search,
+      dateFrom,
+      dateTo,
+      paymentStatus,
+      viewerRole: user?.role as Role,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  // Static route - must come before the dynamic :id route below. The Shop
+  // Dashboard's own PDF, in the Product Supply Details + Payment Ledger
+  // format (see PartyOrdersService.generateShopPdf) - scoped to this shop
+  // and whatever filters are active, never the whole database.
+  @Get('shops-summary/:shopId/pdf')
+  async shopPdf(
+    @Param('shopId') shopId: string,
+    @Res() res: Response,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
+    @CurrentUser() user?: AuthUser,
+  ) {
+    const buffer = await this.service.generateShopPdf(shopId, {
+      status,
+      search,
+      dateFrom,
+      dateTo,
+      paymentStatus,
+      viewerRole: user?.role as Role,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="party-orders-${shopId}-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    res.send(buffer);
+  }
+
+  // Static route - must come before the dynamic :id route below. Same
+  // filtered dataset as shopPdf, as CSV - see the note on
+  // PartyOrdersService.generateListCsv for why this is never one page only.
+  @Get('shops-summary/:shopId/export')
+  async shopCsv(
+    @Param('shopId') shopId: string,
+    @Res() res: Response,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
+    @CurrentUser() user?: AuthUser,
+  ) {
+    const csv = await this.service.generateShopCsv(shopId, {
+      status,
+      search,
+      dateFrom,
+      dateTo,
+      paymentStatus,
+      viewerRole: user?.role as Role,
+    });
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="party-orders-${shopId}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
   }
 
   @Get(':id')

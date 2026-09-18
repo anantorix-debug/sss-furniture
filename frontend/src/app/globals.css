@@ -50,3 +50,48 @@ body {
     @apply bg-brand-50/50;
   }
 }
+
+/* Party Order card's "just dispatched" cue - a truck travelling left to
+   right toward a fixed shop pin, used once after saving a Vehicle Number
+   on a Delivered order (see PartyOrderCard's VehicleNumberInline). */
+@keyframes dispatch-travel {
+  0% {
+    left: 0;
+    opacity: 1;
+  }
+  80% {
+    left: calc(100% - 16px);
+    opacity: 1;
+  }
+  100% {
+    left: calc(100% - 16px);
+    opacity: 0;
+  }
+}
+.animate-dispatch-travel-big {
+  position: absolute;
+  animation: dispatch-travel 3.5s ease-in-out forwards;
+}
+
+/* Purchase Order process tracker (PurchaseProcessTracker) - a document
+   icon sliding toward a WhatsApp bubble, looped while whatsappStatus is
+   PENDING/SENDING (indeterminate duration, unlike the one-shot dispatch
+   cue above). */
+.animate-doc-send {
+  position: absolute;
+  animation: dispatch-travel 1.3s ease-in-out infinite;
+}
+
+/* Soft glow ring on the process tracker's currently-active step. */
+@keyframes step-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(128, 1, 31, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(128, 1, 31, 0);
+  }
+}
+.animate-step-glow {
+  animation: step-glow 1.8s ease-in-out infinite;
+}

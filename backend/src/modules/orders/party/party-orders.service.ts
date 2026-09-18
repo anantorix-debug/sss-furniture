@@ -98,6 +98,127 @@ function stripOrderMoney<
 
 const itemsInclude = { items: { orderBy: { createdAt: 'asc' as const }, include: { referenceImage: true } } };
 
+// A shop's aggregated numbers, computed from whatever order array is handed
+// in - used identically for one group's card on the shop list, and for both
+// the "overall" and "filtered" summaries on the shop dashboard, so the same
+// rules (which statuses count as pending/delivered, how balance is summed)
+// can never drift between the two views.
+function summarizeShopOrders(
+  shop: { id: string | null; name: string; contactPerson?: string | null; contactPhone?: string | null; whatsapp?: string | null; address?: string | null; isActive?: boolean },
+  orders: { totalAmount: any; receivedAmount: number; deliveryStatus: string; orderDate: Date }[],
+) {
+  const orderCount = orders.length;
+  const totalValue = orders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
+  const totalPaid = orders.reduce((sum, o) => sum + Number(o.receivedAmount), 0);
+  const balanceDue = Math.round((totalValue - totalPaid) * 100) / 100;
+  const pendingCount = orders.filter((o) => o.deliveryStatus === 'PENDING').length;
+  const deliveredCount = orders.filter((o) => o.deliveryStatus === 'DELIVERED').length;
+  const lastOrderDate = orders.reduce<Date | null>((max, o) => (!max || o.orderDate > max ? o.orderDate : max), null);
+  return {
+    shopId: shop.id,
+    shopName: shop.name,
+    contactPerson: shop.contactPerson ?? null,
+    contactPhone: shop.contactPhone ?? null,
+    whatsapp: shop.whatsapp ?? null,
+    address: shop.address ?? null,
+    isActive: shop.isActive ?? true,
+    orderCount,
+    totalValue,
+    totalPaid,
+    balanceDue,
+    pendingCount,
+    deliveredCount,
+    lastOrderDate,
+  };
+}
+
+type ShopSummary = ReturnType<typeof summarizeShopOrders>;
+
+// Same money-hiding rule as stripOrderMoney, applied to an aggregated
+// summary instead of one order - a worker role must never see shop-level
+// totals either, only the non-monetary counts.
+function stripShopSummaryMoney(summary: ShopSummary, hide: boolean): ShopSummary {
+  if (!hide) return summary;
+  const { totalValue, totalPaid, balanceDue, ...rest } = summary;
+  return rest as ShopSummary;
+}
+
+// One row per PartyOrderItem line, across every order in the given
+// (already-filtered) array - the "Product Supply Details" table on the Shop
+// Dashboard and its PDF/Excel exports. Legacy orders that predate the
+// items[] table (items.length === 0) fall back to the order's own
+// model/size/finish/price/qty fields, same fallback productSummary()/
+// modelNoSummary() already use on the shop-list card.
+function buildSupplyRows(
+  orders: any[],
+  hide: boolean,
+): {
+  orderId: string;
+  date: Date;
+  order: string;
+  finish: string | null;
+  size: string | null;
+  pattern: string | null;
+  modelNo: string | null;
+  price?: number;
+  qty: number;
+  value?: number;
+}[] {
+  return orders.flatMap((o) => {
+    if (o.items?.length) {
+      return o.items.map((it: any) => ({
+        orderId: o.id,
+        date: o.orderDate,
+        order: it.productName,
+        finish: it.finish ?? null,
+        size: [it.size, it.sizeUnit].filter(Boolean).join(' ') || null,
+        pattern: it.pattern ?? null,
+        modelNo: it.modelNo ?? null,
+        ...(hide ? {} : { price: Number(it.unitPrice ?? 0), value: Number(it.totalValue ?? 0) }),
+        qty: it.qty ?? 1,
+      }));
+    }
+    return [
+      {
+        orderId: o.id,
+        date: o.orderDate,
+        order: o.model ?? o.shopName,
+        finish: o.finish ?? null,
+        size: [o.size, o.sizeUnit].filter(Boolean).join(' ') || null,
+        pattern: null,
+        modelNo: o.cotNo ?? null,
+        ...(hide ? {} : { price: o.price != null ? Number(o.price) : undefined, value: Number(o.totalAmount ?? 0) }),
+        qty: o.qty ?? 1,
+      },
+    ];
+  });
+}
+
+// The Payment Ledger's running balance - every payment across the given
+// (already-filtered) orders, oldest first, each row showing the shop's
+// running balance after that payment (totalOrderValue minus every payment
+// up to and including this one). Never shown to HIDE_FINANCIALS_FOR roles -
+// same rule as every other money field on this dashboard.
+function buildPaymentLedger(orders: any[], totalOrderValue: number, hide: boolean) {
+  if (hide) return [];
+  const rows = orders.flatMap((o) =>
+    (o.payments ?? []).map((p: any) => ({
+      date: p.date as Date,
+      createdAt: p.createdAt as Date,
+      voucherNo: (p.note as string | null) ?? null,
+      orderValue: Number(o.totalAmount ?? 0),
+      amount: Number(p.amount ?? 0),
+      mode: (p.mode as string | null) ?? null,
+    })),
+  );
+  rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
+  let runningPaid = 0;
+  return rows.map(({ createdAt: _createdAt, ...row }) => {
+    runningPaid += row.amount;
+    return { ...row, balance: Math.round((totalOrderValue - runningPaid) * 100) / 100 };
+  });
+}
+
 @Injectable()
 export class PartyOrdersService {
   constructor(
@@ -109,26 +230,21 @@ export class PartyOrdersService {
     private whatsapp: WhatsappService,
   ) {}
 
-  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
-  // `paymentStatus` is derived from receivedAmount/balanceAmount, not a
-  // stored column - filtered/paginated in JS after computing it, same
-  // "compute then filter" pattern as RawMaterial's isLow (paginating in SQL
-  // first would drop matching rows before the derived filter runs).
-  async findAll(params: {
+  // The single filtered dataset every list/summary/PDF/Excel view is built
+  // from - full order objects (real numbers, not money-stripped) after the
+  // same where-clause + derived paymentStatus filter, before any
+  // pagination or role-based stripping. findAll(), getShopSummaries(),
+  // getShopDashboard(), generateListPdf() and generateListCsv() all call
+  // this and only this, so none of them can ever disagree about which rows
+  // match a given filter set.
+  private async getFilteredOrders(params: {
     status?: string;
     search?: string;
     dateFrom?: string;
     dateTo?: string;
     shopId?: string;
     paymentStatus?: 'SETTLED' | 'DUE';
-    viewerRole?: Role;
-    page?: number;
-    limit?: number;
   }) {
-    const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
-    const paginated = params.page != null;
-    const page = params.page ?? 1;
-    const limit = params.limit ?? 20;
     const where = {
       deliveryStatus: params.status ? (params.status as any) : undefined,
       shopId: params.shopId,
@@ -142,7 +258,9 @@ export class PartyOrdersService {
             { model: { contains: params.search } },
             { phone: { contains: params.search } },
             { cotNo: { contains: params.search } },
+            { jobNumber: { contains: params.search } },
             { items: { some: { productName: { contains: params.search } } } },
+            { items: { some: { modelNo: { contains: params.search } } } },
           ]
         : undefined,
     };
@@ -162,12 +280,118 @@ export class PartyOrdersService {
       const balanced = withBalance(o);
       return { ...balanced, paymentStatus: (balanced.balanceAmount <= 0 ? 'SETTLED' : 'DUE') as 'SETTLED' | 'DUE' };
     });
-    const filtered = params.paymentStatus ? withStatus.filter((o) => o.paymentStatus === params.paymentStatus) : withStatus;
+    return params.paymentStatus ? withStatus.filter((o) => o.paymentStatus === params.paymentStatus) : withStatus;
+  }
+
+  // Opt-in pagination - see the identical note on CustomerOrdersService.findAll.
+  async findAll(params: {
+    status?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    shopId?: string;
+    paymentStatus?: 'SETTLED' | 'DUE';
+    viewerRole?: Role;
+    page?: number;
+    limit?: number;
+  }) {
+    const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
+    const paginated = params.page != null;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const filtered = await this.getFilteredOrders(params);
     const mapped = filtered.map((o) => stripOrderMoney(o, hide));
 
     if (!paginated) return mapped;
     const { skip, take } = toSkipTake(page, limit);
     return paginate(mapped.slice(skip, skip + take), mapped.length, page, limit);
+  }
+
+  // Powers the shop-centric main page: one card per shop, grouped from the
+  // same filtered order array findAll() uses - so "Shop = X, Date = Y" on
+  // this view and on the old flat list can never show different orders.
+  // Legacy rows with no shopId (pre-Shop-directory) group by shopName
+  // instead, so they still surface as a card rather than being dropped.
+  async getShopSummaries(params: {
+    status?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    shopId?: string;
+    paymentStatus?: 'SETTLED' | 'DUE';
+    viewerRole?: Role;
+    page?: number;
+    limit?: number;
+  }) {
+    const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
+    const filtered = await this.getFilteredOrders(params);
+
+    const groups = new Map<string, { shopId: string | null; shopName: string; orders: typeof filtered }>();
+    for (const o of filtered) {
+      const key = o.shopId ?? `name:${o.shopName}`;
+      const group = groups.get(key);
+      if (group) group.orders.push(o);
+      else groups.set(key, { shopId: o.shopId, shopName: o.shopName, orders: [o] });
+    }
+
+    const shopIds = [...groups.values()].map((g) => g.shopId).filter((id): id is string => !!id);
+    const shops = shopIds.length ? await this.prisma.shop.findMany({ where: { id: { in: shopIds } } }) : [];
+    const shopById = new Map(shops.map((s) => [s.id, s]));
+
+    const summaries = [...groups.values()]
+      .map((g) => summarizeShopOrders(g.shopId ? (shopById.get(g.shopId) ?? { id: g.shopId, name: g.shopName }) : { id: null, name: g.shopName }, g.orders))
+      .sort((a, b) => a.shopName.localeCompare(b.shopName))
+      .map((s) => stripShopSummaryMoney(s, hide));
+
+    const paginated = params.page != null;
+    if (!paginated) return summaries;
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const { skip, take } = toSkipTake(page, limit);
+    return paginate(summaries.slice(skip, skip + take), summaries.length, page, limit);
+  }
+
+  // Powers the Shop Dashboard: the shop's own record, an "Overall" summary
+  // (all of this shop's orders, no other filters), a "Filtered" summary
+  // (this shop + whatever date/status/payment filters are active), and the
+  // matching paginated order list - all from the same getFilteredOrders().
+  async getShopDashboard(
+    shopId: string,
+    params: {
+      status?: string;
+      search?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      paymentStatus?: 'SETTLED' | 'DUE';
+      viewerRole?: Role;
+      page?: number;
+      limit?: number;
+    },
+  ) {
+    const shop = await this.prisma.shop.findUnique({ where: { id: shopId } });
+    if (!shop) throw new NotFoundException('Shop not found');
+
+    const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
+
+    const overallOrders = await this.getFilteredOrders({ shopId });
+    const filteredOrders = await this.getFilteredOrders({ ...params, shopId });
+
+    const overallSummary = stripShopSummaryMoney(summarizeShopOrders(shop, overallOrders), hide);
+    const filteredSummary = stripShopSummaryMoney(summarizeShopOrders(shop, filteredOrders), hide);
+
+    // Product Supply Details + Payment Ledger - built from the complete
+    // filtered set (not the paginated page below), so they always agree
+    // with filteredSummary's totals no matter which order page is showing.
+    const items = buildSupplyRows(filteredOrders, hide);
+    const paymentLedger = buildPaymentLedger(filteredOrders, filteredSummary.totalValue ?? 0, hide);
+
+    const mapped = filteredOrders.map((o) => stripOrderMoney(o, hide));
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const { skip, take } = toSkipTake(page, limit);
+    const orders = paginate(mapped.slice(skip, skip + take), mapped.length, page, limit);
+
+    return { shop, overallSummary, filteredSummary, orders, items, paymentLedger };
   }
 
   async findOne(id: string, viewerRole?: Role) {
@@ -706,7 +930,11 @@ export class PartyOrdersService {
   }
 
   // Party Orders list PDF - exactly the filtered rows the list page is
-  // showing, never the whole table.
+  // showing, never the whole table. Uses the same getFilteredOrders() as
+  // the list/summary endpoints so this can never diverge from what's on
+  // screen. viewerRole strips financials the same way findAll() does -
+  // this route was previously reachable by any authenticated role without
+  // ever hiding totals, unlike every other party-order endpoint.
   async generateListPdf(params: {
     status?: string;
     search?: string;
@@ -714,20 +942,204 @@ export class PartyOrdersService {
     dateTo?: string;
     shopId?: string;
     paymentStatus?: 'SETTLED' | 'DUE';
+    viewerRole?: Role;
   }): Promise<Buffer> {
-    const orders = (await this.findAll(params)) as any[];
+    const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
+    const filtered = await this.getFilteredOrders(params);
+    const orders = filtered.map((o) => stripOrderMoney(o, hide));
     const rows = orders
       .map(
-        (o, idx) => `<tr>
+        (o: any, idx) => `<tr>
           <td>${idx + 1}</td>
           <td>${escapeHtml(o.jobNumber ?? o.cotNo ?? o.id)}</td>
           <td>${escapeHtml(o.shopName)}</td>
           <td>${new Date(o.orderDate).toLocaleDateString('en-IN')}</td>
           <td>${o.items?.length ?? 0}</td>
-          <td style="text-align:right">Rs. ${Number(o.totalAmount ?? 0).toLocaleString('en-IN')}</td>
+          ${
+            hide
+              ? ''
+              : `<td style="text-align:right">Rs. ${Number(o.totalAmount ?? 0).toLocaleString('en-IN')}</td>
           <td style="text-align:right">Rs. ${Number(o.receivedAmount ?? 0).toLocaleString('en-IN')}</td>
-          <td style="text-align:right">Rs. ${Number(o.balanceAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${Number(o.balanceAmount ?? 0).toLocaleString('en-IN')}</td>`
+          }
           <td>${escapeHtml(String(o.deliveryStatus).replace(/_/g, ' '))}</td>
+        </tr>`,
+      )
+      .join('');
+
+    let shopName: string | undefined;
+    if (params.shopId) {
+      const shop = await this.prisma.shop.findUnique({ where: { id: params.shopId }, select: { name: true } });
+      shopName = shop?.name;
+    }
+    const filterSummary = renderFilterSummary({
+      Search: params.search,
+      Shop: shopName,
+      Status: params.status ? params.status.replace(/_/g, ' ') : undefined,
+      'Date From': params.dateFrom ? new Date(params.dateFrom).toLocaleDateString('en-IN') : undefined,
+      'Date To': params.dateTo ? new Date(params.dateTo).toLocaleDateString('en-IN') : undefined,
+      'Payment Status': params.paymentStatus,
+    });
+
+    const totalsSummary = hide
+      ? ''
+      : `<div class="summary">
+      <div><div class="label">Total Orders</div><div class="value">${orders.length}</div></div>
+      <div><div class="label">Total Value</div><div class="value">Rs. ${filtered.reduce((s, o) => s + Number(o.totalAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">Rs. ${filtered.reduce((s, o) => s + Number(o.receivedAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Balance Due</div><div class="value" style="color:#b91c1c">Rs. ${filtered.reduce((s, o) => s + Number(o.balanceAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
+    </div>`;
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${renderReportHeader('Party Orders')}
+  <div class="body">
+    ${filterSummary}
+    ${totalsSummary}
+    <table>
+      <thead><tr><th>S.No</th><th>Job No</th><th>Dealer/Shop</th><th>Date</th><th>Products</th>${hide ? '' : '<th style="text-align:right">Total</th><th style="text-align:right">Received</th><th style="text-align:right">Balance</th>'}<th>Status</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="${hide ? 6 : 9}" style="text-align:center;color:#9ca3af;padding:16px">No party orders found</td></tr>`}</tbody>
+    </table>
+    ${renderGeneratedFooter(orders.length, 'order')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html);
+  }
+
+  // Same filtered dataset as the PDF/list, as CSV - always the COMPLETE
+  // filtered set (not one page), matching what "Download PDF" already
+  // guarantees. No Excel library exists anywhere in this codebase; this
+  // follows the one existing backend export precedent (ReportsService.toCsv)
+  // exactly, rather than introducing a new dependency for the first time.
+  async generateListCsv(params: {
+    status?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    shopId?: string;
+    paymentStatus?: 'SETTLED' | 'DUE';
+    viewerRole?: Role;
+  }): Promise<string> {
+    const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
+    const filtered = await this.getFilteredOrders(params);
+
+    const rows: Record<string, unknown>[] = [];
+    for (const o of filtered as any[]) {
+      const base = {
+        'Job No': o.jobNumber ?? o.cotNo ?? o.id,
+        Shop: o.shopName,
+        Date: new Date(o.orderDate).toISOString().slice(0, 10),
+        Phone: o.phone ?? '',
+        Status: String(o.deliveryStatus).replace(/_/g, ' '),
+      };
+      if (o.items?.length) {
+        for (const item of o.items) {
+          rows.push({
+            ...base,
+            'Model No': item.modelNo ?? '',
+            Product: item.productName,
+            Qty: item.qty,
+            ...(hide ? {} : { 'Line Total': Number(item.totalValue ?? 0) }),
+            ...(hide
+              ? {}
+              : {
+                  'Order Total': Number(o.totalAmount ?? 0),
+                  Paid: Number(o.receivedAmount ?? 0),
+                  Balance: Number(o.balanceAmount ?? 0),
+                }),
+          });
+        }
+      } else {
+        rows.push({
+          ...base,
+          'Model No': o.cotNo ?? '',
+          Product: o.model ?? '',
+          Qty: o.qty ?? 1,
+          ...(hide
+            ? {}
+            : {
+                'Order Total': Number(o.totalAmount ?? 0),
+                Paid: Number(o.receivedAmount ?? 0),
+                Balance: Number(o.balanceAmount ?? 0),
+              }),
+        });
+      }
+    }
+
+    if (!hide) {
+      rows.push({
+        'Job No': 'TOTAL',
+        Shop: `${filtered.length} order(s)`,
+        Date: '',
+        Phone: '',
+        Status: '',
+        'Model No': '',
+        Product: '',
+        Qty: '',
+        'Order Total': filtered.reduce((s, o) => s + Number(o.totalAmount ?? 0), 0),
+        Paid: filtered.reduce((s, o) => s + Number(o.receivedAmount ?? 0), 0),
+        Balance: filtered.reduce((s, o) => s + Number(o.balanceAmount ?? 0), 0),
+      });
+    }
+
+    return this.toCsv(rows);
+  }
+
+  // Shop Dashboard's own report - Product Supply Details (one row per item,
+  // reusing the exact column set the single-order PDF already uses) plus a
+  // Payment Ledger, both scoped to this shop and whatever filters are
+  // active. Reuses the same getFilteredOrders() as the dashboard's own
+  // screen data, so the PDF can never show a different row count or total
+  // than what's on screen for the same filter set.
+  async generateShopPdf(
+    shopId: string,
+    params: {
+      status?: string;
+      search?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      paymentStatus?: 'SETTLED' | 'DUE';
+      viewerRole?: Role;
+    },
+  ): Promise<Buffer> {
+    const shop = await this.prisma.shop.findUnique({ where: { id: shopId } });
+    if (!shop) throw new NotFoundException('Shop not found');
+
+    const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
+    const filteredOrders = await this.getFilteredOrders({ ...params, shopId });
+    const summary = summarizeShopOrders(shop, filteredOrders);
+    const supplyRows = buildSupplyRows(filteredOrders, hide);
+    const ledgerRows = buildPaymentLedger(filteredOrders, summary.totalValue, hide);
+
+    const rupees = (n: number) => `Rs. ${n.toLocaleString('en-IN')}`;
+
+    const supplyBody = supplyRows
+      .map(
+        (r, idx) => `<tr>
+          <td>${idx + 1}</td>
+          <td>${new Date(r.date).toLocaleDateString('en-IN')}</td>
+          <td>${escapeHtml(r.order)}</td>
+          <td>${escapeHtml(r.finish ?? '-')}</td>
+          <td>${escapeHtml(r.size ?? '-')}</td>
+          <td>${escapeHtml(r.pattern ?? '-')}</td>
+          ${hide ? '' : `<td style="text-align:right">${r.price != null ? rupees(r.price) : '-'}</td>`}
+          <td>${escapeHtml(r.modelNo ?? '-')}</td>
+          ${hide ? '' : `<td style="text-align:right">${r.value != null ? rupees(r.value) : '-'}</td>`}
+        </tr>`,
+      )
+      .join('');
+
+    const ledgerBody = ledgerRows
+      .map(
+        (r) => `<tr>
+          <td>${new Date(r.date).toLocaleDateString('en-IN')}</td>
+          <td>${escapeHtml(r.voucherNo ?? '-')}</td>
+          <td style="text-align:right">${rupees(r.orderValue)}</td>
+          <td style="text-align:right">${rupees(r.amount)}</td>
+          <td>${escapeHtml(r.mode ?? '-')}</td>
+          <td style="text-align:right">${rupees(r.balance)}</td>
         </tr>`,
       )
       .join('');
@@ -740,20 +1152,122 @@ export class PartyOrdersService {
       'Payment Status': params.paymentStatus,
     });
 
+    const paymentSection = hide
+      ? ''
+      : `<h2 style="font-size:14px;margin:22px 0 10px">Payment Details</h2>
+    <div class="summary">
+      <div><div class="label">Total Order Value</div><div class="value">${rupees(summary.totalValue)}</div></div>
+      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">${rupees(summary.totalPaid)}</div></div>
+      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">${rupees(summary.balanceDue)}</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Date</th><th>Bill No / Voucher No</th><th style="text-align:right">Order Value</th><th style="text-align:right">Payment</th><th>Mode</th><th style="text-align:right">Balance</th></tr></thead>
+      <tbody>${ledgerBody || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:16px">No payments recorded</td></tr>'}</tbody>
+    </table>`;
+
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>${REPORT_PDF_STYLES}</style></head>
 <body>
-  ${renderReportHeader('Party Orders')}
+  <div class="header">
+    <h1>${escapeHtml(shop.name)}</h1>
+    <p>SSS Company${shop.contactPhone ? ` &middot; ${escapeHtml(shop.contactPhone)}` : ''} &middot; Product Supply Details</p>
+  </div>
   <div class="body">
     ${filterSummary}
     <table>
-      <thead><tr><th>S.No</th><th>Job No</th><th>Dealer/Shop</th><th>Date</th><th>Products</th><th style="text-align:right">Total</th><th style="text-align:right">Received</th><th style="text-align:right">Balance</th><th>Status</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px">No party orders found</td></tr>'}</tbody>
+      <thead><tr><th>S.No</th><th>Date</th><th>Order</th><th>Finish</th><th>Size</th><th>Pattern</th>${hide ? '' : '<th style="text-align:right">Price</th>'}<th>M.No</th>${hide ? '' : '<th style="text-align:right">Value</th>'}</tr></thead>
+      <tbody>${supplyBody || `<tr><td colspan="${hide ? 7 : 9}" style="text-align:center;color:#9ca3af;padding:16px">No items found</td></tr>`}</tbody>
     </table>
-    ${renderGeneratedFooter(orders.length, 'order')}
+    ${hide ? '' : `<div class="summary"><div><div class="label">Total Order Value</div><div class="value">${rupees(summary.totalValue)}</div></div></div>`}
+    ${paymentSection}
+    ${renderGeneratedFooter(supplyRows.length, 'item')}
   </div>
 </body></html>`;
     return this.pdf.renderHtmlToPdf(html);
+  }
+
+  // Same filtered Product Supply Details rows as generateShopPdf, as CSV -
+  // always the complete filtered set, never one page. Bottom rows carry
+  // Total Order Value / Total Paid / Balance, same numbers as the PDF and
+  // the dashboard's own filteredSummary for this same param set.
+  async generateShopCsv(
+    shopId: string,
+    params: {
+      status?: string;
+      search?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      paymentStatus?: 'SETTLED' | 'DUE';
+      viewerRole?: Role;
+    },
+  ): Promise<string> {
+    const shop = await this.prisma.shop.findUnique({ where: { id: shopId } });
+    if (!shop) throw new NotFoundException('Shop not found');
+
+    const hide = params.viewerRole ? HIDE_FINANCIALS_FOR.includes(params.viewerRole) : false;
+    const filteredOrders = await this.getFilteredOrders({ ...params, shopId });
+    const summary = summarizeShopOrders(shop, filteredOrders);
+    const supplyRows = buildSupplyRows(filteredOrders, hide);
+
+    const rows: Record<string, unknown>[] = supplyRows.map((r, idx) => ({
+      'S.No': idx + 1,
+      Date: new Date(r.date).toISOString().slice(0, 10),
+      Order: r.order,
+      Finish: r.finish ?? '',
+      Size: r.size ?? '',
+      Pattern: r.pattern ?? '',
+      ...(hide ? {} : { Price: r.price ?? '' }),
+      'Model No': r.modelNo ?? '',
+      ...(hide ? {} : { Value: r.value ?? '' }),
+    }));
+
+    if (!hide) {
+      rows.push({
+        'S.No': '',
+        Date: '',
+        Order: 'TOTAL ORDER VALUE',
+        Finish: '',
+        Size: '',
+        Pattern: '',
+        Price: '',
+        'Model No': '',
+        Value: summary.totalValue,
+      });
+      rows.push({
+        'S.No': '',
+        Date: '',
+        Order: 'TOTAL PAID',
+        Finish: '',
+        Size: '',
+        Pattern: '',
+        Price: '',
+        'Model No': '',
+        Value: summary.totalPaid,
+      });
+      rows.push({
+        'S.No': '',
+        Date: '',
+        Order: 'BALANCE',
+        Finish: '',
+        Size: '',
+        Pattern: '',
+        Price: '',
+        'Model No': '',
+        Value: summary.balanceDue,
+      });
+    }
+
+    return this.toCsv(rows);
+  }
+
+  private toCsv(rows: Record<string, unknown>[]): string {
+    if (rows.length === 0) return '';
+    const headers = Object.keys(rows[0]);
+    const escape = (v: unknown) => {
+      const s = v == null ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    return [headers.join(','), ...rows.map((r) => headers.map((h) => escape(r[h])).join(','))].join('\n');
   }
 }

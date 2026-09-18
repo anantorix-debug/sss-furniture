@@ -1,14 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, getAccessToken } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import { RoleGate } from '@/components/RoleGate';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { StatCard } from '@/components/StatCard';
+import { PurchaseProcessTracker } from '@/components/PurchaseProcessTracker';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { PURCHASE_STATUS_LABEL } from '@/types';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
@@ -17,6 +19,8 @@ import { useWhatsApp } from '@/hooks/useWhatsApp';
 import type { Purchase, PurchaseStatus } from '@/types';
 
 const STATUS_CHIP: Record<PurchaseStatus, ChipColor> = {
+  PENDING_APPROVAL: 'amber',
+  APPROVED: 'blue',
   RECORDED: 'green',
   CANCELLED: 'red',
 };
@@ -26,17 +30,34 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/a
 function PurchaseDetailContent() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { hasRole } = useAuth();
   const { data: purchase, isLoading, mutate } = useSWR<Purchase>(`/purchase-orders/${id}`, fetcher);
   const [notice, setNotice] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [receiving, setReceiving] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const {
     showModal,
     whatsappOptions,
     openWhatsApp,
     closeWhatsApp,
   } = useWhatsApp();
+
+  // The automatic post-approval WhatsApp send runs server-side, after the
+  // approve request has already returned - poll while it's in flight
+  // (PENDING/SENDING) so the tracker's WhatsApp step reflects real status
+  // instead of freezing on "Sending..." forever. Stops itself the instant
+  // the status settles to SENT/FAILED (or the purchase isn't approved at
+  // all yet), so this is never a continuous/idle poll.
+  useEffect(() => {
+    if (purchase?.status === 'PENDING_APPROVAL' || purchase?.status === 'CANCELLED') return;
+    if (purchase?.whatsappStatus !== 'PENDING' && purchase?.whatsappStatus !== 'SENDING') return;
+    const t = setInterval(() => mutate(), 1500);
+    return () => clearInterval(t);
+  }, [purchase?.status, purchase?.whatsappStatus, mutate]);
 
   async function handleCancel() {
     setCancelling(true);
@@ -50,6 +71,45 @@ function PurchaseDetailContent() {
       setCancelOpen(false);
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function handleApprove() {
+    setApproving(true);
+    setNotice(null);
+    try {
+      await api.post(`/purchase-orders/${id}/approve`);
+      mutate();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to approve purchase');
+    } finally {
+      setApproving(false);
+    }
+  }
+
+  async function handleReceive() {
+    setReceiving(true);
+    setNotice(null);
+    try {
+      await api.post(`/purchase-orders/${id}/receive`);
+      mutate();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to mark purchase as received');
+    } finally {
+      setReceiving(false);
+    }
+  }
+
+  async function handleRetryWhatsapp() {
+    setRetrying(true);
+    setNotice(null);
+    try {
+      await api.post(`/purchase-orders/${id}/send-whatsapp`);
+      mutate();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to send WhatsApp');
+    } finally {
+      setRetrying(false);
     }
   }
 
@@ -107,6 +167,11 @@ function PurchaseDetailContent() {
             <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
               {downloading ? 'Preparing...' : 'Download PDF'}
             </button>
+            {(purchase.status === 'APPROVED' || purchase.status === 'RECORDED') && purchase.supplier?.phone && (
+              <button className="btn-secondary" onClick={handleRetryWhatsapp} disabled={retrying}>
+                {retrying ? 'Sending...' : 'Send PO PDF via WhatsApp'}
+              </button>
+            )}
             {purchase.supplier?.phone && (
               <WhatsAppActionButton
                 recipientName={purchase.supplier?.name || 'Supplier'}
@@ -130,11 +195,37 @@ function PurchaseDetailContent() {
       </div>
 
       {notice && <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">{notice}</p>}
-      {cancelled && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">This purchase was cancelled - its stock and supplier balance impact has been reversed.</p>}
+      {cancelled && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {purchase.receivedAt
+            ? 'This purchase was cancelled - its stock and supplier balance impact has been reversed.'
+            : purchase.approvedAt
+              ? 'This purchase was cancelled after approval but before receipt - its supplier balance impact has been reversed; stock was never affected.'
+              : 'This purchase was cancelled before approval - it never affected stock or the supplier balance.'}
+        </p>
+      )}
+
+      <PurchaseProcessTracker
+        purchase={purchase}
+        canApprove={hasRole('SUPERADMIN')}
+        approving={approving}
+        onApprove={handleApprove}
+        canReceive={hasRole('ADMIN')}
+        receiving={receiving}
+        onReceive={handleReceive}
+        onRetryWhatsapp={handleRetryWhatsapp}
+        retrying={retrying}
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <StatCard label="Purchase Date" value={formatDate(purchase.purchaseDate)} />
         <StatCard label="Total" value={formatCurrency(purchase.totalValue)} />
+        {purchase.approvedBy && purchase.approvedAt && (
+          <StatCard label="Approved By" value={purchase.approvedBy.name} sub={formatDate(purchase.approvedAt)} />
+        )}
+        {purchase.receivedBy && purchase.receivedAt && (
+          <StatCard label="Received By" value={purchase.receivedBy.name} sub={formatDate(purchase.receivedAt)} />
+        )}
       </div>
 
       <div className="card overflow-x-auto">
@@ -196,7 +287,13 @@ function PurchaseDetailContent() {
       {cancelOpen && (
         <ConfirmDialog
           title="Cancel Purchase"
-          message={`Cancel ${purchase.purchaseNumber}? This reverses its stock and supplier balance impact. This cannot be undone.`}
+          message={`Cancel ${purchase.purchaseNumber}? ${
+            purchase.status === 'RECORDED'
+              ? 'This reverses its stock and supplier balance impact.'
+              : purchase.status === 'APPROVED'
+                ? 'This reverses its supplier balance impact (stock was never added since it has not been received yet).'
+                : 'It has not been approved yet, so nothing to reverse.'
+          } This cannot be undone.`}
           confirmLabel={cancelling ? 'Cancelling...' : 'Cancel Purchase'}
           danger
           onConfirm={handleCancel}

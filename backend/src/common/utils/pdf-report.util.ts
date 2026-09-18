@@ -21,6 +21,8 @@ export const REPORT_PDF_STYLES = `
   .summary .value { font-size: 16px; font-weight: bold; margin-top: 2px; }
   .filters { font-size: 11.5px; color: #6b7280; margin-bottom: 14px; }
   table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
   th { background: #f4f2ec; text-align: left; padding: 7px 9px; border-bottom: 1px solid #e3e1d9; }
   td { padding: 7px 9px; border-bottom: 1px solid #efede6; }
   .generated { margin-top: 18px; font-size: 10.5px; color: #9ca3af; }

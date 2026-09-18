@@ -51,8 +51,30 @@ enum WorkStatus {
 // supplier payable, so there's no approval/receiving pipeline to track -
 // just whether it's still in effect or was cancelled.
 enum PurchaseStatus {
+  // New purchases created by Admin start here - no stock/supplier-payable
+  // effect until a Super Admin approves them (see PurchasesService.approve).
+  PENDING_APPROVAL
+  // Super Admin has approved - the supplier payable/ledger is booked here
+  // (the financial commitment), but stock is NOT yet touched. Stock only
+  // updates once the material is physically received (see
+  // PurchasesService.receive) - a Purchase Order being approved doesn't
+  // mean the goods are in the warehouse yet.
+  APPROVED
+  // Approved AND received - stock has been added. Also the status every
+  // purchase created before this workflow existed already has (both its
+  // stock and payable were always applied immediately at creation back
+  // then) - those legacy rows are equivalent to "received", just never
+  // went through an explicit approve/receive step, so no backfill was
+  // needed when this enum value was introduced.
   RECORDED
   CANCELLED
+}
+
+enum PurchaseWhatsappStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
 }
 
 enum StockMovementType {
@@ -200,6 +222,8 @@ model User {
   carpenterPayments            CarpenterPayment[]
   stockMovements               StockMovement[]
   purchasesCreated             Purchase[]
+  purchasesApproved            Purchase[]             @relation("PurchaseApprovedBy")
+  purchasesReceived            Purchase[]             @relation("PurchaseReceivedBy")
   auditLogs                    AuditLog[]
   qualityChecks                QualityCheck[]
   dispatchRecords              DispatchRecord[]
@@ -839,13 +863,15 @@ model ProductStockMovement {
 // managed list. Same disable-instead-of-delete-when-in-use pattern as
 // ExpenseCategoryService.removeCategory/SuppliersService.remove.
 model Shop {
-  id           String   @id @default(cuid())
-  name         String   @unique
-  contactPhone String?
-  address      String?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String   @id @default(cuid())
+  name          String   @unique
+  contactPerson String?
+  contactPhone  String?
+  whatsapp      String?
+  address       String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   partyOrders PartyOrder[]
 
@@ -1000,6 +1026,31 @@ model Purchase {
 
   createdById String
   createdBy   User   @relation(fields: [createdById], references: [id])
+
+  // Set only once a Super Admin approves a PENDING_APPROVAL purchase - see
+  // PurchasesService.approve(). Null for every purchase created before this
+  // workflow existed (all already RECORDED) and for one still awaiting
+  // approval.
+  approvedById String?
+  approvedBy   User?     @relation("PurchaseApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  // Set only once the physically-received material is confirmed (see
+  // PurchasesService.receive) - this is what actually adds stock, kept
+  // separate from approvedAt/approvedById above since approval and receipt
+  // are two different real-world events that can happen days apart.
+  receivedById String?
+  receivedBy   User?     @relation("PurchaseReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
+  receivedAt   DateTime?
+
+  // Tracks the automatic "PDF to supplier WhatsApp" send triggered right
+  // after approval, and every manual (re)send after that - same three
+  // fields either way, so the frontend's process animation always reads
+  // real backend state instead of guessing. Null = never attempted (e.g. a
+  // purchase still PENDING_APPROVAL, or one from before this existed).
+  whatsappStatus PurchaseWhatsappStatus?
+  whatsappSentAt DateTime?
+  whatsappError  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

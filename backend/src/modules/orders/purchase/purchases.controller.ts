@@ -65,6 +65,26 @@ export class PurchasesController {
     return this.service.cancel(id, user.userId);
   }
 
+  // Super Admin only - overrides the class-level @Roles(ADMIN) above (an
+  // ADMIN gets ForbiddenException here, SUPERADMIN always passes any
+  // @Roles() check per RolesGuard). Approval is the one action that must
+  // never be reachable by a plain Admin, since it's what actually commits
+  // the supplier-payable change.
+  @Roles(Role.SUPERADMIN)
+  @Post(':id/approve')
+  approve(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.approve(id, user.userId);
+  }
+
+  // Goods receipt - ADMIN+ (inherits the class-level role, no override
+  // needed), since confirming physical delivery is an operational action,
+  // not a financial-approval one. This is the one place stock actually
+  // updates.
+  @Post(':id/receive')
+  receive(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.receive(id, user.userId);
+  }
+
   @Get(':id/pdf')
   async downloadPdf(@Param('id') id: string, @Res() res: Response) {
     const buffer = await this.service.generatePdf(id);
@@ -74,8 +94,13 @@ export class PurchasesController {
     res.send(buffer);
   }
 
+  // Manual "Send PO PDF via WhatsApp" / "Retry WhatsApp" - same underlying
+  // method the automatic post-approval send uses, so whatsappStatus tracks
+  // consistently either way. Safe to call repeatedly: it only (re)generates
+  // the latest PDF and sends it - never creates a purchase, touches stock,
+  // or touches the supplier ledger.
   @Post(':id/send-whatsapp')
-  sendWhatsapp(@Param('id') id: string) {
-    return this.service.sendPdfToSupplier(id);
+  sendWhatsapp(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.sendPurchaseWhatsapp(id, user.userId);
   }
 }

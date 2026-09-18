@@ -1,11 +1,16 @@
+import type { PaginatedResult } from '@/components/Pagination';
+
 export type Role = 'SUPERADMIN' | 'ADMIN' | 'CARPENTER' | 'CARVER' | 'POLISHER';
 export type DeliveryStatus = 'PENDING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'DELIVERY_FAILED' | 'CANCELLED';
 export type WorkStatus = 'ASSIGNED' | 'IN_PROGRESS' | 'QUALITY_CHECK' | 'REWORK' | 'COMPLETED';
-export type PurchaseStatus = 'RECORDED' | 'CANCELLED';
+export type PurchaseStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'RECORDED' | 'CANCELLED';
 export const PURCHASE_STATUS_LABEL: Record<PurchaseStatus, string> = {
-  RECORDED: 'Recorded',
+  PENDING_APPROVAL: 'Pending Approval',
+  APPROVED: 'Approved - Awaiting Receipt',
+  RECORDED: 'Received',
   CANCELLED: 'Cancelled',
 };
+export type PurchaseWhatsappStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED';
 export type StockMovementType = 'IN' | 'OUT' | 'ADJUSTMENT';
 // WhatsApp order-confirmation message content: full pricing/payment info
 // for a customer, operational-only (no money) for a production employee.
@@ -167,9 +172,70 @@ export interface GalleryImage {
 export interface Shop {
   id: string;
   name: string;
+  contactPerson?: string | null;
   contactPhone?: string | null;
+  whatsapp?: string | null;
   address?: string | null;
   isActive: boolean;
+}
+
+// One shop's aggregated Party Order numbers - used both as the shop-list
+// card data and as the "Overall"/"Filtered" summary pair on the Shop
+// Dashboard. totalValue/totalPaid/balanceDue are omitted entirely (not
+// zeroed) for viewers who can't see financials, same convention as
+// PartyOrder's own price/totalAmount fields.
+export interface ShopSummary {
+  shopId: string | null;
+  shopName: string;
+  contactPerson?: string | null;
+  contactPhone?: string | null;
+  whatsapp?: string | null;
+  address?: string | null;
+  isActive: boolean;
+  orderCount: number;
+  totalValue?: number;
+  totalPaid?: number;
+  balanceDue?: number;
+  pendingCount: number;
+  deliveredCount: number;
+  lastOrderDate: string | null;
+}
+
+// One Product Supply Details row - one PartyOrderItem line (or, for legacy
+// orders with no items[], one synthesized row from the order's own
+// model/size/finish/price fields). price/value are omitted for viewers who
+// can't see financials, same convention as ShopSummary's money fields.
+export interface ShopSupplyRow {
+  orderId: string;
+  date: string;
+  order: string;
+  finish: string | null;
+  size: string | null;
+  pattern: string | null;
+  modelNo: string | null;
+  price?: number;
+  qty: number;
+  value?: number;
+}
+
+// One Payment Ledger row - one payment against any of the shop's filtered
+// orders, oldest first, with the shop's running balance after that payment.
+export interface ShopLedgerRow {
+  date: string;
+  voucherNo: string | null;
+  orderValue: number;
+  amount: number;
+  mode: string | null;
+  balance: number;
+}
+
+export interface ShopDashboardResult {
+  shop: Shop;
+  overallSummary: ShopSummary;
+  filteredSummary: ShopSummary;
+  orders: PaginatedResult<PartyOrder>;
+  items: ShopSupplyRow[];
+  paymentLedger: ShopLedgerRow[];
 }
 
 export interface SupplierSummary {
@@ -605,6 +671,13 @@ export interface Purchase {
   items: PurchaseItem[];
   totalValue: number;
   createdBy?: { name: string };
+  approvedBy?: { name: string } | null;
+  approvedAt?: string | null;
+  receivedBy?: { name: string } | null;
+  receivedAt?: string | null;
+  whatsappStatus?: PurchaseWhatsappStatus | null;
+  whatsappSentAt?: string | null;
+  whatsappError?: string | null;
   createdAt: string;
 }
 

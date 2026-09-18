@@ -7,7 +7,15 @@ export class CreateShopDto {
 
   @IsString()
   @IsOptional()
+  contactPerson?: string;
+
+  @IsString()
+  @IsOptional()
   contactPhone?: string;
+
+  @IsString()
+  @IsOptional()
+  whatsapp?: string;
 
   @IsString()
   @IsOptional()

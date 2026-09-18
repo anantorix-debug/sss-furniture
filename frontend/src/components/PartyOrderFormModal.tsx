@@ -19,6 +19,7 @@ interface ItemForm {
   productId?: string;
   productName: string;
   finish: string;
+  size: string;
   color: string;
   pattern: string;
   details: string;
@@ -33,6 +34,7 @@ interface ItemForm {
 const emptyItem: ItemForm = {
   productName: '',
   finish: '',
+  size: '',
   color: '',
   pattern: '',
   details: '',
@@ -54,6 +56,7 @@ function itemFromExisting(i: PartyOrderItem): ItemForm {
     productId: i.productId ?? undefined,
     productName: i.productName,
     finish: i.finish ?? '',
+    size: i.size ?? '',
     color: i.color ?? '',
     pattern: i.pattern ?? '',
     details: i.details ?? '',
@@ -68,10 +71,22 @@ function itemFromExisting(i: PartyOrderItem): ItemForm {
 // Create/edit form for a Party Order - shared by the list page's "+ New
 // Party Order" / card "Edit" action and the detail page's "Edit" button,
 // so the (fairly large) multi-product form only exists in one place.
-export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: PartyOrder | null; onClose: () => void; onSaved: () => void }) {
+export function PartyOrderFormModal({
+  editing,
+  initialShopId,
+  onClose,
+  onSaved,
+}: {
+  editing: PartyOrder | null;
+  // Pre-selects the shop when opened from a shop's own "+ New Order" card
+  // action - ignored when editing (the order's own shop always wins).
+  initialShopId?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { hasRole } = useAuth();
   const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
-  const { data: shops } = useSWR<Shop[]>('/shops', fetcher);
+  const { data: shops, mutate: mutateShops } = useSWR<Shop[]>('/shops', fetcher);
   const [form, setForm] = useState(
     editing
       ? {
@@ -82,8 +97,39 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
           actualDeliveryDate: toDateInputValue(editing.actualDeliveryDate),
           deliveryStatus: editing.deliveryStatus,
         }
-      : emptyForm,
+      : { ...emptyForm, shopId: initialShopId ?? '' },
   );
+  const [addingShop, setAddingShop] = useState(false);
+  const [newShop, setNewShop] = useState({ name: '', contactPerson: '', contactPhone: '', whatsapp: '', address: '' });
+  const [newShopError, setNewShopError] = useState<string | null>(null);
+  const [savingShop, setSavingShop] = useState(false);
+
+  async function handleAddShop(e: React.FormEvent) {
+    e.preventDefault();
+    setNewShopError(null);
+    if (!newShop.name.trim()) {
+      setNewShopError('Shop name is required');
+      return;
+    }
+    setSavingShop(true);
+    try {
+      const created = await api.post<Shop>('/shops', {
+        name: newShop.name.trim(),
+        contactPerson: newShop.contactPerson || undefined,
+        contactPhone: newShop.contactPhone || undefined,
+        whatsapp: newShop.whatsapp || undefined,
+        address: newShop.address || undefined,
+      });
+      await mutateShops();
+      setForm((f) => ({ ...f, shopId: created.id }));
+      setAddingShop(false);
+      setNewShop({ name: '', contactPerson: '', contactPhone: '', whatsapp: '', address: '' });
+    } catch (err) {
+      setNewShopError(err instanceof ApiError ? err.message : 'Failed to create shop');
+    } finally {
+      setSavingShop(false);
+    }
+  }
   const [items, setItems] = useState<ItemForm[]>(
     editing && editing.items.length > 0 ? editing.items.map(itemFromExisting) : [{ ...emptyItem }],
   );
@@ -112,6 +158,7 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
       productId: product.id,
       productName: product.name,
       finish: product.materialFinish ?? '',
+      size: product.modelSize ?? '',
       pattern: product.pattern ?? '',
       details: product.details ?? '',
       unitPrice: String(product.retailPrice ?? 0),
@@ -142,6 +189,7 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
         productId: i.productId,
         productName: i.productName,
         finish: i.finish || undefined,
+        size: i.size || undefined,
         color: i.color || undefined,
         pattern: i.pattern || undefined,
         details: i.details || undefined,
@@ -183,16 +231,81 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
             />
           </FormField>
           <FormField label="Shop">
-            <select className="input" required value={form.shopId} onChange={(e) => setForm((f) => ({ ...f, shopId: e.target.value }))}>
+            <select
+              className="input"
+              required={!addingShop}
+              value={form.shopId}
+              onChange={(e) => {
+                if (e.target.value === '__add_new__') {
+                  setAddingShop(true);
+                  return;
+                }
+                setForm((f) => ({ ...f, shopId: e.target.value }));
+              }}
+            >
               <option value="">Select shop...</option>
               {shops?.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
               ))}
+              <option value="__add_new__">+ Add New Shop</option>
             </select>
           </FormField>
         </FormRow>
+
+        {addingShop && (
+          <div className="border border-brand-200 rounded-lg p-3 space-y-2 bg-brand-50">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-brand-900">New Shop</h4>
+              <button type="button" className="text-xs text-brand-500 hover:underline" onClick={() => setAddingShop(false)}>
+                Cancel
+              </button>
+            </div>
+            <FormRow>
+              <FormField label="Shop Name">
+                <input
+                  className="input"
+                  value={newShop.name}
+                  onChange={(e) => setNewShop((s) => ({ ...s, name: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Contact Person">
+                <input
+                  className="input"
+                  value={newShop.contactPerson}
+                  onChange={(e) => setNewShop((s) => ({ ...s, contactPerson: e.target.value }))}
+                />
+              </FormField>
+            </FormRow>
+            <FormRow>
+              <FormField label="Contact Phone">
+                <input
+                  className="input"
+                  value={newShop.contactPhone}
+                  onChange={(e) => setNewShop((s) => ({ ...s, contactPhone: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="WhatsApp">
+                <input
+                  className="input"
+                  value={newShop.whatsapp}
+                  onChange={(e) => setNewShop((s) => ({ ...s, whatsapp: e.target.value }))}
+                />
+              </FormField>
+            </FormRow>
+            <FormField label="Address">
+              <input className="input" value={newShop.address} onChange={(e) => setNewShop((s) => ({ ...s, address: e.target.value }))} />
+            </FormField>
+            {newShopError && <p className="text-xs text-red-600">{newShopError}</p>}
+            <div className="flex justify-end">
+              <button type="button" className="btn-primary text-xs px-3 py-1.5" disabled={savingShop} onClick={handleAddShop}>
+                {savingShop ? 'Creating...' : 'Create Shop'}
+              </button>
+            </div>
+          </div>
+        )}
+
         <FormField label="Phone">
           <input className="input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
         </FormField>
@@ -229,8 +342,14 @@ export function PartyOrderFormModal({ editing, onClose, onSaved }: { editing: Pa
                   </button>
                 </div>
                 {item.productId && <p className="text-[11px] text-emerald-700">From Godown Stock - In Stock</p>}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <input className="input text-sm" placeholder="Finish" value={item.finish} onChange={(e) => updateItem(idx, { finish: e.target.value })} />
+                  <input
+                    className="input text-sm"
+                    placeholder="Size (e.g. 75x60)"
+                    value={item.size}
+                    onChange={(e) => updateItem(idx, { size: e.target.value })}
+                  />
                   <input className="input text-sm" placeholder="Pattern" value={item.pattern} onChange={(e) => updateItem(idx, { pattern: e.target.value })} />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
