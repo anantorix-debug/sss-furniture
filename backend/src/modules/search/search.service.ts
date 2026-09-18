@@ -24,7 +24,7 @@ export class SearchService {
     const hideFinancials = viewerRole ? HIDE_FINANCIALS_FOR.includes(viewerRole) : false;
     const trimmed = modelNo.trim();
 
-    const [product, customerOrders, partyOrders, partyOrderItems, workItems] = await Promise.all([
+    const [product, customerOrders, partyOrders, partyOrderItems] = await Promise.all([
       this.prisma.product.findFirst({ where: { modelNo: { contains: trimmed } } }),
       this.prisma.customerOrder.findMany({
         // cotTrack can be a combined value (e.g. "JOB-2026-00008, 309" when
@@ -58,19 +58,36 @@ export class SearchService {
         },
         orderBy: { createdAt: 'desc' },
       }),
-      this.prisma.carpenterWorkItem.findMany({
-        where: { modelNo: { contains: trimmed } },
-        include: {
-          carpenter: { select: { name: true, phone: true, workerType: true } },
-          createdBy: { select: { name: true } },
-          stockMovements: {
-            where: { type: 'OUT' },
-            include: { rawMaterial: { select: { id: true, name: true, unit: true, type: true } } },
-          },
-        },
-        orderBy: { workDate: 'asc' },
-      }),
     ]);
+
+    // A work item's own modelNo can differ from the Model No actually
+    // searched: an order's cotTrack is a combined value when it has
+    // multiple items (e.g. "JOB-2026-00008, 309"), but each CarpenterWorkItem
+    // keeps only the single modelNo that was entered for it - so searching
+    // "309" would find the order above yet miss every work item, even
+    // though this order clearly has real production history. Once an order
+    // is matched, pull its production history by source link too, not just
+    // by each work item's own modelNo.
+    const matchedCustomerOrderIds = customerOrders.map((o) => o.id);
+    const matchedPartyOrderItemIds = partyOrderItems.map((i) => i.id);
+    const workItems = await this.prisma.carpenterWorkItem.findMany({
+      where: {
+        OR: [
+          { modelNo: { contains: trimmed } },
+          ...(matchedCustomerOrderIds.length ? [{ sourceCustomerOrderId: { in: matchedCustomerOrderIds } }] : []),
+          ...(matchedPartyOrderItemIds.length ? [{ sourcePartyOrderItemId: { in: matchedPartyOrderItemIds } }] : []),
+        ],
+      },
+      include: {
+        carpenter: { select: { name: true, phone: true, workerType: true } },
+        createdBy: { select: { name: true } },
+        stockMovements: {
+          where: { type: 'OUT' },
+          include: { rawMaterial: { select: { id: true, name: true, unit: true, type: true } } },
+        },
+      },
+      orderBy: { workDate: 'asc' },
+    });
 
     // Stock is fungible (no per-batch lot tracking), so "which wholesaler
     // supplied this" is answered per raw material, not per issued unit:
