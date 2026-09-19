@@ -240,7 +240,6 @@ function PartyOrderDetailContent() {
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                   <ViewField label="Model No" value={item.modelNo ?? 'Not Updated'} />
                   <ViewField label="Product" value={item.productName} />
-                  <ViewField label="Finish" value={item.finish ?? '-'} />
                   <ViewField label="Size" value={[item.size, item.sizeUnit].filter(Boolean).join(' ') || '-'} />
                   {item.color && <ViewField label="Polish Colour" value={item.color} />}
                   <ViewField label="Pattern" value={item.pattern ?? '-'} />

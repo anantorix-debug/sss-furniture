@@ -1,5 +1,6 @@
 'use client';
 
+import { TruckIcon } from '@/components/TruckIcon';
 import type { Purchase } from '@/types';
 
 type StepStatus = 'complete' | 'active' | 'pending' | 'failed';
@@ -114,7 +115,7 @@ export function PurchaseProcessTracker({
       {awaitingReceipt && (
         <div className="relative h-6 max-w-[140px] mx-auto mt-3 overflow-hidden text-base">
           <span className="absolute right-0 top-1/2 -translate-y-1/2">📦</span>
-          <span className="absolute top-1/2 -translate-y-1/2 animate-doc-send">🚚</span>
+          <span className="absolute top-1/2 -translate-y-1/2 animate-doc-send"><TruckIcon className="h-5 w-8" /></span>
         </div>
       )}
       {whatsappStatus === 'active' && (

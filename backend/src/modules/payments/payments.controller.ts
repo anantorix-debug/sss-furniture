@@ -10,7 +10,7 @@ import { Role } from '../../common/enums/role.enum';
 // Admin+ only. Previously missing RolesGuard entirely (open to any
 // authenticated role, including every carpenter's own wage payments).
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
+@Roles(Role.SUPERADMIN)
 @Controller('payments')
 export class PaymentsController {
   constructor(private service: PaymentsService) {}

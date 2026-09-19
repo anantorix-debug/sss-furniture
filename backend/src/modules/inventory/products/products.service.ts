@@ -143,7 +143,10 @@ export class ProductsService {
     const paginated = params.page != null;
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
-    const where = { productId: params.productId || undefined, type: params.type as any };
+    // product: { is: {} } skips any leftover movement whose product was deleted -
+    // its FK cascade isn't guaranteed on every database, and one orphan row
+    // makes the whole include fail with a 500.
+    const where = { productId: params.productId || undefined, type: params.type as any, product: { is: {} } };
     const [movements, total] = await Promise.all([
       this.prisma.productStockMovement.findMany({
         where,

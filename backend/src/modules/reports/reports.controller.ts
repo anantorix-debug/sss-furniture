@@ -7,7 +7,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
+@Roles(Role.SUPERADMIN)
 @Controller('reports')
 export class ReportsController {
   constructor(private service: ReportsService) {}

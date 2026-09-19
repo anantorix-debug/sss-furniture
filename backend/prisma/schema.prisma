@@ -686,6 +686,15 @@ model CarpenterWorkItem {
   carpenter     Carpenter?          @relation(fields: [carpenterId], references: [id], onDelete: SetNull)
   workDate      DateTime
   modelNo       String? // shared Job/Model Number - links Carpenter -> Carving -> Polish stages and back to CustomerOrder.jobNumber
+  // Per-piece Model Numbers for a STOCK batch with quantity > 1, entered by
+  // the Carpenter before Admin verification (a batch has no individual
+  // Product rows to attach a Model No to until then - see
+  // CarpenterService.updateWorkItemPieceModelNo). A JSON array of
+  // string|null, index-aligned to the piece position (0..quantity-1).
+  // Applied to the newly created Product rows at verification time (see
+  // applyCompletionToStock) instead of leaving them blank. Null/unset on
+  // every quantity=1 item, which uses the plain modelNo field above.
+  pieceModelNos Json?
   stage         ProductionStageType @default(CARPENTER)
   productName   String // e.g. "HEARTEN"
   category      String? // e.g. "BOTTOM COT", "FULL BOX"

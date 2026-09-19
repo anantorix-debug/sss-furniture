@@ -149,6 +149,14 @@ export class PartyOrdersController {
     });
   }
 
+  // Records one payment against the shop's overall balance (Payment Ledger
+  // on the Shop Dashboard) - see PartyOrdersService.addShopPayment.
+  @Roles(Role.ADMIN)
+  @Post('shops-summary/:shopId/payments')
+  addShopPayment(@Param('shopId') shopId: string, @Body() dto: CreatePaymentDto, @CurrentUser() user: AuthUser) {
+    return this.service.addShopPayment(shopId, dto, user.userId);
+  }
+
   // Static route - must come before the dynamic :id route below. The Shop
   // Dashboard's own PDF, in the Product Supply Details + Payment Ledger
   // format (see PartyOrdersService.generateShopPdf) - scoped to this shop
@@ -275,7 +283,10 @@ export class PartyOrdersController {
     return this.service.assignEmployee(id, dto, user.userId);
   }
 
-  @Roles(Role.CARPENTER, Role.CARVER, Role.POLISHER)
+  // Model No entry is Carpenter-only - Carving and Polish never get this
+  // action, matching the same rule on the work-item-level endpoint
+  // (CarpenterController.updateWorkItemModelNo).
+  @Roles(Role.CARPENTER)
   @Post(':id/model-no')
   updateModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
     return this.service.updateModelNo(id, dto, user);

@@ -246,7 +246,9 @@ export default function CarpentersPage() {
           <h1 className="text-2xl font-bold text-brand-900">{isProductionEmployee ? 'My Assigned Orders' : 'Production Workers'}</h1>
           <p className="text-sm text-brand-500 mt-1">
             {isProductionEmployee
-              ? 'Orders assigned to you for Model No entry.'
+              ? user?.role === 'CARPENTER'
+                ? 'Orders assigned to you for Model No entry.'
+                : 'Orders assigned to you.'
               : 'Carpenters, Polishers and Carving Men. Assign work, track output value and payments. Work assignments notify by WhatsApp.'}
           </p>
         </div>
@@ -559,13 +561,16 @@ export default function CarpentersPage() {
 }
 
 // Production Employee Workspace: orders (Customer or Party) assigned to the
-// logged-in Carpenter/Polisher user, with the one action they own - entering
-// the Model No. Reuses the existing order list endpoints (already readable
-// by any authenticated role) rather than adding new backend query params.
+// logged-in Carpenter/Carver/Polisher user. Only a Carpenter gets the
+// "Enter/Update Model No" action - Carver and Polisher see the same list
+// read-only (they can still see whatever Model No the Carpenter already
+// entered). Reuses the existing order list endpoints (already readable by
+// any authenticated role) rather than adding new backend query params.
 type ModelNoTarget = { type: 'customer'; order: CustomerOrder } | { type: 'party'; order: PartyOrder };
 
 function MyAssignedOrders() {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
+  const canEditModelNo = hasRole('CARPENTER');
   const { data: customerOrders, mutate: mutateCustomer } = useSWR<CustomerOrder[]>('/customer-orders', fetcher);
   const { data: partyOrders, mutate: mutateParty } = useSWR<PartyOrder[]>('/party-orders', fetcher);
   const [modelNoTarget, setModelNoTarget] = useState<ModelNoTarget | null>(null);
@@ -622,9 +627,11 @@ function MyAssignedOrders() {
               <p className="text-brand-400 text-xs">Model No</p>
               <p className="font-semibold">{o.cotTrack || <span className="text-brand-400 italic font-normal">Not Updated</span>}</p>
             </div>
-            <button className="btn-primary h-8 px-3 text-xs" onClick={() => setModelNoTarget({ type: 'customer', order: o })}>
-              {o.cotTrack ? 'Update Model No' : 'Enter Model No'}
-            </button>
+            {canEditModelNo && (
+              <button className="btn-primary h-8 px-3 text-xs" onClick={() => setModelNoTarget({ type: 'customer', order: o })}>
+                {o.cotTrack ? 'Update Model No' : 'Enter Model No'}
+              </button>
+            )}
           </div>
         </div>
       ))}
@@ -658,9 +665,11 @@ function MyAssignedOrders() {
               <p className="text-brand-400 text-xs">Model No</p>
               <p className="font-semibold">{o.cotNo || <span className="text-brand-400 italic font-normal">Not Updated</span>}</p>
             </div>
-            <button className="btn-primary h-8 px-3 text-xs" onClick={() => setModelNoTarget({ type: 'party', order: o })}>
-              {o.cotNo ? 'Update Model No' : 'Enter Model No'}
-            </button>
+            {canEditModelNo && (
+              <button className="btn-primary h-8 px-3 text-xs" onClick={() => setModelNoTarget({ type: 'party', order: o })}>
+                {o.cotNo ? 'Update Model No' : 'Enter Model No'}
+              </button>
+            )}
           </div>
         </div>
       ))}

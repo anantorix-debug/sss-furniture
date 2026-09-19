@@ -1381,10 +1381,14 @@ export class CarpenterService {
       sourceCustomerOrderId: string | null;
       sourcePartyOrderItemId: string | null;
       batchId: string | null;
+      pieceModelNos?: unknown;
     },
     userId: string,
   ) {
     if (workItem.source === 'STOCK') {
+      // Model Nos the Carpenter already entered per piece before verification
+      // (see updateWorkItemPieceModelNo) - applied by position below.
+      const pieceModelNos = Array.isArray(workItem.pieceModelNos) ? (workItem.pieceModelNos as (string | null)[]) : [];
       // productId, if set, is a reference design to copy descriptive
       // fields from (Finish/Size/Pattern/Price) - never a row to
       // increment, since a design and a physical unit aren't the same
@@ -1397,7 +1401,7 @@ export class CarpenterService {
         for (let i = 0; i < workItem.quantity; i++) {
           const created = await tx.product.create({
             data: {
-              modelNo: i === 0 && singleModelNo ? singleModelNo : undefined,
+              modelNo: pieceModelNos[i] || (i === 0 && singleModelNo ? singleModelNo : undefined),
               name: template?.name ?? workItem.productName,
               category: template?.category ?? undefined,
               modelSize: template?.modelSize ?? workItem.size ?? undefined,
@@ -1537,6 +1541,63 @@ export class CarpenterService {
       targetType: 'CarpenterWorkItem',
       targetId: id,
       metadata: { modelNo: trimmed, source: workItem.source },
+    });
+
+    return this.findOneWorkItem(id);
+  }
+
+  // Per-piece Model No entry for a multi-unit STOCK batch, entered by the
+  // Carpenter as soon as they know it - never blocked on Admin
+  // verification. Stored on the work item itself (pieceModelNos, index-
+  // aligned to piece position) since no individual Product row exists yet
+  // to attach a Model No to; applyCompletionToStock below carries these
+  // values over onto the real rows it creates once the batch is verified,
+  // so nothing entered here is ever lost or has to be re-typed.
+  async updateWorkItemPieceModelNo(id: string, index: number, modelNo: string, userId: string) {
+    const trimmed = modelNo.trim();
+    if (!trimmed) throw new BadRequestException('Model No cannot be empty');
+
+    const workItem = await this.prisma.carpenterWorkItem.findUnique({ where: { id } });
+    if (!workItem) throw new NotFoundException('Work item not found');
+
+    if (workItem.stage === 'POLISH') {
+      throw new BadRequestException('Model No can only be entered during the Carpenter or Carving stage, not Polish.');
+    }
+    if (workItem.source !== 'STOCK' || workItem.quantity <= 1) {
+      throw new BadRequestException('This action is only for a multi-unit Stock Production batch.');
+    }
+    if (index < 0 || index >= workItem.quantity) {
+      throw new BadRequestException(`Piece index out of range - this batch has ${workItem.quantity} pieces.`);
+    }
+
+    const existing = Array.isArray(workItem.pieceModelNos) ? (workItem.pieceModelNos as (string | null)[]) : [];
+    const next = Array.from({ length: workItem.quantity }, (_, i) => existing[i] ?? null);
+    next[index] = trimmed;
+
+    await this.prisma.carpenterWorkItem.update({ where: { id }, data: { pieceModelNos: next } });
+
+    // Already verified (real Product rows exist) - keep the corresponding
+    // row in sync too, same as updateWorkItemModelNo does for a
+    // quantity=1 item. Not yet verified - nothing to sync yet;
+    // applyCompletionToStock reads pieceModelNos directly when it creates
+    // the rows.
+    if (workItem.batchId) {
+      const pieces = await this.prisma.product.findMany({
+        where: { sourceBatchId: workItem.batchId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (pieces[index]) {
+        await this.prisma.product.update({ where: { id: pieces[index].id }, data: { modelNo: trimmed } });
+      }
+    }
+
+    await this.audit.log({
+      userId,
+      action: 'PIECE_MODEL_NO_UPDATED',
+      targetType: 'CarpenterWorkItem',
+      targetId: id,
+      metadata: { index, modelNo: trimmed },
     });
 
     return this.findOneWorkItem(id);

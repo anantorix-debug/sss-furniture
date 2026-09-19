@@ -152,7 +152,7 @@ function PaymentsContent() {
 
 export default function PaymentsPage() {
   return (
-    <RoleGate minRole="ADMIN">
+    <RoleGate minRole="SUPERADMIN">
       <PaymentsContent />
     </RoleGate>
   );

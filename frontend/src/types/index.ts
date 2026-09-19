@@ -209,7 +209,7 @@ export interface ShopSupplyRow {
   orderId: string;
   date: string;
   order: string;
-  finish: string | null;
+  polishColor: string | null;
   size: string | null;
   pattern: string | null;
   modelNo: string | null;
@@ -357,6 +357,7 @@ export interface CarpenterWorkItem {
   stage: ProductionStage;
   workDate: string;
   modelNo?: string | null;
+  pieceModelNos?: (string | null)[] | null;
   productName: string;
   category?: string | null;
   pattern?: string | null;

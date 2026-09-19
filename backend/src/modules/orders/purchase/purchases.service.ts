@@ -9,6 +9,7 @@ import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 import { computeBoardFeet } from '../../../common/utils/board-feet.util';
 import { generatePurchaseNumber } from '../../../common/utils/purchase-number.util';
 import { REPORT_PDF_STYLES, renderReportHeader, renderFilterSummary, renderGeneratedFooter } from '../../../common/utils/pdf-report.util';
+import { getPdfFooterDataUri } from '../../../common/utils/pdf-banner.util';
 
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -501,6 +502,7 @@ export class PurchasesService {
       </tbody>
     </table>
     ${purchase.notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(purchase.notes)}</div>` : ''}
+    <img src="${getPdfFooterDataUri()}" alt="SSS Furniture" style="display:block;width:100%;margin-top:24px;break-inside:avoid" />
   </div>
 </body></html>`;
   }

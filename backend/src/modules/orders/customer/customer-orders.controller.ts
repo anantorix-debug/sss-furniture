@@ -102,7 +102,10 @@ export class CustomerOrdersController {
     return this.service.assignEmployee(id, dto, user.userId);
   }
 
-  @Roles(Role.CARPENTER, Role.CARVER, Role.POLISHER)
+  // Model No entry is Carpenter-only - Carving and Polish never get this
+  // action, matching the same rule on the work-item-level endpoint
+  // (CarpenterController.updateWorkItemModelNo).
+  @Roles(Role.CARPENTER)
   @Post(':id/model-no')
   updateModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
     return this.service.updateModelNo(id, dto, user);

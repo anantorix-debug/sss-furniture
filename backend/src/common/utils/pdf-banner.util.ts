@@ -18,3 +18,15 @@ export function getPdfBannerDataUri(): string {
   }
   return cachedBannerDataUri;
 }
+
+// The SSS Furniture template image printed at the very end of a report/order
+// PDF (see pdf-footer.jpeg) - same embed-as-data-URI approach as the banner.
+let cachedFooterDataUri: string | null = null;
+
+export function getPdfFooterDataUri(): string {
+  if (!cachedFooterDataUri) {
+    const bytes = readFileSync(join(process.cwd(), 'src/assets/pdf-footer.jpeg'));
+    cachedFooterDataUri = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+  }
+  return cachedFooterDataUri;
+}

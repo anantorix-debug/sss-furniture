@@ -9,6 +9,7 @@ import { StatusBadge, BalanceBadge } from '@/components/StatusBadge';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { sharePdf } from '@/lib/sharePdf';
 import { buildPartyOrderMessage } from '@/lib/orderMessages';
+import { TruckIcon } from '@/components/TruckIcon';
 import type { PartyOrder, GalleryImage, DeliveryStatus } from '@/types';
 import type { UseWhatsAppOptions } from '@/hooks/useWhatsApp';
 
@@ -144,10 +145,9 @@ function DispatchCelebration({ vehicleNo, onDone }: { vehicleNo: string; onDone:
       <div className="card w-full max-w-sm p-8 text-center" onClick={(e) => e.stopPropagation()}>
         <div className="relative h-12 mb-5 overflow-hidden">
           <span className="absolute right-0 top-1/2 -translate-y-1/2 text-4xl">🏬</span>
-          {/* The truck emoji glyph faces left by default - flipped here so it
-              visually faces the direction it's travelling (rightward, toward
-              the shop icon), instead of appearing to drive backwards. */}
-          <span className="absolute top-1/2 -translate-y-1/2 -scale-x-100 text-4xl animate-dispatch-travel-big">🚚</span>
+          {/* Drawn truck icon, cab on the right - faces the direction it
+              travels (toward the shop) on every device. */}
+          <span className="absolute top-1/2 -translate-y-1/2 animate-dispatch-travel-big"><TruckIcon className="h-10 w-14" /></span>
         </div>
         <p className="text-xl font-bold text-emerald-600">Dispatched!</p>
         {vehicleNo && <p className="text-sm text-brand-500 mt-1">Vehicle No: {vehicleNo}</p>}

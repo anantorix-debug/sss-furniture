@@ -4,6 +4,7 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, assetUrl } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import { formatDate } from '@/lib/format';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
@@ -17,13 +18,14 @@ const STATUS_CHIP: Record<string, ChipColor> = {
   COMPLETED: 'green',
 };
 
-// A multi-unit Stock Production batch can't take one shared Model No while
-// it's still a single work item (one Model No = one physical piece) - the
-// individual pieces only exist after Admin verifies the batch (see
-// Production Control > Ready for Verification). Once they do, this lets
-// whoever worked the batch assign each piece's Model No right here,
-// without needing Stock Management access.
-function BatchPieceRow({ product, onChanged }: { product: Product; onChanged: () => void }) {
+// A multi-unit Stock Production batch can't take one shared Model No (one
+// Model No = one physical piece), so every employee working it (Carpenter,
+// Carving, Polish) sees it broken out into its separate pieces - but only
+// a Carpenter gets the input/Save to set a piece's Model No, and can do so
+// straight away (PendingPieceRow below) without waiting for Admin
+// verification. This row is the post-verification version, editing the
+// real Product row.
+function BatchPieceRow({ index, product, canEdit, onChanged }: { index: number; product: Product; canEdit: boolean; onChanged: () => void }) {
   const [modelNo, setModelNo] = useState(product.modelNo ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,9 +44,19 @@ function BatchPieceRow({ product, onChanged }: { product: Product; onChanged: ()
     }
   }
 
+  if (!canEdit) {
+    return (
+      <div className="flex items-center justify-between text-xs bg-brand-50 rounded-lg px-2 py-1.5">
+        <span className="text-brand-500">Piece {index}</span>
+        <span className="font-medium text-ink">{product.modelNo || <span className="text-brand-400 italic font-normal">Not set</span>}</span>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1">
-      <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+      <div className="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
+        <span className="text-xs text-brand-400 shrink-0">#{index}</span>
         <input className="input text-sm" placeholder="Enter Model No" value={modelNo} onChange={(e) => setModelNo(e.target.value)} />
         <button className="btn-secondary text-xs shrink-0" disabled={saving || !modelNo.trim() || modelNo.trim() === product.modelNo} onClick={save}>
           {saving ? 'Saving...' : 'Save'}
@@ -55,24 +67,99 @@ function BatchPieceRow({ product, onChanged }: { product: Product; onChanged: ()
   );
 }
 
-function BatchProducedPieces({ batchId }: { batchId: string }) {
-  const { data: pieces, isLoading, mutate } = useSWR<Product[]>(`/products?sourceBatchId=${batchId}`, fetcher);
+// One not-yet-verified piece of a multi-unit batch. Its Model No is stored on
+// the work item itself (pieceModelNos) since no Product row exists yet - a
+// Carpenter can enter it right away without waiting for Admin verification.
+function PendingPieceRow({
+  workItemId,
+  index,
+  modelNo,
+  canEdit,
+  onChanged,
+}: {
+  workItemId: string;
+  index: number;
+  modelNo: string | null;
+  canEdit: boolean;
+  onChanged: () => void;
+}) {
+  const [value, setValue] = useState(modelNo ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (!value.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch(`/carpenter-work-items/${workItemId}/piece-model-no`, { index, modelNo: value.trim() });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!canEdit) {
+    return (
+      <div className="flex items-center justify-between text-xs bg-brand-50 rounded-lg px-2 py-1.5">
+        <span className="text-brand-500">Piece {index + 1}</span>
+        <span className="font-medium text-ink">{modelNo || <span className="text-brand-400 italic font-normal">Not set</span>}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
+        <span className="text-xs text-brand-400 shrink-0">#{index + 1}</span>
+        <input className="input text-sm" placeholder="Enter Model No" value={value} onChange={(e) => setValue(e.target.value)} />
+        <button className="btn-secondary text-xs shrink-0" disabled={saving || !value.trim() || value.trim() === modelNo} onClick={save}>
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+function BatchProducedPieces({ item, canEdit, onWorkItemChanged }: { item: CarpenterWorkItem; canEdit: boolean; onWorkItemChanged: () => void }) {
+  const { data: pieces, isLoading, mutate } = useSWR<Product[]>(`/products?sourceBatchId=${item.batchId}`, fetcher);
 
   if (isLoading) return null;
+
   if (!pieces || pieces.length === 0) {
-    return <p className="text-xs text-brand-400">Not verified into stock yet - Model Nos can be set here once Admin verifies this batch.</p>;
+    const entered = item.pieceModelNos ?? [];
+    return (
+      <div className="space-y-2 border-t border-brand-100 pt-2">
+        <p className="text-xs font-medium text-brand-500">
+          {canEdit ? 'Assign Model No to each piece' : 'Model No per piece'} ({item.quantity})
+        </p>
+        {Array.from({ length: item.quantity }).map((_, i) => (
+          <PendingPieceRow
+            key={`${i}-${entered[i] ?? ''}`}
+            workItemId={item.id}
+            index={i}
+            modelNo={entered[i] ?? null}
+            canEdit={canEdit}
+            onChanged={onWorkItemChanged}
+          />
+        ))}
+      </div>
+    );
   }
   return (
     <div className="space-y-2 border-t border-brand-100 pt-2">
-      <p className="text-xs font-medium text-brand-500">Assign Model No to each piece ({pieces.length})</p>
-      {pieces.map((p) => (
-        <BatchPieceRow key={p.id} product={p} onChanged={mutate} />
+      <p className="text-xs font-medium text-brand-500">{canEdit ? 'Assign Model No to each piece' : 'Model No per piece'} ({pieces.length})</p>
+      {pieces.map((p, i) => (
+        <BatchPieceRow key={p.id} index={i + 1} product={p} canEdit={canEdit} onChanged={mutate} />
       ))}
     </div>
   );
 }
 
-function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () => void }) {
+function WorkCard({ item, canEditModelNo, onChanged }: { item: CarpenterWorkItem; canEditModelNo: boolean; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [remarks, setRemarks] = useState('');
@@ -136,7 +223,7 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
 
       {item.notes && <p className="text-xs text-brand-500 bg-brand-50 rounded-lg px-2 py-1.5">Note: {item.notes}</p>}
 
-      {item.stage !== 'POLISH' && (
+      {item.stage !== 'POLISH' && canEditModelNo && (
         <div className="flex gap-2 items-center">
           <input
             className="input text-sm flex-1"
@@ -181,8 +268,8 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
         />
       )}
 
-      {item.source === 'STOCK' && item.quantity > 1 && item.batchId && item.status === 'COMPLETED' && (
-        <BatchProducedPieces batchId={item.batchId} />
+      {item.source === 'STOCK' && item.quantity > 1 && item.batchId && (
+        <BatchProducedPieces item={item} canEdit={canEditModelNo} onWorkItemChanged={onChanged} />
       )}
 
     </div>
@@ -190,6 +277,8 @@ function WorkCard({ item, onChanged }: { item: CarpenterWorkItem; onChanged: () 
 }
 
 function MyWorkContent() {
+  const { hasRole } = useAuth();
+  const canEditModelNo = hasRole('CARPENTER');
   const { data: me, isLoading: meLoading } = useSWR<{ id: string; name: string } | null>('/carpenters/me', fetcher);
   const { data: workItems, isLoading: workLoading, mutate } = useSWR<CarpenterWorkItem[]>(
     me ? `/carpenter-work-items?carpenterId=${me.id}` : null,
@@ -223,7 +312,7 @@ function MyWorkContent() {
             {!workLoading && active.length === 0 && <p className="text-brand-400 text-sm">Nothing assigned to you right now.</p>}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {active.map((item) => (
-                <WorkCard key={item.id} item={item} onChanged={mutate} />
+                <WorkCard key={item.id} item={item} canEditModelNo={canEditModelNo} onChanged={mutate} />
               ))}
             </div>
           </section>
@@ -233,7 +322,7 @@ function MyWorkContent() {
               <h2 className="text-sm font-semibold text-brand-700 uppercase tracking-wide mb-3">Recently Finished</h2>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {recent.map((item) => (
-                  <WorkCard key={item.id} item={item} onChanged={mutate} />
+                  <WorkCard key={item.id} item={item} canEditModelNo={canEditModelNo} onChanged={mutate} />
                 ))}
               </div>
             </section>

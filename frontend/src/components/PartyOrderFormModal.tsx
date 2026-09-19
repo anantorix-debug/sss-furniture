@@ -157,7 +157,6 @@ export function PartyOrderFormModal({
     updateItem(idx, {
       productId: product.id,
       productName: product.name,
-      finish: product.materialFinish ?? '',
       size: product.modelSize ?? '',
       pattern: product.pattern ?? '',
       details: product.details ?? '',
@@ -342,8 +341,7 @@ export function PartyOrderFormModal({
                   </button>
                 </div>
                 {item.productId && <p className="text-[11px] text-emerald-700">From Godown Stock - In Stock</p>}
-                <div className="grid grid-cols-3 gap-2">
-                  <input className="input text-sm" placeholder="Finish" value={item.finish} onChange={(e) => updateItem(idx, { finish: e.target.value })} />
+                <div className="grid grid-cols-2 gap-2">
                   <input
                     className="input text-sm"
                     placeholder="Size (e.g. 75x60)"

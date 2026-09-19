@@ -14,7 +14,7 @@ import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
 import { computeBalance, suggestPaymentType } from '../../../common/utils/balance.util';
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
-import { getPdfBannerDataUri } from '../../../common/utils/pdf-banner.util';
+import { getPdfBannerDataUri, getPdfFooterDataUri } from '../../../common/utils/pdf-banner.util';
 import { galleryImageDataUri } from '../../../common/utils/gallery-image-data-uri.util';
 import { REPORT_PDF_STYLES, renderReportHeader, renderFilterSummary, renderGeneratedFooter } from '../../../common/utils/pdf-report.util';
 import { Role } from '../../../common/enums/role.enum';
@@ -156,7 +156,7 @@ function buildSupplyRows(
   orderId: string;
   date: Date;
   order: string;
-  finish: string | null;
+  polishColor: string | null;
   size: string | null;
   pattern: string | null;
   modelNo: string | null;
@@ -170,7 +170,7 @@ function buildSupplyRows(
         orderId: o.id,
         date: o.orderDate,
         order: it.productName,
-        finish: it.finish ?? null,
+        polishColor: it.color ?? null,
         size: [it.size, it.sizeUnit].filter(Boolean).join(' ') || null,
         pattern: it.pattern ?? null,
         modelNo: it.modelNo ?? null,
@@ -183,7 +183,7 @@ function buildSupplyRows(
         orderId: o.id,
         date: o.orderDate,
         order: o.model ?? o.shopName,
-        finish: o.finish ?? null,
+        polishColor: null,
         size: [o.size, o.sizeUnit].filter(Boolean).join(' ') || null,
         pattern: null,
         modelNo: o.cotNo ?? null,
@@ -201,21 +201,31 @@ function buildSupplyRows(
 // same rule as every other money field on this dashboard.
 function buildPaymentLedger(orders: any[], totalOrderValue: number, hide: boolean) {
   if (hide) return [];
-  const rows = orders.flatMap((o) =>
+  const raw = orders.flatMap((o) =>
     (o.payments ?? []).map((p: any) => ({
       date: p.date as Date,
       createdAt: p.createdAt as Date,
       voucherNo: (p.note as string | null) ?? null,
-      orderValue: Number(o.totalAmount ?? 0),
       amount: Number(p.amount ?? 0),
       mode: (p.mode as string | null) ?? null,
     })),
   );
+  // One shop-level payment is stored as several per-order rows (see
+  // addShopPayment) that share the exact same createdAt - fold them back
+  // into the single payment the user actually recorded.
+  const merged = new Map<string, (typeof raw)[number]>();
+  for (const r of raw) {
+    const key = `${r.createdAt.getTime()}|${r.date.getTime()}|${r.voucherNo ?? ''}|${r.mode ?? ''}`;
+    const existing = merged.get(key);
+    if (existing) existing.amount += r.amount;
+    else merged.set(key, { ...r });
+  }
+  const rows = [...merged.values()];
   rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
   let runningPaid = 0;
   return rows.map(({ createdAt: _createdAt, ...row }) => {
     runningPaid += row.amount;
-    return { ...row, balance: Math.round((totalOrderValue - runningPaid) * 100) / 100 };
+    return { ...row, orderValue: totalOrderValue, balance: Math.round((totalOrderValue - runningPaid) * 100) / 100 };
   });
 }
 
@@ -632,6 +642,58 @@ export class PartyOrdersService {
     return this.findOne(orderId);
   }
 
+  // One payment against the shop's overall balance (Shop Dashboard's Payment
+  // Ledger) - there's no separate shop-level payment table, so it's applied
+  // to the shop's orders oldest-first, each up to what it still owes, with
+  // any excess landing on the newest order. Every row created here shares
+  // one createdAt so the ledger can show it as the single payment it was.
+  async addShopPayment(shopId: string, dto: { date: string; amount: number; mode?: string; note?: string }, userId: string) {
+    const shop = await this.prisma.shop.findUnique({ where: { id: shopId } });
+    if (!shop) throw new NotFoundException('Shop not found');
+
+    const orders = (await this.getFilteredOrders({ shopId }))
+      .filter((o) => o.deliveryStatus !== 'CANCELLED')
+      .sort((a, b) => a.orderDate.getTime() - b.orderDate.getTime());
+    if (orders.length === 0) throw new BadRequestException('This shop has no orders to record a payment against');
+
+    const allocations: { orderId: string; amount: number; order: (typeof orders)[number] }[] = [];
+    let remaining = Math.round(dto.amount * 100) / 100;
+    for (const o of orders) {
+      if (remaining <= 0) break;
+      const due = Math.round(Number(o.balanceAmount) * 100) / 100;
+      if (due <= 0) continue;
+      const part = Math.min(due, remaining);
+      allocations.push({ orderId: o.id, amount: part, order: o });
+      remaining = Math.round((remaining - part) * 100) / 100;
+    }
+    if (remaining > 0) {
+      const last = orders[orders.length - 1];
+      const existing = allocations.find((a) => a.orderId === last.id);
+      if (existing) existing.amount = Math.round((existing.amount + remaining) * 100) / 100;
+      else allocations.push({ orderId: last.id, amount: remaining, order: last });
+    }
+
+    const createdAt = new Date();
+    await this.prisma.$transaction(
+      allocations.map((a) =>
+        this.prisma.partyOrderPayment.create({
+          data: {
+            orderId: a.orderId,
+            date: new Date(dto.date),
+            amount: a.amount,
+            type: suggestPaymentType(Number(a.order.totalAmount), a.order.payments, a.amount),
+            mode: dto.mode,
+            note: dto.note,
+            createdById: userId,
+            createdAt,
+          },
+        }),
+      ),
+    );
+    for (const a of allocations) await this.autoMarkDeliveredIfPaid(a.orderId);
+    return { success: true, allocatedTo: allocations.length };
+  }
+
   // Same auto-advance as CustomerOrdersService.autoMarkDeliveredIfPaid -
   // clearing the balance implies delivered, but only from PENDING/
   // OUT_FOR_DELIVERY, never overriding a CANCELLED or failed delivery.
@@ -796,7 +858,7 @@ export class PartyOrdersService {
       ? order.items.map((i) => ({
           date: order.orderDate,
           order: i.productName,
-          finish: i.finish ?? '-',
+          polishColor: i.color ?? "-",
           size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || '-',
           pattern: i.pattern ?? '-',
           price: i.unitPrice != null ? Number(i.unitPrice) : null,
@@ -808,7 +870,7 @@ export class PartyOrdersService {
           {
             date: order.orderDate,
             order: order.model ?? 'Order',
-            finish: order.finish ?? '-',
+            polishColor: "-",
             size: [order.size, order.sizeUnit].filter(Boolean).join(' ') || '-',
             pattern: '-',
             price: order.price != null ? Number(order.price) : null,
@@ -826,7 +888,7 @@ export class PartyOrdersService {
           <td>${dataUri ? `<img class="row-photo" src="${dataUri}" alt="${escapeHtml(l.order)}" />` : '-'}</td>
           <td>${l.date.toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(l.order)}</td>
-          <td>${escapeHtml(l.finish)}</td>
+          <td>${escapeHtml(l.polishColor)}</td>
           <td>${escapeHtml(l.size)}</td>
           <td>${escapeHtml(l.pattern)}</td>
           ${isEmployee ? '' : `<td style="text-align:right">${l.price != null ? `Rs. ${l.price.toLocaleString('en-IN')}` : '-'}</td>`}
@@ -889,7 +951,7 @@ export class PartyOrdersService {
     </div>
     <table>
       <thead>
-        <tr><th>S.No</th><th>Photo</th><th>Date</th><th>Order</th><th>Finish</th><th>Size</th><th>Pattern</th>${
+        <tr><th>S.No</th><th>Photo</th><th>Date</th><th>Order</th><th>Polish Colour</th><th>Size</th><th>Pattern</th>${
           isEmployee ? '' : '<th style="text-align:right">Price</th>'
         }<th>Model No</th>${isEmployee ? '' : '<th style="text-align:right">Value</th>'}</tr>
       </thead>
@@ -906,6 +968,7 @@ export class PartyOrdersService {
     }
     ${deliveryBlock}
     <p class="thanks"><strong>Thank you</strong> for your trust and support - SSS Furniture</p>
+    <img src="${getPdfFooterDataUri()}" alt="SSS Furniture" style="display:block;width:100%;margin-top:18px;break-inside:avoid" />
   </div>
 </body></html>`;
   }
@@ -1121,7 +1184,7 @@ export class PartyOrdersService {
           <td>${idx + 1}</td>
           <td>${new Date(r.date).toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(r.order)}</td>
-          <td>${escapeHtml(r.finish ?? '-')}</td>
+          <td>${escapeHtml(r.polishColor ?? '-')}</td>
           <td>${escapeHtml(r.size ?? '-')}</td>
           <td>${escapeHtml(r.pattern ?? '-')}</td>
           ${hide ? '' : `<td style="text-align:right">${r.price != null ? rupees(r.price) : '-'}</td>`}
@@ -1176,12 +1239,13 @@ export class PartyOrdersService {
   <div class="body">
     ${filterSummary}
     <table>
-      <thead><tr><th>S.No</th><th>Date</th><th>Order</th><th>Finish</th><th>Size</th><th>Pattern</th>${hide ? '' : '<th style="text-align:right">Price</th>'}<th>M.No</th>${hide ? '' : '<th style="text-align:right">Value</th>'}</tr></thead>
+      <thead><tr><th>S.No</th><th>Date</th><th>Order</th><th>Polish Colour</th><th>Size</th><th>Pattern</th>${hide ? '' : '<th style="text-align:right">Price</th>'}<th>M.No</th>${hide ? '' : '<th style="text-align:right">Value</th>'}</tr></thead>
       <tbody>${supplyBody || `<tr><td colspan="${hide ? 7 : 9}" style="text-align:center;color:#9ca3af;padding:16px">No items found</td></tr>`}</tbody>
     </table>
     ${hide ? '' : `<div class="summary"><div><div class="label">Total Order Value</div><div class="value">${rupees(summary.totalValue)}</div></div></div>`}
     ${paymentSection}
     ${renderGeneratedFooter(supplyRows.length, 'item')}
+    <img src="${getPdfFooterDataUri()}" alt="SSS Furniture" style="display:block;width:100%;margin-top:18px;break-inside:avoid" />
   </div>
 </body></html>`;
     return this.pdf.renderHtmlToPdf(html);
@@ -1214,7 +1278,7 @@ export class PartyOrdersService {
       'S.No': idx + 1,
       Date: new Date(r.date).toISOString().slice(0, 10),
       Order: r.order,
-      Finish: r.finish ?? '',
+      'Polish Colour': r.polishColor ?? '',
       Size: r.size ?? '',
       Pattern: r.pattern ?? '',
       ...(hide ? {} : { Price: r.price ?? '' }),
@@ -1227,7 +1291,7 @@ export class PartyOrdersService {
         'S.No': '',
         Date: '',
         Order: 'TOTAL ORDER VALUE',
-        Finish: '',
+        'Polish Colour': '',
         Size: '',
         Pattern: '',
         Price: '',
@@ -1238,7 +1302,7 @@ export class PartyOrdersService {
         'S.No': '',
         Date: '',
         Order: 'TOTAL PAID',
-        Finish: '',
+        'Polish Colour': '',
         Size: '',
         Pattern: '',
         Price: '',
@@ -1249,7 +1313,7 @@ export class PartyOrdersService {
         'S.No': '',
         Date: '',
         Order: 'BALANCE',
-        Finish: '',
+        'Polish Colour': '',
         Size: '',
         Pattern: '',
         Price: '',

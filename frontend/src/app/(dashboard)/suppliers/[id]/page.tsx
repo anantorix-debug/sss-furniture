@@ -11,6 +11,7 @@ import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { RoleGate } from '@/components/RoleGate';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
+import { PurchaseFormModal } from '@/components/PurchaseFormModal';
 import { PURCHASE_STATUS_LABEL } from '@/types';
 import type { SupplierDetail, SupplierPayment, Purchase, PurchaseStatus } from '@/types';
 
@@ -43,8 +44,9 @@ function SupplierDetailContent() {
   // Every purchase for a supplier immediately books stock + the ledger -
   // this is a read-only history, not another place to enter a purchase
   // from. See PurchasesController for the actual purchasing flow.
-  const { data: purchases } = useSWR<Purchase[]>(`/purchase-orders?supplierId=${id}`, fetcher);
+  const { data: purchases, mutate: mutatePurchases } = useSWR<Purchase[]>(`/purchase-orders?supplierId=${id}`, fetcher);
 
+  const [purchaseFormOpen, setPurchaseFormOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState(emptyPaymentForm);
@@ -152,9 +154,9 @@ function SupplierDetailContent() {
         <div className="card p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-brand-900">Purchases</h2>
-            <Link href="/purchase-orders" className="text-brand-600 hover:underline text-xs">
+            <button type="button" className="text-brand-600 hover:underline text-xs" onClick={() => setPurchaseFormOpen(true)}>
               + New Purchase
-            </Link>
+            </button>
           </div>
           <div className="max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100">
             <table className="table-shell">
@@ -282,6 +284,18 @@ function SupplierDetailContent() {
           )}
         </div>
       </div>
+
+      {purchaseFormOpen && (
+        <PurchaseFormModal
+          editing={null}
+          initialSupplierId={id}
+          onClose={() => setPurchaseFormOpen(false)}
+          onSaved={() => {
+            mutatePurchases();
+            mutate();
+          }}
+        />
+      )}
     </div>
   );
 }

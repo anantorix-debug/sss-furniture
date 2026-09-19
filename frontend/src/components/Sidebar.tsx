@@ -33,12 +33,12 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/suppliers', label: 'Purchasing', icon: '⇩', minRole: 'ADMIN', alsoActiveOn: ['/purchase-orders'] },
   { href: '/carpenters', label: 'Production', icon: '✦', minRole: 'ADMIN' },
   { href: '/production-control', label: 'Production Control', icon: '⏻', minRole: 'ADMIN' },
-  { href: '/payments', label: 'Payments', icon: '▣', minRole: 'ADMIN' },
+  { href: '/payments', label: 'Payments', icon: '▣', minRole: 'SUPERADMIN' },
   { href: '/expenses', label: 'Expenses', icon: '⛁', minRole: 'SUPERADMIN' },
-  { href: '/reports', label: 'Reports', icon: '▥', minRole: 'ADMIN' },
+  { href: '/reports', label: 'Reports', icon: '▥', minRole: 'SUPERADMIN' },
   { href: '/users', label: 'Users & Roles', icon: '◍', minRole: 'SUPERADMIN' },
   { href: '/audit-log', label: 'Audit Log', icon: '◪', minRole: 'SUPERADMIN' },
-  { href: '/settings/whatsapp', label: 'Settings', icon: '✱', minRole: 'ADMIN' },
+  { href: '/settings/whatsapp', label: 'Settings', icon: '✱', minRole: 'SUPERADMIN' },
 ];
 
 const ROLE_LABEL: Record<Role, string> = {

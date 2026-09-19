@@ -53,7 +53,7 @@ function ProductSupplyTable({ rows }: { rows: ShopDashboardResult['items'] }) {
               <th>S.No</th>
               <th>Date</th>
               <th>Order</th>
-              <th>Finish</th>
+              <th>Polish Colour</th>
               <th>Size</th>
               <th>Pattern</th>
               {hasFinancials && <th className="text-right">Price</th>}
@@ -74,7 +74,7 @@ function ProductSupplyTable({ rows }: { rows: ShopDashboardResult['items'] }) {
                 <td>{idx + 1}</td>
                 <td className="whitespace-nowrap">{formatDate(r.date)}</td>
                 <td>{r.order}</td>
-                <td>{r.finish ?? 'Not specified'}</td>
+                <td>{r.polishColor ?? 'Not specified'}</td>
                 <td>{r.size ?? 'Not specified'}</td>
                 <td>{r.pattern ?? 'Not specified'}</td>
                 {hasFinancials && <td className="text-right">{r.price != null ? formatCurrency(r.price) : '-'}</td>}
@@ -106,24 +106,19 @@ function PaymentSummaryCards({ summary }: { summary: ShopSummary }) {
 // RIGHT side of the two-column report - the running-balance payment
 // ledger, same column set as the Purchasing/Supplier detail page's own
 // Payment Ledger (Date/Voucher No/Amount/Balance/Mode), plus the same
-// "Record Payment" inline form that page has. A shop can have several
-// orders, so this form has one extra field the Supplier one doesn't need -
-// which order the payment applies to - and posts to that order's own
-// existing POST /party-orders/:id/payments (no new payment model/endpoint).
+// "Record Payment" inline form that page has. The payment is against the
+// shop's overall balance - the backend splits it across the shop's orders.
 function PaymentLedgerPanel({
   summary,
   ledger,
-  orders,
   canAdd,
   onAddPayment,
 }: {
   summary: ShopSummary;
   ledger: ShopDashboardResult['paymentLedger'];
-  orders: PartyOrder[];
   canAdd: boolean;
-  onAddPayment: (orderId: string, payload: { date: string; amount: number; mode?: string; note?: string }) => Promise<void>;
+  onAddPayment: (payload: { date: string; amount: number; mode?: string; note?: string }) => Promise<void>;
 }) {
-  const [orderId, setOrderId] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [voucherNo, setVoucherNo] = useState('');
   const [amount, setAmount] = useState('');
@@ -135,17 +130,13 @@ function PaymentLedgerPanel({
     e.preventDefault();
     setError(null);
     const numAmount = parseFloat(amount);
-    if (!orderId) {
-      setError('Select which order this payment is for');
-      return;
-    }
     if (!numAmount || numAmount <= 0) {
       setError('Enter a valid amount');
       return;
     }
     setSubmitting(true);
     try {
-      await onAddPayment(orderId, { date, amount: numAmount, mode, note: voucherNo || undefined });
+      await onAddPayment({ date, amount: numAmount, mode, note: voucherNo || undefined });
       setAmount('');
       setVoucherNo('');
     } catch (err) {
@@ -202,14 +193,6 @@ function PaymentLedgerPanel({
       </div>
       {canAdd && (
         <form onSubmit={handleAdd} className="p-4 border-t border-brand-100 space-y-2">
-          <select className="input" required value={orderId} onChange={(e) => setOrderId(e.target.value)}>
-            <option value="">Select order...</option>
-            {orders.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.jobNumber ?? o.cotNo ?? o.id} - {formatCurrency(o.balanceAmount ?? 0)} due
-              </option>
-            ))}
-          </select>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input type="date" className="input" required value={date} onChange={(e) => setDate(e.target.value)} />
             <input className="input" placeholder="Voucher No." value={voucherNo} onChange={(e) => setVoucherNo(e.target.value)} />
@@ -331,8 +314,8 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
     }, hasRole('SUPERADMIN'));
   }
 
-  async function handleAddPayment(orderId: string, payload: { date: string; amount: number; mode?: string; note?: string }) {
-    await api.post(`/party-orders/${orderId}/payments`, payload);
+  async function handleAddPayment(payload: { date: string; amount: number; mode?: string; note?: string }) {
+    await api.post(`/party-orders/shops-summary/${shopId}/payments`, payload);
     mutate();
   }
 
@@ -399,7 +382,6 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
         <PaymentLedgerPanel
           summary={filteredSummary}
           ledger={paymentLedger}
-          orders={orders.data}
           canAdd={hasRole('ADMIN')}
           onAddPayment={handleAddPayment}
         />

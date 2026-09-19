@@ -10,6 +10,7 @@ import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
 import { CreateProductionTeamDto } from './dto/create-production-team.dto';
 import { UpdateProductionTeamDto } from './dto/update-production-team.dto';
 import { UpdateModelNoDto } from '../orders/customer/dto/update-model-no.dto';
+import { UpdatePieceModelNoDto } from './dto/update-piece-model-no.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -254,12 +255,22 @@ export class CarpenterController {
     return this.service.notifyWorkItem(id);
   }
 
-  // Model No is only ever known/entered while the piece is being made -
-  // Carpenter or Carving stage - never Polish (see the service-level stage
-  // guard too, which blocks it regardless of role once past Carving).
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.CARPENTER, Role.CARVER)
+  // Model No entry is Carpenter-only (Carving and Polish never get this
+  // action, regardless of which stage the work item happens to be at) -
+  // the service-level stage guard below is a separate, additional check
+  // that also blocks it once the item is past Carving.
+  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.CARPENTER)
   @Patch('carpenter-work-items/:id/model-no')
   updateWorkItemModelNo(@Param('id') id: string, @Body() dto: UpdateModelNoDto, @CurrentUser() user: AuthUser) {
     return this.service.updateWorkItemModelNo(id, dto.modelNo, user.userId);
+  }
+
+  // Per-piece Model No for a multi-unit Stock batch - Carpenter-only like
+  // the single-item endpoint above, and available immediately (no Admin
+  // verification needed first).
+  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.CARPENTER)
+  @Patch('carpenter-work-items/:id/piece-model-no')
+  updateWorkItemPieceModelNo(@Param('id') id: string, @Body() dto: UpdatePieceModelNoDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateWorkItemPieceModelNo(id, dto.index, dto.modelNo, user.userId);
   }
 }

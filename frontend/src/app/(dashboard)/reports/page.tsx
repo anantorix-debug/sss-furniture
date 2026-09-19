@@ -133,7 +133,7 @@ function ReportsContent() {
 
 export default function ReportsPage() {
   return (
-    <RoleGate minRole="ADMIN">
+    <RoleGate minRole="SUPERADMIN">
       <ReportsContent />
     </RoleGate>
   );
