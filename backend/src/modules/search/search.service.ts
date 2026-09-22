@@ -24,7 +24,7 @@ export class SearchService {
     const hideFinancials = viewerRole ? HIDE_FINANCIALS_FOR.includes(viewerRole) : false;
     const trimmed = modelNo.trim();
 
-    const [product, customerOrders, partyOrders, partyOrderItems] = await Promise.all([
+    const [product, customerOrders, customerOrderItems, partyOrders, partyOrderItems] = await Promise.all([
       this.prisma.product.findFirst({ where: { modelNo: { contains: trimmed } } }),
       this.prisma.customerOrder.findMany({
         // cotTrack can be a combined value (e.g. "JOB-2026-00008, 309" when
@@ -39,6 +39,22 @@ export class SearchService {
           modelNoUpdatedBy: { select: { name: true } },
         },
         orderBy: { orderDate: 'desc' },
+      }),
+      // A line's own Catalog Model No (linked to a Product, set via the
+      // order form's search box - see CustomerOrdersService.resolveItemModelNos)
+      // is a completely different place Model No lives from cotTrack above,
+      // and is now the primary way one gets set. Missing this meant an
+      // order could be fully tagged with a real Model No and still never
+      // show up here at all - same "order -> production -> employee ->
+      // delivery" gap PartyOrderItem's own modelNo search already covers.
+      this.prisma.customerOrderItem.findMany({
+        where: { product: { modelNo: { contains: trimmed } } },
+        include: {
+          order: { include: { payments: true, createdBy: { select: { name: true } } } },
+          product: { select: { modelNo: true } },
+          modelNoSetBy: { select: { name: true } },
+        },
+        orderBy: { order: { orderDate: 'desc' } },
       }),
       this.prisma.partyOrder.findMany({
         where: { cotNo: { contains: trimmed } },
@@ -68,7 +84,7 @@ export class SearchService {
     // though this order clearly has real production history. Once an order
     // is matched, pull its production history by source link too, not just
     // by each work item's own modelNo.
-    const matchedCustomerOrderIds = customerOrders.map((o) => o.id);
+    const matchedCustomerOrderIds = Array.from(new Set([...customerOrders.map((o) => o.id), ...customerOrderItems.map((i) => i.orderId)]));
     const matchedPartyOrderItemIds = partyOrderItems.map((i) => i.id);
     const workItems = await this.prisma.carpenterWorkItem.findMany({
       where: {
@@ -110,7 +126,9 @@ export class SearchService {
 
     return {
       query: trimmed,
-      found: Boolean(product || customerOrders.length || partyOrders.length || partyOrderItems.length || workItems.length),
+      found: Boolean(
+        product || customerOrders.length || customerOrderItems.length || partyOrders.length || partyOrderItems.length || workItems.length,
+      ),
       product: product
         ? {
             id: product.id,
@@ -155,6 +173,36 @@ export class SearchService {
           modelNoUpdatedAt: order.modelNoUpdatedAt,
           paymentStatus: balanceAmount <= 0 ? ('SETTLED' as const) : ('DUE' as const),
           ...(hideFinancials ? {} : { orderValue: Number(order.orderValue), totalReceived, balanceAmount }),
+        };
+      }),
+      // Multi-line Customer Order matches via each line's own Catalog Model
+      // No (Product link) - separate from customerOrders above (which only
+      // matches the order-level cotTrack), same "one entry per matching
+      // product line" shape as partyOrderItems below.
+      customerOrderItems: customerOrderItems.map((item) => {
+        const { totalReceived, balanceAmount } = computeBalance(Number(item.order.orderValue), item.order.payments);
+        return {
+          id: item.id,
+          orderId: item.orderId,
+          modelNo: item.product?.modelNo ?? null,
+          productName: item.productName,
+          category: item.category,
+          size: item.size,
+          quantity: item.quantity,
+          stockReservedQty: item.stockReservedQty,
+          productionQty: item.productionQty,
+          orderIdLabel: item.order.orderId,
+          customerName: item.order.customerName,
+          phone: item.order.phone,
+          address: item.order.address,
+          deliveryStatus: item.order.deliveryStatus,
+          orderDate: item.order.orderDate,
+          actualDeliveryDate: item.order.actualDeliveryDate,
+          createdBy: item.order.createdBy?.name,
+          modelNoSetBy: item.modelNoSetBy?.name ?? null,
+          modelNoSetAt: item.modelNoSetAt,
+          paymentStatus: balanceAmount <= 0 ? ('SETTLED' as const) : ('DUE' as const),
+          ...(hideFinancials ? {} : { unitPrice: Number(item.unitPrice), totalReceived, balanceAmount }),
         };
       }),
       partyOrders: partyOrders.map((order) => {
@@ -253,12 +301,12 @@ export class SearchService {
     const result = await this.track(modelNo, viewerRole);
     const fmt = (d: string | Date | null | undefined) => (d ? new Date(d).toLocaleDateString('en-IN') : '-');
 
-    const customerOrderRows = result.customerOrders
+    const customerOrderRows = [...result.customerOrders, ...result.customerOrderItems]
       .map(
-        (o) => `<tr>
-          <td>${escapeHtml(o.orderId)}</td>
+        (o: any) => `<tr>
+          <td>${escapeHtml(o.orderIdLabel ?? o.orderId ?? '-')}</td>
           <td>${escapeHtml(o.customerName)}</td>
-          <td>${escapeHtml(o.product)}</td>
+          <td>${escapeHtml(o.product ?? o.productName ?? '-')}</td>
           <td>${fmt(o.orderDate)}</td>
           <td>${escapeHtml(o.deliveryStatus)}</td>
           <td>${fmt(o.actualDeliveryDate)}</td>

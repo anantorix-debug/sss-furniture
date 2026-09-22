@@ -149,6 +149,43 @@ export default function TrackPage() {
         </div>
       )}
 
+      {data && data.customerOrderItems.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="font-semibold text-brand-900">
+            Customer Order Line{data.customerOrderItems.length > 1 ? `s (${data.customerOrderItems.length})` : ''}
+          </h2>
+          {data.customerOrderItems.map((item) => (
+            <div key={item.id} className="card p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={item.deliveryStatus} />
+                  <Chip color={item.paymentStatus === 'SETTLED' ? 'green' : 'red'} label={item.paymentStatus === 'SETTLED' ? 'Paid' : 'Payment Due'} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard label="Order ID" value={item.orderIdLabel} />
+                <StatCard label="Customer" value={item.customerName} />
+                <StatCard label="Phone" value={item.phone ?? '-'} />
+                <StatCard label="Product" value={item.productName} />
+                <StatCard label="Category" value={item.category ?? '-'} />
+                <StatCard label="Size" value={item.size ?? '-'} />
+                <StatCard label="Qty" value={String(item.quantity)} />
+                <StatCard label="From Stock" value={String(item.stockReservedQty)} />
+                <StatCard label="From Production" value={String(item.productionQty)} />
+                <StatCard label="Order Date" value={formatDate(item.orderDate)} />
+                {item.unitPrice !== undefined && <StatCard label="Unit Price" value={formatCurrency(item.unitPrice)} />}
+                {item.balanceAmount !== undefined && <StatCard label="Order Balance" value={formatCurrency(item.balanceAmount)} />}
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-brand-100">
+                <StatCard label="Model No Set By" value={item.modelNoSetBy ?? '-'} />
+                <StatCard label="Model No Set At" value={item.modelNoSetAt ? formatDate(item.modelNoSetAt) : '-'} />
+                <StatCard label="Created By" value={item.createdBy ?? '-'} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {data && data.partyOrders.length > 0 && (
         <div className="space-y-4">
           <h2 className="font-semibold text-brand-900">Party Order{data.partyOrders.length > 1 ? `s (${data.partyOrders.length})` : ''}</h2>

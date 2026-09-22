@@ -10,6 +10,7 @@ import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { sharePdf } from '@/lib/sharePdf';
 import { buildPartyOrderMessage } from '@/lib/orderMessages';
 import { TruckIcon } from '@/components/TruckIcon';
+import { HoverPreview } from '@/components/HoverPreview';
 import type { PartyOrder, GalleryImage, DeliveryStatus } from '@/types';
 import type { UseWhatsAppOptions } from '@/hooks/useWhatsApp';
 
@@ -40,8 +41,8 @@ function ProductCell({ order }: { order: PartyOrder }) {
   const first = images[0];
   const itemModelNos = items.filter((i) => i.modelNo);
 
-  return (
-    <div className="relative flex items-start gap-2 min-w-0 group">
+  const trigger = (
+    <>
       {first ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={assetUrl(first.url) ?? ''} alt={first.fileName} className="h-12 w-12 shrink-0 object-cover rounded-md border border-brand-200" />
@@ -64,39 +65,44 @@ function ProductCell({ order }: { order: PartyOrder }) {
           <p className="text-[11px] text-brand-400 italic">Model No not updated</p>
         )}
       </div>
+    </>
+  );
 
-      {/* Hover-only detail box: every line's own image, name, Model No and
-          who set it - stays hidden until this block is hovered. */}
-      {items.length > 0 && (
-        <div className="hidden group-hover:block absolute z-20 top-full left-0 mt-1 bg-white border border-brand-200 rounded-lg shadow-xl p-4 w-max max-w-[440px] text-sm space-y-3">
-          {items.map((item) => (
-            <div key={item.id} className="flex items-start gap-3">
-              {item.referenceImage ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={assetUrl(item.referenceImage.url) ?? ''} alt={item.referenceImage.fileName} className="h-20 w-20 object-cover rounded-md border border-brand-100 shrink-0" />
+  if (items.length === 0) {
+    return <div className="flex items-start gap-2 min-w-0">{trigger}</div>;
+  }
+
+  return (
+    <HoverPreview triggerClassName="flex items-start gap-2 min-w-0" trigger={trigger}>
+      {/* Every line's own image, name, Model No and who set it. */}
+      <div className="bg-white border border-brand-200 rounded-lg shadow-xl p-4 w-max max-w-[440px] max-h-[70vh] overflow-y-auto text-sm space-y-3">
+        {items.map((item) => (
+          <div key={item.id} className="flex items-start gap-3">
+            {item.referenceImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={assetUrl(item.referenceImage.url) ?? ''} alt={item.referenceImage.fileName} className="h-20 w-20 object-cover rounded-md border border-brand-100 shrink-0" />
+            ) : (
+              <span className="h-20 w-20 shrink-0 rounded-md border border-dashed border-brand-200" />
+            )}
+            <div>
+              <p className="font-medium text-ink">{item.productName}</p>
+              {item.modelNo ? (
+                <>
+                  <p className="text-brand-600 font-medium">{item.modelNo}</p>
+                  {item.modelNoUpdatedBy && (
+                    <p className="text-brand-400 text-xs">
+                      by {attributedTo(item.modelNoUpdatedBy)} &middot; {formatDate(item.modelNoUpdatedAt)}
+                    </p>
+                  )}
+                </>
               ) : (
-                <span className="h-20 w-20 shrink-0 rounded-md border border-dashed border-brand-200" />
+                <p className="text-brand-400 italic">Model No not updated</p>
               )}
-              <div>
-                <p className="font-medium text-ink">{item.productName}</p>
-                {item.modelNo ? (
-                  <>
-                    <p className="text-brand-600 font-medium">{item.modelNo}</p>
-                    {item.modelNoUpdatedBy && (
-                      <p className="text-brand-400 text-xs">
-                        by {attributedTo(item.modelNoUpdatedBy)} &middot; {formatDate(item.modelNoUpdatedAt)}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-brand-400 italic">Model No not updated</p>
-                )}
-              </div>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+          </div>
+        ))}
+      </div>
+    </HoverPreview>
   );
 }
 

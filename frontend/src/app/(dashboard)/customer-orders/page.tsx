@@ -29,6 +29,8 @@ import { useForceable } from '@/hooks/useForceable';
 import { sharePdf } from '@/lib/sharePdf';
 import { buildCustomerOrderMessage } from '@/lib/orderMessages';
 import { OrderWorkEntriesPanel, type StagedWorkEntry } from '@/components/OrderWorkEntriesPanel';
+import { HoverPreview } from '@/components/HoverPreview';
+import { SuccessTick } from '@/components/SuccessTick';
 import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -106,6 +108,8 @@ function CustomerOrdersContent() {
   // Staged Work Entries for a brand-new order (not saved yet) - submitted
   // right after the order itself is created. See OrderWorkEntriesPanel.
   const [pendingWorkEntries, setPendingWorkEntries] = useState<StagedWorkEntry[]>([]);
+  // GPay-style confirmation after a successful save/payment - see SuccessTick.
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   function addItemRow() {
     setItems((rows) => [...rows, { ...emptyRow }]);
@@ -243,6 +247,7 @@ function CustomerOrdersContent() {
           }
         }
         mutate();
+        setSuccessMessage(editing ? 'Order Updated' : 'Order Created');
         if (saveAndNew && !editing) {
           openCreate();
         } else {
@@ -354,6 +359,7 @@ function CustomerOrdersContent() {
 
   return (
     <div className="space-y-6">
+      {successMessage && <SuccessTick message={successMessage} onDone={() => setSuccessMessage(null)} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-900">Customer Orders</h1>
@@ -736,6 +742,7 @@ function CustomerOrdersContent() {
             onAddPayment={async (payload) => {
               await api.post(`/customer-orders/${paymentsOrder.id}/payments`, payload);
               await refreshPaymentsOrder(paymentsOrder.id);
+              setSuccessMessage('Payment Recorded');
             }}
             onDeletePayment={async (paymentId) => {
               await api.delete(`/customer-orders/${paymentsOrder.id}/payments/${paymentId}`);
@@ -987,8 +994,8 @@ function ProductCell({ order }: { order: CustomerOrder }) {
   const first = images[0];
   const itemModelNos = items.filter((i) => i.product?.modelNo);
 
-  return (
-    <div className="relative inline-flex items-center gap-2 group max-w-[260px]">
+  const trigger = (
+    <>
       {first ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={assetUrl(first.url) ?? ''} alt={first.fileName} className="h-10 w-10 shrink-0 object-cover rounded-md border border-brand-200" />
@@ -1005,41 +1012,44 @@ function ProductCell({ order }: { order: CustomerOrder }) {
           <p className="text-[11px] text-brand-400 italic">Not Updated</p>
         )}
       </div>
+    </>
+  );
 
-      {/* Hover-only detail box: every line's own image, name, Model No and
-          who set it - stays hidden until this cell is hovered. */}
-      <div className="hidden group-hover:block absolute z-20 top-full left-0 mt-1 bg-white border border-brand-200 rounded-lg shadow-xl p-4 w-max max-w-[440px] text-sm space-y-3">
-        {items.length > 0 ? (
-          items.map((item) => (
-            <div key={item.id} className="flex items-start gap-3">
-              {item.referenceImage ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={assetUrl(item.referenceImage.url) ?? ''} alt={item.referenceImage.fileName} className="h-20 w-20 object-cover rounded-md border border-brand-100 shrink-0" />
+  if (items.length === 0) {
+    return <div className="inline-flex items-center gap-2 max-w-[260px]">{trigger}</div>;
+  }
+
+  return (
+    <HoverPreview triggerClassName="inline-flex items-center gap-2 max-w-[260px]" trigger={trigger}>
+      {/* Every line's own image, name, Model No and who set it. */}
+      <div className="bg-white border border-brand-200 rounded-lg shadow-xl p-4 w-max max-w-[440px] max-h-[70vh] overflow-y-auto text-sm space-y-3">
+        {items.map((item) => (
+          <div key={item.id} className="flex items-start gap-3">
+            {item.referenceImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={assetUrl(item.referenceImage.url) ?? ''} alt={item.referenceImage.fileName} className="h-20 w-20 object-cover rounded-md border border-brand-100 shrink-0" />
+            ) : (
+              <span className="h-20 w-20 shrink-0 rounded-md border border-dashed border-brand-200" />
+            )}
+            <div>
+              <p className="font-medium text-ink">{item.productName}</p>
+              {item.product?.modelNo ? (
+                <>
+                  <p className="text-brand-600 font-medium">{item.product.modelNo}</p>
+                  {item.modelNoSetBy && (
+                    <p className="text-brand-400 text-xs">
+                      by {attributedTo(item.modelNoSetBy)} &middot; {formatDate(item.modelNoSetAt)}
+                    </p>
+                  )}
+                </>
               ) : (
-                <span className="h-20 w-20 shrink-0 rounded-md border border-dashed border-brand-200" />
+                <p className="text-brand-400 italic">No Catalog Model No</p>
               )}
-              <div>
-                <p className="font-medium text-ink">{item.productName}</p>
-                {item.product?.modelNo ? (
-                  <>
-                    <p className="text-brand-600 font-medium">{item.product.modelNo}</p>
-                    {item.modelNoSetBy && (
-                      <p className="text-brand-400 text-xs">
-                        by {attributedTo(item.modelNoSetBy)} &middot; {formatDate(item.modelNoSetAt)}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-brand-400 italic">No Catalog Model No</p>
-                )}
-              </div>
             </div>
-          ))
-        ) : (
-          <p className="text-brand-500">{order.product}</p>
-        )}
+          </div>
+        ))}
       </div>
-    </div>
+    </HoverPreview>
   );
 }
 

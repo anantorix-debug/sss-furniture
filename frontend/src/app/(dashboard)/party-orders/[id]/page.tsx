@@ -13,6 +13,7 @@ import { Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
 import { PaymentsPanel } from '@/components/PaymentsPanel';
 import { PartyOrderFormModal } from '@/components/PartyOrderFormModal';
 import { OrderWorkEntriesPanel } from '@/components/OrderWorkEntriesPanel';
+import { SuccessTick } from '@/components/SuccessTick';
 import { AssignEmployeeModal } from '@/components/AssignEmployeeModal';
 import { AssignProductionModal, type AssignProductionPayload } from '@/components/AssignProductionModal';
 import { WorkTimelineModal } from '@/components/WorkTimelineModal';
@@ -79,6 +80,7 @@ function PartyOrderDetailContent() {
   const [workTimelineOpen, setWorkTimelineOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   async function downloadOrderPdf() {
     if (!order) return;
@@ -148,6 +150,7 @@ function PartyOrderDetailContent() {
 
   return (
     <div className="space-y-6">
+      {successMessage && <SuccessTick message={successMessage} onDone={() => setSuccessMessage(null)} />}
       <div>
         <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.push('/party-orders')}>
           &larr; All party orders
@@ -289,6 +292,7 @@ function PartyOrderDetailContent() {
               onAddPayment={async (payload) => {
                 await api.post(`/party-orders/${order.id}/payments`, payload);
                 mutate();
+                setSuccessMessage('Payment Recorded');
               }}
               onDeletePayment={async (paymentId) => {
                 await api.delete(`/party-orders/${order.id}/payments/${paymentId}`);

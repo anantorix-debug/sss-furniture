@@ -12,6 +12,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { StatCard } from '@/components/StatCard';
 import { ShopManagerModal } from '@/components/ShopManagerModal';
 import { PartyOrderFormModal } from '@/components/PartyOrderFormModal';
+import { SuccessTick } from '@/components/SuccessTick';
 import { PartyOrderCard } from '@/components/PartyOrderCard';
 import { RoleGate } from '@/components/RoleGate';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
@@ -298,6 +299,7 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PartyOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PartyOrder | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   function openCreate() {
     setEditing(null);
@@ -317,6 +319,7 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
   async function handleAddPayment(payload: { date: string; amount: number; mode?: string; note?: string }) {
     await api.post(`/party-orders/shops-summary/${shopId}/payments`, payload);
     mutate();
+    setSuccessMessage('Payment Recorded');
   }
 
   if (isLoading && !dashboard) {
@@ -332,6 +335,7 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
 
   return (
     <div className="space-y-6">
+      {successMessage && <SuccessTick message={successMessage} onDone={() => setSuccessMessage(null)} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link href="/party-orders" className="text-xs text-brand-500 hover:underline">

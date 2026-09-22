@@ -838,6 +838,35 @@ export interface TrackResult {
     totalReceived?: number;
     balanceAmount?: number;
   }[];
+  // Multi-line Customer Order matches via each line's own Catalog Model No
+  // (Product link) - separate from customerOrders above, which only
+  // matches the order-level cotTrack. Same shape/purpose as
+  // partyOrderItems below.
+  customerOrderItems: {
+    id: string;
+    orderId: string;
+    modelNo?: string | null;
+    productName: string;
+    category?: string | null;
+    size?: string | null;
+    quantity: number;
+    stockReservedQty: number;
+    productionQty: number;
+    orderIdLabel: string;
+    customerName: string;
+    phone?: string | null;
+    address?: string | null;
+    deliveryStatus: DeliveryStatus;
+    orderDate: string;
+    actualDeliveryDate?: string | null;
+    createdBy?: string;
+    modelNoSetBy?: string | null;
+    modelNoSetAt?: string | null;
+    paymentStatus: 'SETTLED' | 'DUE';
+    unitPrice?: number;
+    totalReceived?: number;
+    balanceAmount?: number;
+  }[];
   partyOrders: {
     id: string;
     cotNo?: string | null;

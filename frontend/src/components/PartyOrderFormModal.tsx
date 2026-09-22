@@ -13,6 +13,7 @@ import { FormRow, FormField } from './orders/OrderFormFields';
 import { ModelNoPicker } from './ModelNoPicker';
 import { GalleryGrid } from './GalleryGrid';
 import { OrderWorkEntriesPanel, type StagedWorkEntry } from './OrderWorkEntriesPanel';
+import { SuccessTick } from './SuccessTick';
 import { assetUrl } from '@/lib/api';
 import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product, GalleryImage } from '@/types';
 
@@ -140,6 +141,12 @@ export function PartyOrderFormModal({
   // Staged Work Entries for a brand-new order (not saved yet) - submitted
   // right after the order itself is created. See OrderWorkEntriesPanel.
   const [pendingWorkEntries, setPendingWorkEntries] = useState<StagedWorkEntry[]>([]);
+  // GPay-style confirmation after a successful save - see SuccessTick.
+  // afterSuccess holds whatever close/reset should happen once the tick's
+  // own animation finishes, instead of closing the form immediately
+  // underneath it.
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [afterSuccess, setAfterSuccess] = useState<(() => void) | null>(null);
 
   function updateItem(idx: number, patch: Partial<ItemForm>) {
     setItems((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -217,14 +224,17 @@ export function PartyOrderFormModal({
           }
         }
         onSaved();
-        if (saveAndNew && !editing) {
-          setForm({ ...emptyForm, shopId: initialShopId ?? '' });
-          setItems([{ ...emptyItem }]);
-          setPendingWorkEntries([]);
-          setFormError(null);
-        } else {
-          onClose();
-        }
+        setSuccessMessage(editing ? 'Order Updated' : 'Order Created');
+        setAfterSuccess(() => () => {
+          if (saveAndNew && !editing) {
+            setForm({ ...emptyForm, shopId: initialShopId ?? '' });
+            setItems([{ ...emptyItem }]);
+            setPendingWorkEntries([]);
+            setFormError(null);
+          } else {
+            onClose();
+          }
+        });
       } catch (err) {
         setFormError(err instanceof ApiError ? err.message : 'Failed to save order');
         throw err;
@@ -235,7 +245,18 @@ export function PartyOrderFormModal({
   }
 
   return (
-    <Modal title={editing ? 'Edit Party Order' : 'New Party Order'} onClose={onClose} wide>
+    <>
+      {successMessage && (
+        <SuccessTick
+          message={successMessage}
+          onDone={() => {
+            setSuccessMessage(null);
+            afterSuccess?.();
+            setAfterSuccess(null);
+          }}
+        />
+      )}
+      <Modal title={editing ? 'Edit Party Order' : 'New Party Order'} onClose={onClose} wide>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -515,6 +536,7 @@ export function PartyOrderFormModal({
           onCancel={closeForcePrompt}
         />
       )}
-    </Modal>
+      </Modal>
+    </>
   );
 }
