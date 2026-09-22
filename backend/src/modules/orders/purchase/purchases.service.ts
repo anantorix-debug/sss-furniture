@@ -80,6 +80,7 @@ export class PurchasesService {
         where,
         include: {
           items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } },
+          referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } },
           supplier: { select: { id: true, name: true } },
           createdBy: { select: { name: true } },
           approvedBy: { select: { name: true } },
@@ -99,6 +100,7 @@ export class PurchasesService {
       where: { id },
       include: {
         items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } },
+        referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } },
         supplier: true,
         createdBy: { select: { name: true } },
         approvedBy: { select: { name: true } },
@@ -123,11 +125,12 @@ export class PurchasesService {
         supplierId: dto.supplierId,
         purchaseDate,
         notes: dto.notes,
+        referenceImageId: dto.referenceImageId || null,
         status: 'PENDING_APPROVAL',
         createdById: userId,
         items: { create: items },
       },
-      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
     });
 
     await this.audit.log({
@@ -154,7 +157,7 @@ export class PurchasesService {
   async approve(id: string, userId: string) {
     const existing = await this.prisma.purchase.findUnique({
       where: { id },
-      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
     });
     if (!existing) throw new NotFoundException('Purchase not found');
     if (existing.status === 'CANCELLED') {
@@ -217,7 +220,7 @@ export class PurchasesService {
   async receive(id: string, userId: string) {
     const existing = await this.prisma.purchase.findUnique({
       where: { id },
-      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
     });
     if (!existing) throw new NotFoundException('Purchase not found');
     if (existing.status === 'PENDING_APPROVAL') {
@@ -288,7 +291,7 @@ export class PurchasesService {
   async update(id: string, dto: UpdatePurchaseDto, userId: string) {
     const existing = await this.prisma.purchase.findUnique({
       where: { id },
-      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
     });
     if (!existing) throw new NotFoundException('Purchase not found');
     if (existing.status === 'CANCELLED') {
@@ -298,6 +301,8 @@ export class PurchasesService {
     const newItems = dto.items ? await this.resolveItemsInput(dto.items) : undefined;
     const purchaseDate = dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate;
     const supplierId = dto.supplierId ?? existing.supplierId;
+    // undefined = not sent, leave unchanged; null/string = explicitly set/cleared.
+    const referenceImageId = dto.referenceImageId !== undefined ? dto.referenceImageId : existing.referenceImageId;
     const isPending = existing.status === 'PENDING_APPROVAL';
     const isReceived = existing.status === 'RECORDED';
     const hasPayable = existing.status === 'APPROVED' || isReceived;
@@ -328,7 +333,7 @@ export class PurchasesService {
 
         const created = await tx.purchase.findUniqueOrThrow({
           where: { id },
-          include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+          include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
         });
 
         await tx.stockMovement.createMany({
@@ -362,7 +367,7 @@ export class PurchasesService {
 
         const created = await tx.purchase.findUniqueOrThrow({
           where: { id },
-          include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+          include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
         });
         const totalValue = created.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
         const particulars = created.items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
@@ -376,8 +381,8 @@ export class PurchasesService {
 
       return tx.purchase.update({
         where: { id },
-        data: { supplierId, purchaseDate, notes: dto.notes },
-        include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+        data: { supplierId, purchaseDate, notes: dto.notes, referenceImageId },
+        include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
       });
     });
 
@@ -395,7 +400,7 @@ export class PurchasesService {
   async cancel(id: string, userId: string) {
     const existing = await this.prisma.purchase.findUnique({
       where: { id },
-      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } } },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
     });
     if (!existing) throw new NotFoundException('Purchase not found');
     if (existing.status === 'CANCELLED') {

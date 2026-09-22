@@ -12,6 +12,7 @@ import { ViewField } from '@/components/ViewField';
 import { Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
 import { PaymentsPanel } from '@/components/PaymentsPanel';
 import { PartyOrderFormModal } from '@/components/PartyOrderFormModal';
+import { OrderWorkEntriesPanel } from '@/components/OrderWorkEntriesPanel';
 import { AssignEmployeeModal } from '@/components/AssignEmployeeModal';
 import { AssignProductionModal, type AssignProductionPayload } from '@/components/AssignProductionModal';
 import { WorkTimelineModal } from '@/components/WorkTimelineModal';
@@ -307,6 +308,8 @@ function PartyOrderDetailContent() {
               </div>
             </div>
           </div>
+
+          <OrderWorkEntriesPanel basePath="party-orders" orderId={order.id} />
         </div>
       </div>
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError, getAccessToken } from '@/lib/api';
+import { api, ApiError, getAccessToken, assetUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { RoleGate } from '@/components/RoleGate';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -281,6 +281,20 @@ function PurchaseDetailContent() {
         <div className="card p-5">
           <h2 className="font-semibold text-brand-900 mb-2">Notes</h2>
           <p className="text-sm text-brand-600">{purchase.notes}</p>
+        </div>
+      )}
+
+      {purchase.referenceImage && (
+        <div className="card p-5">
+          <h2 className="font-semibold text-brand-900 mb-3">Model Image</h2>
+          <a href={assetUrl(purchase.referenceImage.url) ?? '#'} target="_blank" rel="noreferrer">
+            <img
+              src={assetUrl(purchase.referenceImage.url) ?? ''}
+              alt={purchase.referenceImage.fileName}
+              className="h-24 w-24 object-cover rounded-md border border-brand-200"
+            />
+          </a>
+          {purchase.referenceImage.modelNo && <p className="text-xs text-brand-500 mt-1">{purchase.referenceImage.modelNo}</p>}
         </div>
       )}
 

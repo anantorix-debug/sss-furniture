@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError, getAccessToken } from '@/lib/api';
+import { api, ApiError, getAccessToken, assetUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
@@ -46,7 +46,10 @@ function SupplierDetailContent() {
   // from. See PurchasesController for the actual purchasing flow.
   const { data: purchases, mutate: mutatePurchases } = useSWR<Purchase[]>(`/purchase-orders?supplierId=${id}`, fetcher);
 
-  const [purchaseFormOpen, setPurchaseFormOpen] = useState(false);
+  // The New Purchase form is always visible now (no button-click toggle) -
+  // bumping this key remounts it with blank fields after a save, or when
+  // Cancel/x is clicked to reset an in-progress entry.
+  const [purchaseFormKey, setPurchaseFormKey] = useState(0);
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState(emptyPaymentForm);
@@ -152,56 +155,81 @@ function SupplierDetailContent() {
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="card p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-brand-900">Purchases</h2>
-            <button type="button" className="text-brand-600 hover:underline text-xs" onClick={() => setPurchaseFormOpen(true)}>
-              + New Purchase
-            </button>
-          </div>
-          <div className="max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100">
-            <table className="table-shell">
-              <thead>
-                <tr>
-                  <th>Purchase No</th>
-                  <th>Date</th>
-                  <th>Items</th>
-                  <th>Total</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(!purchases || purchases.length === 0) && (
+          <h2 className="font-semibold text-brand-900 mb-3">Purchases</h2>
+          <div className="max-h-[700px] overflow-y-auto pr-1">
+            <div className="overflow-x-auto rounded-lg border border-brand-100">
+              <table className="table-shell">
+                <thead>
                   <tr>
-                    <td colSpan={6} className="text-center text-brand-400 py-4">
-                      No purchases yet
-                    </td>
+                    <th>Image</th>
+                    <th>Purchase No</th>
+                    <th>Date</th>
+                    <th>Items</th>
+                    <th>Total</th>
+                    <th>Status</th>
+                    <th></th>
                   </tr>
-                )}
-                {purchases?.map((p) => (
-                  <tr key={p.id}>
-                    <td className="font-medium">{p.purchaseNumber}</td>
-                    <td>{formatDate(p.purchaseDate)}</td>
-                    <td>{purchaseItemsSummary(p)}</td>
-                    <td className="font-medium">{formatCurrency(p.totalValue)}</td>
-                    <td>
-                      <Chip color={STATUS_CHIP[p.status]} label={PURCHASE_STATUS_LABEL[p.status]} />
-                    </td>
-                    <td>
-                      <Link href={`/purchase-orders/${p.id}`} className="text-brand-600 hover:underline text-xs">
-                        View
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(!purchases || purchases.length === 0) && (
+                    <tr>
+                      <td colSpan={7} className="text-center text-brand-400 py-4">
+                        No purchases yet
+                      </td>
+                    </tr>
+                  )}
+                  {purchases?.map((p) => (
+                    <tr key={p.id}>
+                      <td>
+                        {p.referenceImage ? (
+                          <img
+                            src={assetUrl(p.referenceImage.url) ?? ''}
+                            alt={p.referenceImage.fileName}
+                            className="h-9 w-9 object-cover rounded-md border border-brand-200"
+                          />
+                        ) : (
+                          <span className="text-brand-300 text-xs">-</span>
+                        )}
+                      </td>
+                      <td className="font-medium">{p.purchaseNumber}</td>
+                      <td>{formatDate(p.purchaseDate)}</td>
+                      <td>{purchaseItemsSummary(p)}</td>
+                      <td className="font-medium">{formatCurrency(p.totalValue)}</td>
+                      <td>
+                        <Chip color={STATUS_CHIP[p.status]} label={PURCHASE_STATUS_LABEL[p.status]} />
+                      </td>
+                      <td>
+                        <Link href={`/purchase-orders/${p.id}`} className="text-brand-600 hover:underline text-xs">
+                          View
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4">
+              <PurchaseFormModal
+                key={purchaseFormKey}
+                editing={null}
+                initialSupplierId={id}
+                inline
+                onClose={() => setPurchaseFormKey((k) => k + 1)}
+                onSaved={() => {
+                  mutatePurchases();
+                  mutate();
+                  setPurchaseFormKey((k) => k + 1);
+                }}
+              />
+            </div>
           </div>
         </div>
 
         <div className="card p-5">
           <h2 className="font-semibold text-brand-900 mb-3">Payment Ledger</h2>
-          <div className="max-h-72 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
+          <div className="max-h-[700px] overflow-y-auto pr-1">
+          <div className="overflow-x-auto rounded-lg border border-brand-100 mb-4">
             <table className="table-shell">
               <thead>
                 <tr>
@@ -282,20 +310,9 @@ function SupplierDetailContent() {
               </button>
             </form>
           )}
+          </div>
         </div>
       </div>
-
-      {purchaseFormOpen && (
-        <PurchaseFormModal
-          editing={null}
-          initialSupplierId={id}
-          onClose={() => setPurchaseFormOpen(false)}
-          onSaved={() => {
-            mutatePurchases();
-            mutate();
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -96,7 +96,9 @@ function stripOrderMoney<
   };
 }
 
-const itemsInclude = { items: { orderBy: { createdAt: 'asc' as const }, include: { referenceImage: true } } };
+const itemsInclude = {
+  items: { orderBy: { createdAt: 'asc' as const }, include: { referenceImage: true, modelNoUpdatedBy: { select: { id: true, name: true, role: true } } } },
+};
 
 // A shop's aggregated numbers, computed from whatever order array is handed
 // in - used identically for one group's card on the shop list, and for both
@@ -239,6 +241,51 @@ export class PartyOrdersService {
     private pdf: PdfService,
     private whatsapp: WhatsappService,
   ) {}
+
+  // The item-level Model No field (ModelNoPicker on the frontend) is a
+  // search-and-autofill box: picking an existing match already sets
+  // productId directly, so there's nothing to do here for those lines. A
+  // typed Model No with NO match is treated as a brand-new catalogue
+  // product - same registration CustomerOrdersService does, so a new
+  // Model No behaves identically whether it's entered from a Customer or a
+  // Party Order. `upsert` on the unique modelNo makes this race-safe: two
+  // lines (or two concurrent saves) with the same new Model No land on the
+  // same Product row instead of erroring or duplicating. An existing
+  // Product's catalogue data is never overwritten by an order line's
+  // snapshot values (`update: {}`). PartyOrderItem.modelNo itself (the
+  // production-tracking string already shown on the list) is untouched -
+  // this only adds the productId link alongside it.
+  private async resolveItemModelNos<T extends PartyOrderItemDto>(items: T[]): Promise<T[]> {
+    const pending = items.filter((i) => !i.productId && i.modelNo?.trim());
+    if (pending.length === 0) return items;
+
+    const resolved = new Map<string, string>();
+    for (const i of pending) {
+      const modelNo = i.modelNo!.trim();
+      if (resolved.has(modelNo)) continue;
+      const product = await this.prisma.product.upsert({
+        where: { modelNo },
+        update: {},
+        create: {
+          modelNo,
+          name: i.productName,
+          modelSize: i.size,
+          sizeUnit: i.sizeUnit,
+          materialFinish: i.color,
+          pattern: i.pattern,
+          details: i.details,
+          retailPrice: i.unitPrice,
+          unit: 'Nos',
+        },
+      });
+      resolved.set(modelNo, product.id);
+    }
+
+    return items.map((i) => {
+      const modelNo = i.modelNo?.trim();
+      return !i.productId && modelNo && resolved.has(modelNo) ? { ...i, productId: resolved.get(modelNo) } : i;
+    });
+  }
 
   // The single filtered dataset every list/summary/PDF/Excel view is built
   // from - full order objects (real numbers, not money-stripped) after the
@@ -430,7 +477,8 @@ export class PartyOrdersService {
     if (!shop) throw new NotFoundException('Shop not found');
 
     const jobNumber = await generateJobNumber(this.prisma);
-    const totalAmount = dto.items.reduce((sum, i) => sum + this.lineTotal(i), 0);
+    const resolvedItems = await this.resolveItemModelNos(dto.items);
+    const totalAmount = resolvedItems.reduce((sum, i) => sum + this.lineTotal(i), 0);
 
     const order = await this.prisma.partyOrder.create({
       data: {
@@ -445,7 +493,7 @@ export class PartyOrdersService {
         deliveryStatus: dto.deliveryStatus,
         createdById: userId,
         items: {
-          create: dto.items.map((i) => ({
+          create: resolvedItems.map((i) => ({
             productId: i.productId,
             productName: i.productName,
             finish: i.finish,
@@ -458,6 +506,13 @@ export class PartyOrdersService {
             unitPrice: i.unitPrice,
             totalValue: this.lineTotal(i),
             modelNo: i.modelNo,
+            // Whoever typed/picked this line's Model No on this save gets
+            // credited, same "by X - date" the list shows - matches the
+            // dedicated carpenter self-service endpoint's own attribution
+            // (updateItemModelNo below), just reachable from the regular
+            // order form too now.
+            modelNoUpdatedById: i.modelNo?.trim() ? userId : undefined,
+            modelNoUpdatedAt: i.modelNo?.trim() ? new Date() : undefined,
             referenceImageId: i.referenceImageId,
           })),
         },
@@ -507,6 +562,7 @@ export class PartyOrdersService {
   async update(id: string, dto: UpdatePartyOrderDto, userId: string, force = false, viewerRole?: Role) {
     const current = await this.findOne(id);
     const usingItems = Boolean(dto.items?.length) && itemsDiffer(current.items ?? [], dto.items!);
+    const resolvedItems = dto.items?.length ? await this.resolveItemModelNos(dto.items) : undefined;
 
     // force is only ever honored for SUPERADMIN - Admin still gets the
     // normal safety block even if a stale/tampered request sends force=true.
@@ -557,7 +613,7 @@ export class PartyOrdersService {
         deliveryStatus: dto.deliveryStatus,
         items: usingItems
           ? {
-              create: dto.items!.map((i) => ({
+              create: resolvedItems!.map((i) => ({
                 productId: i.productId,
                 productName: i.productName,
                 finish: i.finish,
@@ -570,6 +626,8 @@ export class PartyOrdersService {
                 unitPrice: i.unitPrice,
                 totalValue: this.lineTotal(i),
                 modelNo: i.modelNo,
+                modelNoUpdatedById: i.modelNo?.trim() ? userId : undefined,
+                modelNoUpdatedAt: i.modelNo?.trim() ? new Date() : undefined,
                 referenceImageId: i.referenceImageId,
               })),
             }

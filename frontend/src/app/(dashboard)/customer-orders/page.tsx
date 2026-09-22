@@ -28,6 +28,7 @@ import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { useForceable } from '@/hooks/useForceable';
 import { sharePdf } from '@/lib/sharePdf';
 import { buildCustomerOrderMessage } from '@/lib/orderMessages';
+import { OrderWorkEntriesPanel, type StagedWorkEntry } from '@/components/OrderWorkEntriesPanel';
 import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -102,6 +103,9 @@ function CustomerOrdersContent() {
   const [items, setItems] = useState<ItemRow[]>([{ ...emptyRow }]);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Staged Work Entries for a brand-new order (not saved yet) - submitted
+  // right after the order itself is created. See OrderWorkEntriesPanel.
+  const [pendingWorkEntries, setPendingWorkEntries] = useState<StagedWorkEntry[]>([]);
 
   function addItemRow() {
     setItems((rows) => [...rows, { ...emptyRow }]);
@@ -152,6 +156,7 @@ function CustomerOrdersContent() {
     setForm(emptyForm);
     setItems([{ ...emptyRow }]);
     setFormError(null);
+    setPendingWorkEntries([]);
     setFormOpen(true);
   }
 
@@ -171,25 +176,29 @@ function CustomerOrdersContent() {
     setItems(
       order.items?.length
         ? order.items.map((i) => ({
-            productId: i.productId ?? undefined,
-            productName: i.productName,
-            category: i.category ?? '',
-            size: i.size ?? '',
-            sizeUnit: i.sizeUnit ?? '',
-            color: i.color ?? '',
-            quantity: String(i.quantity),
-            unitPrice: String(i.unitPrice),
-            referenceImageId: i.referenceImageId ?? undefined,
-            referenceImage: i.referenceImage ?? null,
-          }))
+          productId: i.productId ?? undefined,
+          modelNo: i.product?.modelNo ?? undefined,
+          productName: i.productName,
+          category: i.category ?? '',
+          size: i.size ?? '',
+          sizeUnit: i.sizeUnit ?? '',
+          color: i.color ?? '',
+          quantity: String(i.quantity),
+          unitPrice: String(i.unitPrice),
+          referenceImageId: i.referenceImageId ?? undefined,
+          referenceImage: i.referenceImage ?? null,
+        }))
         : [{ ...emptyRow, productName: order.product, unitPrice: String(order.orderValue ?? 0) }],
     );
     setFormError(null);
+    setPendingWorkEntries([]);
     setFormOpen(true);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // saveAndNew: after a successful CREATE (never on an edit), reopen a
+  // fresh blank "New Order" form instead of closing - for entering several
+  // orders back to back without reopening the modal each time.
+  async function handleSubmit(saveAndNew = false) {
     setFormError(null);
     setSubmitting(true);
     const payload = {
@@ -206,6 +215,7 @@ function CustomerOrdersContent() {
         .filter((i) => i.productName && i.unitPrice)
         .map((i) => ({
           productId: i.productId,
+          modelNo: i.modelNo || undefined,
           productName: i.productName,
           category: i.category || undefined,
           size: i.size || undefined,
@@ -225,10 +235,19 @@ function CustomerOrdersContent() {
         if (editing) {
           await api.patch(`/customer-orders/${editing.id}${force ? '?force=true' : ''}`, payload);
         } else {
-          await api.post('/customer-orders', payload);
+          const created = await api.post<CustomerOrder>('/customer-orders', payload);
+          // Staged Work Entries only exist for a brand-new order - submit
+          // them now that it has a real id, best-effort one at a time.
+          for (const entry of pendingWorkEntries) {
+            await api.post(`/customer-orders/${created.id}/work-entries`, entry).catch(() => undefined);
+          }
         }
-        setFormOpen(false);
         mutate();
+        if (saveAndNew && !editing) {
+          openCreate();
+        } else {
+          setFormOpen(false);
+        }
       } catch (err) {
         setFormError(err instanceof ApiError ? err.message : 'Failed to save order');
         throw err;
@@ -357,7 +376,7 @@ function CustomerOrdersContent() {
                   'Order Value': o.orderValue ?? 0,
                   Received: o.totalReceived ?? 0,
                   Balance: o.balanceAmount ?? 0,
-                  'Model No': o.cotTrack ?? '',
+                  'Model No': (o.items ?? []).map((i) => i.product?.modelNo).filter(Boolean).join(', ') || o.cotTrack || '',
                   Status: o.deliveryStatus,
                   'Delivery Date': formatDate(o.actualDeliveryDate),
                 })),
@@ -393,10 +412,8 @@ function CustomerOrdersContent() {
             <tr>
               <th>Order ID</th>
               <th>Job No.</th>
-              <th>Model No</th>
               <th>Date</th>
               <th>Customer</th>
-              <th>Image</th>
               <th>Product</th>
               <th>Order Value</th>
               <th>Balance</th>
@@ -408,14 +425,14 @@ function CustomerOrdersContent() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={12} className="text-center py-8 text-brand-400">
+                <td colSpan={10} className="text-center py-8 text-brand-400">
                   Loading orders...
                 </td>
               </tr>
             )}
             {!isLoading && data?.length === 0 && (
               <tr>
-                <td colSpan={12} className="text-center py-8 text-brand-400">
+                <td colSpan={10} className="text-center py-8 text-brand-400">
                   No orders found
                 </td>
               </tr>
@@ -424,41 +441,14 @@ function CustomerOrdersContent() {
               <tr key={order.id}>
                 <td className="font-medium">{order.orderId}</td>
                 <td className="text-brand-600 text-xs font-medium whitespace-nowrap">{order.jobNumber ?? '-'}</td>
-                <td className="text-xs whitespace-nowrap">
-                  {order.cotTrack ? (
-                    <>
-                      <span className="font-medium text-ink">{order.cotTrack}</span>
-                      {order.modelNoUpdatedBy && (
-                        <div className="text-brand-400 text-[10px] flex items-center gap-1">
-                          <span>
-                            by {order.modelNoUpdatedBy.name} &middot; {formatDate(order.modelNoUpdatedAt)}
-                          </span>
-                          {hasRole('SUPERADMIN') && (
-                            <button
-                              type="button"
-                              className="text-brand-500 hover:underline"
-                              title="Correct this date"
-                              onClick={() => setEditModelNoDateFor(order)}
-                            >
-                              Edit
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-brand-400 italic">Not Updated</span>
-                  )}
-                </td>
                 <td>{formatDate(order.orderDate)}</td>
                 <td>
                   {order.customerName}
                   {order.phone && <div className="text-xs text-brand-400">{order.phone}</div>}
                 </td>
                 <td>
-                  <OrderThumbnail order={order} />
+                  <ProductCell order={order} />
                 </td>
-                <td className="max-w-[220px] truncate">{order.product}</td>
                 <td>{formatCurrency(order.orderValue ?? 0)}</td>
                 <td>
                   {formatCurrency(order.balanceAmount ?? 0)} <BalanceBadge amount={order.balanceAmount ?? 0} />
@@ -512,7 +502,13 @@ function CustomerOrdersContent() {
 
       {formOpen && (
         <Modal title={editing ? `Edit Order ${editing.orderId}` : 'New Customer Order'} onClose={() => setFormOpen(false)} wide>
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit(false);
+            }}
+            className="space-y-3"
+          >
             <FormRow>
               <FormField label="Order ID">
                 <input
@@ -565,6 +561,7 @@ function CustomerOrdersContent() {
                           modelNo={row.modelNo ?? ''}
                           onChangeModelNo={(v) => updateItemRow(idx, { modelNo: v })}
                           onSelect={(p) => selectItemProduct(idx, p)}
+                          placeholder="Catalog Model No."
                         />
                         <input
                           className="input"
@@ -693,6 +690,12 @@ function CustomerOrdersContent() {
               </FormField>
             </FormRow>
 
+            <OrderWorkEntriesPanel
+              basePath="customer-orders"
+              orderId={editing?.id}
+              pendingEntries={pendingWorkEntries}
+              onPendingChange={setPendingWorkEntries}
+            />
 
             {formError && <p className="text-sm text-red-600">{formError}</p>}
 
@@ -700,8 +703,13 @@ function CustomerOrdersContent() {
               <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>
                 Cancel
               </button>
+              {!editing && (
+                <button type="button" disabled={submitting} className="btn-secondary" onClick={() => handleSubmit(true)}>
+                  {submitting ? 'Saving...' : 'Save & New'}
+                </button>
+              )}
               <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Create Order'}
+                {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Done'}
               </button>
             </div>
           </form>
@@ -779,10 +787,10 @@ function CustomerOrdersContent() {
           onOpenWhatsAppPicker={
             hasRole('SUPERADMIN')
               ? () =>
-                  openWhatsApp({
-                    recipientName: assignItemTarget.item.productName,
-                    defaultMessage: `New work assigned - ${assignItemTarget.item.productName} for order ${assignItemTarget.order.orderId} (${assignItemTarget.order.customerName}).`,
-                  })
+                openWhatsApp({
+                  recipientName: assignItemTarget.item.productName,
+                  defaultMessage: `New work assigned - ${assignItemTarget.item.productName} for order ${assignItemTarget.order.orderId} (${assignItemTarget.order.customerName}).`,
+                })
               : undefined
           }
           onClose={() => setAssignItemTarget(null)}
@@ -961,20 +969,76 @@ function AssignProductionPickerModal({
 // Table thumbnail - prefers each line's own product image; falls back to
 // the order-wide gallery selection for older orders that only ever used
 // that. Shows the first image plus a "+N" badge when there's more than one.
-function OrderThumbnail({ order }: { order: CustomerOrder }) {
-  const itemImages = (order.items ?? []).map((i) => i.referenceImage).filter((img): img is GalleryImage => Boolean(img));
+// A name-or-role display fallback: every account normally has a name, but
+// this guards the edge case anyway.
+function attributedTo(person?: { name?: string | null; role?: string | null } | null): string | null {
+  if (!person) return null;
+  return person.name || person.role || null;
+}
+
+// Merged "Model No / Image / Product" column - one compact cell (thumbnail +
+// product name) with the full per-line detail (each product's own image,
+// name, and Catalog Model No, or the order-level tracking Model No as a
+// fallback) revealed in a hover popup instead of three separate columns.
+function ProductCell({ order }: { order: CustomerOrder }) {
+  const items = order.items ?? [];
+  const itemImages = items.map((i) => i.referenceImage).filter((img): img is GalleryImage => Boolean(img));
   const images = itemImages.length > 0 ? itemImages : order.galleryImages ?? [];
-  if (images.length === 0) return <span className="text-brand-300 text-xs">-</span>;
   const first = images[0];
+  const itemModelNos = items.filter((i) => i.product?.modelNo);
+
   return (
-    <div className="relative inline-block">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={assetUrl(first.url) ?? ''} alt={first.fileName} className="h-10 w-10 object-cover rounded-md border border-brand-200" />
-      {images.length > 1 && (
-        <span className="absolute -bottom-1 -right-1 bg-brand-700 text-white text-[9px] leading-none rounded-full h-4 w-4 flex items-center justify-center">
-          +{images.length - 1}
-        </span>
+    <div className="relative inline-flex items-center gap-2 group max-w-[260px]">
+      {first ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={assetUrl(first.url) ?? ''} alt={first.fileName} className="h-10 w-10 shrink-0 object-cover rounded-md border border-brand-200" />
+      ) : (
+        <span className="h-10 w-10 shrink-0 rounded-md border border-dashed border-brand-200" />
       )}
+      <div className="min-w-0">
+        <p className="truncate">{order.product}</p>
+        {itemModelNos.length > 0 ? (
+          <p className="text-[11px] text-ink font-medium truncate">{itemModelNos.map((i) => i.product!.modelNo).join(', ')}</p>
+        ) : order.cotTrack ? (
+          <p className="text-[11px] text-ink font-medium truncate">{order.cotTrack}</p>
+        ) : (
+          <p className="text-[11px] text-brand-400 italic">Not Updated</p>
+        )}
+      </div>
+
+      {/* Hover-only detail box: every line's own image, name, Model No and
+          who set it - stays hidden until this cell is hovered. */}
+      <div className="hidden group-hover:block absolute z-20 top-full left-0 mt-1 bg-white border border-brand-200 rounded-lg shadow-xl p-4 w-max max-w-[440px] text-sm space-y-3">
+        {items.length > 0 ? (
+          items.map((item) => (
+            <div key={item.id} className="flex items-start gap-3">
+              {item.referenceImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={assetUrl(item.referenceImage.url) ?? ''} alt={item.referenceImage.fileName} className="h-20 w-20 object-cover rounded-md border border-brand-100 shrink-0" />
+              ) : (
+                <span className="h-20 w-20 shrink-0 rounded-md border border-dashed border-brand-200" />
+              )}
+              <div>
+                <p className="font-medium text-ink">{item.productName}</p>
+                {item.product?.modelNo ? (
+                  <>
+                    <p className="text-brand-600 font-medium">{item.product.modelNo}</p>
+                    {item.modelNoSetBy && (
+                      <p className="text-brand-400 text-xs">
+                        by {attributedTo(item.modelNoSetBy)} &middot; {formatDate(item.modelNoSetAt)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-brand-400 italic">No Catalog Model No</p>
+                )}
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="text-brand-500">{order.product}</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1037,6 +1101,8 @@ function OrderDetailsModal({ order, onClose }: { order: CustomerOrder; onClose: 
             ))}
           </div>
         </div>
+
+        <OrderWorkEntriesPanel basePath="customer-orders" orderId={order.id} />
 
         <div className="flex justify-end pt-2">
           <button className="btn-secondary" onClick={onClose}>

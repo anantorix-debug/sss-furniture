@@ -1,12 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useForceable } from '@/hooks/useForceable';
-import { formatDate } from '@/lib/format';
+import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { Modal } from '@/components/Modal';
@@ -232,6 +233,12 @@ interface StockProductionRow {
   color: string;
   quantity: string;
   carpenterId: string;
+  // Per-unit rate paid to the worker for this piece - was previously
+  // always sent as 0 with no way to set it here, so every Stock Production
+  // work item's Work Value stayed ₹0 forever unless someone deleted and
+  // re-added it. Optional: leave blank to record it later (see the Work
+  // List's own "Edit Price" action on each item).
+  price: string;
 }
 
 const emptyStockProductionRow: StockProductionRow = {
@@ -243,6 +250,7 @@ const emptyStockProductionRow: StockProductionRow = {
   color: '',
   quantity: '1',
   carpenterId: '',
+  price: '',
 };
 
 // Multiple different products in one go - each row becomes its own
@@ -295,7 +303,7 @@ function StartStockProductionModal({ onClose, onCreated }: { onClose: () => void
             sizeUnit: r.sizeUnit || undefined,
             color: r.color || undefined,
             quantity: r.quantity ? parseInt(r.quantity, 10) : 1,
-            price: 0,
+            price: r.price ? parseFloat(r.price) : 0,
             productId: r.template?.id,
             notes: notes || undefined,
             notifyWhatsapp: false,
@@ -347,7 +355,7 @@ function StartStockProductionModal({ onClose, onCreated }: { onClose: () => void
                   Remove
                 </button>
               </div>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                 <input className="input text-sm" placeholder="Size" value={row.size} onChange={(e) => updateRow(idx, { size: e.target.value })} />
                 <UnitSelect id={`stock-production-size-unit-${idx}`} className="input text-sm" value={row.sizeUnit} onChange={(v) => updateRow(idx, { sizeUnit: v })} />
                 <input
@@ -357,6 +365,15 @@ function StartStockProductionModal({ onClose, onCreated }: { onClose: () => void
                   placeholder="Qty"
                   value={row.quantity}
                   onChange={(e) => updateRow(idx, { quantity: e.target.value })}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="input text-sm"
+                  placeholder="Rate (₹/unit)"
+                  value={row.price}
+                  onChange={(e) => updateRow(idx, { price: e.target.value })}
                 />
                 <select className="input text-sm" value={row.carpenterId} onChange={(e) => updateRow(idx, { carpenterId: e.target.value })}>
                   <option value="">Unassigned</option>
@@ -470,7 +487,7 @@ function OverviewTab() {
             <table className="table-shell">
               <thead>
                 <tr>
-                  <th>Model No</th>
+                  <th>Piece Model No</th>
                   <th>Product</th>
                   <th>Stage</th>
                   <th>Employee</th>
@@ -577,7 +594,7 @@ function VerificationTab() {
         <table className="table-shell">
           <thead>
             <tr>
-              <th>Model No</th>
+              <th>Piece Model No</th>
               <th>Product</th>
               <th>Qty</th>
               <th>Type</th>
@@ -835,7 +852,7 @@ function DispatchTab() {
         <table className="table-shell">
           <thead>
             <tr>
-              <th>Model No</th>
+              <th>Piece Model No</th>
               <th>Product</th>
               <th>Completed</th>
               <th>Progress</th>
@@ -1470,15 +1487,87 @@ function HistoricalTab() {
   );
 }
 
-// --- Page shell: one menu entry, four tabs ---
+// --- Work Entries tab: every manually-entered "who worked this order" ---
+// record across every Customer/Party Order, in one place to monitor -
+// entries themselves are still only added/removed from the order's own
+// form (spec: "where monitoring workers production show on that screen").
 
-type TopTab = 'overview' | 'dispatch' | 'verification' | 'historical';
+interface OrderWorkEntryRow {
+  id: string;
+  workerName: string;
+  workDescription?: string | null;
+  workerPrice: number;
+  extraPrice?: number | null;
+  workDate: string;
+  orderType: 'CUSTOMER' | 'PARTY';
+  orderRef: { id: string; label: string; sub: string } | null;
+}
+
+function WorkEntriesTab() {
+  const { data: entries, isLoading } = useSWR<OrderWorkEntryRow[]>('/order-work-entries', fetcher);
+
+  return (
+    <div className="card overflow-x-auto">
+      <table className="table-shell">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Worker</th>
+            <th>Work</th>
+            <th className="text-right">Price</th>
+            <th className="text-right">Extra</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {isLoading && (
+            <tr>
+              <td colSpan={6} className="text-center py-8 text-brand-400">
+                Loading work entries...
+              </td>
+            </tr>
+          )}
+          {!isLoading && (!entries || entries.length === 0) && (
+            <tr>
+              <td colSpan={6} className="text-center py-8 text-brand-400">
+                No work entries recorded yet.
+              </td>
+            </tr>
+          )}
+          {entries?.map((e) => (
+            <tr key={e.id}>
+              <td>
+                {e.orderRef ? (
+                  <Link href={`/${e.orderType === 'CUSTOMER' ? 'customer-orders' : 'party-orders'}/${e.orderRef.id}`} className="text-brand-600 hover:underline">
+                    {e.orderRef.label}
+                  </Link>
+                ) : (
+                  <span className="text-brand-400">Deleted order</span>
+                )}
+                {e.orderRef && <div className="text-xs text-brand-400">{e.orderRef.sub}</div>}
+                <div className="text-[10px] text-brand-400">{e.orderType === 'CUSTOMER' ? 'Customer Order' : 'Party Order'}</div>
+              </td>
+              <td className="font-medium">{e.workerName}</td>
+              <td className="text-brand-500">{e.workDescription || '-'}</td>
+              <td className="text-right">{formatCurrency(e.workerPrice)}</td>
+              <td className="text-right">{e.extraPrice ? formatCurrency(e.extraPrice) : '-'}</td>
+              <td className="whitespace-nowrap">{formatDate(e.workDate)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// --- Page shell: one menu entry, five tabs ---
+
+type TopTab = 'overview' | 'dispatch' | 'verification';
 
 const TOP_TABS: { key: TopTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'dispatch', label: 'Dispatch Pipeline' },
   { key: 'verification', label: 'Ready for Verification' },
-  { key: 'historical', label: 'Historical Entry' },
 ];
 
 function ProductionControlContent() {
@@ -1510,7 +1599,6 @@ function ProductionControlContent() {
       {tab === 'overview' && <OverviewTab />}
       {tab === 'dispatch' && <DispatchTab />}
       {tab === 'verification' && <VerificationTab />}
-      {tab === 'historical' && <HistoricalTab />}
     </div>
   );
 }

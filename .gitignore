@@ -9,3 +9,4 @@ coverage/
 .wwebjs_cache/
 *.tsbuildinfo
 backend/uploads/
+frontend/public/build-version.txt

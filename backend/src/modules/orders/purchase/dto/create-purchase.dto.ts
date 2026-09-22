@@ -53,6 +53,12 @@ export class CreatePurchaseDto {
   @IsOptional()
   notes?: string;
 
+  // Picked from the existing Gallery (by Model No) - see the schema comment
+  // on Purchase.referenceImageId. Never a fresh upload.
+  @IsString()
+  @IsOptional()
+  referenceImageId?: string | null;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

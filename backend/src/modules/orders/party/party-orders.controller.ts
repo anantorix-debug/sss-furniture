@@ -12,11 +12,16 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { Role } from '../../../common/enums/role.enum';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
+import { OrderWorkEntriesService } from '../work-entries/order-work-entries.service';
+import { CreateOrderWorkEntryDto } from '../work-entries/dto/create-order-work-entry.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('party-orders')
 export class PartyOrdersController {
-  constructor(private service: PartyOrdersService) {}
+  constructor(
+    private service: PartyOrdersService,
+    private workEntries: OrderWorkEntriesService,
+  ) {}
 
   @Get()
   findAll(
@@ -250,6 +255,26 @@ export class PartyOrdersController {
   @Delete(':id/payments/:paymentId')
   removePayment(@Param('id') id: string, @Param('paymentId') paymentId: string) {
     return this.service.removePayment(id, paymentId);
+  }
+
+  // Manual "who worked this order" log - see OrderWorkEntriesService. Shown
+  // and entered directly on this order's own edit form, not a separate page.
+  @Roles(Role.ADMIN)
+  @Get(':id/work-entries')
+  listWorkEntries(@Param('id') id: string) {
+    return this.workEntries.listForPartyOrder(id);
+  }
+
+  @Roles(Role.ADMIN)
+  @Post(':id/work-entries')
+  addWorkEntry(@Param('id') id: string, @Body() dto: CreateOrderWorkEntryDto, @CurrentUser() user: AuthUser) {
+    return this.workEntries.createForPartyOrder(id, dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Delete(':id/work-entries/:entryId')
+  removeWorkEntry(@Param('entryId') entryId: string, @CurrentUser() user: AuthUser) {
+    return this.workEntries.remove(entryId, user.userId);
   }
 
   // Per-line Model No entry for the new multi-line flow (ADMIN - see the

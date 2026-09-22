@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError, getAccessToken } from '@/lib/api';
+import { api, ApiError, getAccessToken, assetUrl } from '@/lib/api';
 import { RoleGate } from '@/components/RoleGate';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
@@ -192,6 +192,7 @@ function PurchaseOrdersContent() {
         <table className="table-shell">
           <thead>
             <tr>
+              <th>Image</th>
               <th>Purchase No</th>
               <th>Date</th>
               <th>Supplier</th>
@@ -204,20 +205,31 @@ function PurchaseOrdersContent() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-brand-400">
+                <td colSpan={8} className="text-center py-8 text-brand-400">
                   Loading purchases...
                 </td>
               </tr>
             )}
             {!isLoading && data?.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-brand-400">
+                <td colSpan={8} className="text-center py-8 text-brand-400">
                   No purchases yet
                 </td>
               </tr>
             )}
             {data?.map((purchase) => (
               <tr key={purchase.id}>
+                <td>
+                  {purchase.referenceImage ? (
+                    <img
+                      src={assetUrl(purchase.referenceImage.url) ?? ''}
+                      alt={purchase.referenceImage.fileName}
+                      className="h-9 w-9 object-cover rounded-md border border-brand-200"
+                    />
+                  ) : (
+                    <span className="text-brand-300 text-xs">-</span>
+                  )}
+                </td>
                 <td className="font-medium">{purchase.purchaseNumber}</td>
                 <td>{formatDate(purchase.purchaseDate)}</td>
                 <td>{purchase.supplier?.name}</td>

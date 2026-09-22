@@ -94,6 +94,12 @@ function CarpenterDetailContent() {
 
   const [statusTarget, setStatusTarget] = useState<{ id: string; current: WorkStatus } | null>(null);
   const [statusForm, setStatusForm] = useState<{ status: WorkStatus; qcNote: string }>({ status: 'ASSIGNED', qcNote: '' });
+  // Corrects a work item's rate after the fact - the only way to fix a
+  // past entry that was created with no price (e.g. via Stock Production
+  // before it had a Rate field), since there was previously no way to edit
+  // an existing item's price at all, only delete and re-add it.
+  const [priceTarget, setPriceTarget] = useState<{ id: string; productName: string } | null>(null);
+  const [priceForm, setPriceForm] = useState({ price: '', extra: '0' });
 
   const [issueTarget, setIssueTarget] = useState<{ id: string; productName: string } | null>(null);
   const [issueRows, setIssueRows] = useState<IssueRow[]>([{ ...emptyIssueRow }]);
@@ -169,6 +175,27 @@ function CarpenterDetailContent() {
       mutate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update status');
+    }
+  }
+
+  function openPriceModal(workId: string, productName: string, currentPrice?: number, currentExtra?: number) {
+    setPriceTarget({ id: workId, productName });
+    setPriceForm({ price: currentPrice != null ? String(currentPrice) : '', extra: currentExtra != null ? String(currentExtra) : '0' });
+  }
+
+  async function submitPrice(e: React.FormEvent) {
+    e.preventDefault();
+    if (!priceTarget) return;
+    setError(null);
+    try {
+      await api.patch(`/carpenter-work-items/${priceTarget.id}`, {
+        price: parseFloat(priceForm.price) || 0,
+        extra: parseFloat(priceForm.extra) || 0,
+      });
+      setPriceTarget(null);
+      mutate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update price');
     }
   }
 
@@ -355,9 +382,14 @@ Please confirm receipt.`,
                       Notify
                     </button>
                     {canEdit && (
-                      <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => removeWork(w.id)}>
-                        Remove
-                      </button>
+                      <>
+                        <button className="text-brand-600 hover:underline text-xs" onClick={() => openPriceModal(w.id, w.productName, w.price, w.extra)}>
+                          {w.price ? 'Edit Price' : 'Set Price'}
+                        </button>
+                        <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => removeWork(w.id)}>
+                          Remove
+                        </button>
+                      </>
                     )}
                   </td>
                 </tr>
@@ -542,6 +574,45 @@ Please confirm receipt.`,
               </button>
               <button type="submit" className="btn-primary">
                 Update Status
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {priceTarget && (
+        <Modal title={`Set Rate - ${priceTarget.productName}`} onClose={() => setPriceTarget(null)}>
+          <form onSubmit={submitPrice} className="space-y-3">
+            <div>
+              <label className="label">Rate (₹ per unit)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="input"
+                required
+                value={priceForm.price}
+                onChange={(e) => setPriceForm((f) => ({ ...f, price: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="label">Extra (₹, optional)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="input"
+                value={priceForm.extra}
+                onChange={(e) => setPriceForm((f) => ({ ...f, extra: e.target.value }))}
+              />
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" className="btn-secondary" onClick={() => setPriceTarget(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary">
+                Save
               </button>
             </div>
           </form>

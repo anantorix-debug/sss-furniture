@@ -42,6 +42,11 @@ export interface Payment {
 export interface CustomerOrderItem {
   id: string;
   productId?: string | null;
+  product?: { modelNo?: string | null } | null;
+  // Who linked/typed this line's own Catalog Model No, and when - shown
+  // next to it, per product line.
+  modelNoSetBy?: { id: string; name?: string | null; role?: string | null } | null;
+  modelNoSetAt?: string | null;
   productName: string;
   category?: string | null;
   size?: string | null;
@@ -81,7 +86,7 @@ export interface CustomerOrder {
   assignedEmployee?: { id: string; name: string } | null;
   assignedBy?: { id: string; name: string } | null;
   assignedAt?: string | null;
-  modelNoUpdatedBy?: { id: string; name: string } | null;
+  modelNoUpdatedBy?: { id: string; name?: string | null; role?: string | null } | null;
   modelNoUpdatedAt?: string | null;
   // Omitted entirely for Carpenter/Polisher viewers - `paymentStatus`
   // (a non-monetary SETTLED/DUE flag) is all they get instead.
@@ -109,6 +114,8 @@ export interface PartyOrderItem {
   details?: string | null;
   qty: number;
   modelNo?: string | null;
+  modelNoUpdatedBy?: { id: string; name?: string | null; role?: string | null } | null;
+  modelNoUpdatedAt?: string | null;
   // Stock-first split, computed at create/edit time.
   stockReservedQty?: number;
   productionQty?: number;
@@ -146,7 +153,7 @@ export interface PartyOrder {
   assignedEmployee?: { id: string; name: string } | null;
   assignedBy?: { id: string; name: string } | null;
   assignedAt?: string | null;
-  modelNoUpdatedBy?: { id: string; name: string } | null;
+  modelNoUpdatedBy?: { id: string; name?: string | null; role?: string | null } | null;
   modelNoUpdatedAt?: string | null;
   // Omitted entirely for Carpenter/Polisher viewers - `paymentStatus`
   // (a non-monetary SETTLED/DUE flag) is all they get instead.
@@ -278,6 +285,18 @@ export interface SupplierPayment {
 export interface SupplierDetail extends SupplierSummary {
   purchases: SupplierPurchase[];
   payments: SupplierPayment[];
+}
+
+// Manual, historical "who worked this order" log - shown/entered directly
+// on the Customer/Party Order form (see OrderWorkEntry on the backend).
+export interface OrderWorkEntry {
+  id: string;
+  workerName: string;
+  workDescription?: string | null;
+  workerPrice: number;
+  extraPrice?: number | null;
+  workDate: string;
+  createdAt: string;
 }
 
 export type WorkerType = 'CARPENTER' | 'POLISHER' | 'CARVER';
@@ -670,6 +689,9 @@ export interface Purchase {
   purchaseDate: string;
   notes?: string | null;
   items: PurchaseItem[];
+  // Picked from the existing Gallery (by Model No) - see GalleryImage.
+  referenceImageId?: string | null;
+  referenceImage?: GalleryImage | null;
   totalValue: number;
   createdBy?: { name: string };
   approvedBy?: { name: string } | null;

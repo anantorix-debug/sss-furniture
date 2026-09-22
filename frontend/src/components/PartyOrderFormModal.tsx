@@ -12,6 +12,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import { ModelNoPicker } from './ModelNoPicker';
 import { GalleryGrid } from './GalleryGrid';
+import { OrderWorkEntriesPanel, type StagedWorkEntry } from './OrderWorkEntriesPanel';
 import { assetUrl } from '@/lib/api';
 import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product, GalleryImage } from '@/types';
 
@@ -90,13 +91,13 @@ export function PartyOrderFormModal({
   const [form, setForm] = useState(
     editing
       ? {
-          orderDate: toDateInputValue(editing.orderDate),
-          shopId: editing.shopId ?? '',
-          phone: editing.phone ?? '',
-          courierTrack: editing.courierTrack ?? '',
-          actualDeliveryDate: toDateInputValue(editing.actualDeliveryDate),
-          deliveryStatus: editing.deliveryStatus,
-        }
+        orderDate: toDateInputValue(editing.orderDate),
+        shopId: editing.shopId ?? '',
+        phone: editing.phone ?? '',
+        courierTrack: editing.courierTrack ?? '',
+        actualDeliveryDate: toDateInputValue(editing.actualDeliveryDate),
+        deliveryStatus: editing.deliveryStatus,
+      }
       : { ...emptyForm, shopId: initialShopId ?? '' },
   );
   const [addingShop, setAddingShop] = useState(false);
@@ -136,6 +137,9 @@ export function PartyOrderFormModal({
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [itemImagePickerIdx, setItemImagePickerIdx] = useState<number | null>(null);
+  // Staged Work Entries for a brand-new order (not saved yet) - submitted
+  // right after the order itself is created. See OrderWorkEntriesPanel.
+  const [pendingWorkEntries, setPendingWorkEntries] = useState<StagedWorkEntry[]>([]);
 
   function updateItem(idx: number, patch: Partial<ItemForm>) {
     setItems((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -168,8 +172,10 @@ export function PartyOrderFormModal({
 
   const orderTotal = items.reduce((sum, i) => sum + (parseInt(i.qty, 10) || 1) * (parseFloat(i.unitPrice) || 0), 0);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // saveAndNew: after a successful CREATE (never on an edit), reset this
+  // same form back to blank instead of closing - for entering several
+  // orders back to back without reopening the modal each time.
+  async function handleSubmit(saveAndNew = false) {
     setFormError(null);
     const validItems = items.filter((i) => i.productName.trim());
     if (validItems.length === 0) {
@@ -203,10 +209,22 @@ export function PartyOrderFormModal({
         if (editing) {
           await api.patch(`/party-orders/${editing.id}${force ? '?force=true' : ''}`, payload);
         } else {
-          await api.post('/party-orders', payload);
+          const created = await api.post<PartyOrder>('/party-orders', payload);
+          // Staged Work Entries only exist for a brand-new order - submit
+          // them now that it has a real id, best-effort one at a time.
+          for (const entry of pendingWorkEntries) {
+            await api.post(`/party-orders/${created.id}/work-entries`, entry).catch(() => undefined);
+          }
         }
         onSaved();
-        onClose();
+        if (saveAndNew && !editing) {
+          setForm({ ...emptyForm, shopId: initialShopId ?? '' });
+          setItems([{ ...emptyItem }]);
+          setPendingWorkEntries([]);
+          setFormError(null);
+        } else {
+          onClose();
+        }
       } catch (err) {
         setFormError(err instanceof ApiError ? err.message : 'Failed to save order');
         throw err;
@@ -218,7 +236,13 @@ export function PartyOrderFormModal({
 
   return (
     <Modal title={editing ? 'Edit Party Order' : 'New Party Order'} onClose={onClose} wide>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSubmit(false);
+        }}
+        className="space-y-4"
+      >
         <FormRow>
           <FormField label="Order Date">
             <input
@@ -239,7 +263,8 @@ export function PartyOrderFormModal({
                   setAddingShop(true);
                   return;
                 }
-                setForm((f) => ({ ...f, shopId: e.target.value }));
+                const shop = shops?.find((s) => s.id === e.target.value);
+                setForm((f) => ({ ...f, shopId: e.target.value, phone: shop?.contactPhone ?? shop?.whatsapp ?? f.phone }));
               }}
             >
               <option value="">Select shop...</option>
@@ -324,6 +349,7 @@ export function PartyOrderFormModal({
                     modelNo={item.modelNo ?? ''}
                     onChangeModelNo={(v) => updateItem(idx, { modelNo: v })}
                     onSelect={(p) => selectItemProduct(idx, p)}
+                    placeholder="Catalog Model No."
                   />
                   <input
                     className="input"
@@ -436,14 +462,26 @@ export function PartyOrderFormModal({
           </select>
         </FormField>
 
+        <OrderWorkEntriesPanel
+          basePath="party-orders"
+          orderId={editing?.id}
+          pendingEntries={pendingWorkEntries}
+          onPendingChange={setPendingWorkEntries}
+        />
+
         {formError && <p className="text-sm text-red-600">{formError}</p>}
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>
             Cancel
           </button>
+          {!editing && (
+            <button type="button" disabled={submitting} className="btn-secondary" onClick={() => handleSubmit(true)}>
+              {submitting ? 'Saving...' : 'Save & New'}
+            </button>
+          )}
           <button type="submit" disabled={submitting} className="btn-primary">
-            {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Create Order'}
+            {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Done'}
           </button>
         </div>
       </form>

@@ -21,27 +21,80 @@ function productSummary(order: PartyOrder): string {
   return `${order.items[0].productName} +${order.items.length - 1} more`;
 }
 
-function modelNoSummary(order: PartyOrder): string {
-  if (order.items.length === 0) return order.cotNo ?? '';
-  if (order.items.length === 1) return order.items[0].modelNo ?? '';
-  const withModelNo = order.items.filter((i) => i.modelNo).length;
-  return withModelNo === 0 ? '' : `${withModelNo}/${order.items.length} assigned`;
+// A name-or-role display fallback: every account normally has a name, but
+// this guards the edge case anyway.
+function attributedTo(person?: { name?: string | null; role?: string | null } | null): string | null {
+  if (!person) return null;
+  return person.name || person.role || null;
 }
 
 // Card thumbnail - each line's own product image; shows the first plus a
 // "+N" badge when there's more than one.
-function OrderThumbnail({ order }: { order: PartyOrder }) {
-  const images = order.items.map((i) => i.referenceImage).filter((img): img is GalleryImage => Boolean(img));
-  if (images.length === 0) return null;
+// Merged "Model No / Image / Product" block - one compact row (thumbnail +
+// product names + Model Nos) with the full per-line detail (each product's
+// own image, name, Model No, and who set it) revealed in a hover popup,
+// instead of three separate pieces of the card.
+function ProductCell({ order }: { order: PartyOrder }) {
+  const items = order.items;
+  const images = items.map((i) => i.referenceImage).filter((img): img is GalleryImage => Boolean(img));
   const first = images[0];
+  const itemModelNos = items.filter((i) => i.modelNo);
+
   return (
-    <div className="relative shrink-0">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={assetUrl(first.url) ?? ''} alt={first.fileName} className="h-12 w-12 object-cover rounded-md border border-brand-200" />
-      {images.length > 1 && (
-        <span className="absolute -bottom-1 -right-1 bg-brand-700 text-white text-[9px] leading-none rounded-full h-4 w-4 flex items-center justify-center">
-          +{images.length - 1}
-        </span>
+    <div className="relative flex items-start gap-2 min-w-0 group">
+      {first ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={assetUrl(first.url) ?? ''} alt={first.fileName} className="h-12 w-12 shrink-0 object-cover rounded-md border border-brand-200" />
+      ) : (
+        <span className="h-12 w-12 shrink-0 rounded-md border border-dashed border-brand-200" />
+      )}
+      <div className="min-w-0">
+        <p className="font-semibold text-brand-900 truncate">{order.shopName}</p>
+        {order.phone && <p className="text-xs text-brand-400">{order.phone}</p>}
+        <p className="text-brand-600 text-xs font-medium mt-0.5">{order.jobNumber ?? '-'}</p>
+        <p className="text-xs text-ink mt-1 truncate">
+          {productSummary(order)}
+          {items.length > 1 && <span className="text-brand-400"> &middot; {items.length} line(s)</span>}
+        </p>
+        {itemModelNos.length > 0 ? (
+          <p className="text-[11px] font-medium text-ink truncate">{itemModelNos.map((i) => i.modelNo).join(', ')}</p>
+        ) : order.cotNo ? (
+          <p className="text-[11px] font-medium text-ink truncate">{order.cotNo}</p>
+        ) : (
+          <p className="text-[11px] text-brand-400 italic">Model No not updated</p>
+        )}
+      </div>
+
+      {/* Hover-only detail box: every line's own image, name, Model No and
+          who set it - stays hidden until this block is hovered. */}
+      {items.length > 0 && (
+        <div className="hidden group-hover:block absolute z-20 top-full left-0 mt-1 bg-white border border-brand-200 rounded-lg shadow-xl p-4 w-max max-w-[440px] text-sm space-y-3">
+          {items.map((item) => (
+            <div key={item.id} className="flex items-start gap-3">
+              {item.referenceImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={assetUrl(item.referenceImage.url) ?? ''} alt={item.referenceImage.fileName} className="h-20 w-20 object-cover rounded-md border border-brand-100 shrink-0" />
+              ) : (
+                <span className="h-20 w-20 shrink-0 rounded-md border border-dashed border-brand-200" />
+              )}
+              <div>
+                <p className="font-medium text-ink">{item.productName}</p>
+                {item.modelNo ? (
+                  <>
+                    <p className="text-brand-600 font-medium">{item.modelNo}</p>
+                    {item.modelNoUpdatedBy && (
+                      <p className="text-brand-400 text-xs">
+                        by {attributedTo(item.modelNoUpdatedBy)} &middot; {formatDate(item.modelNoUpdatedAt)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-brand-400 italic">Model No not updated</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -297,27 +350,8 @@ export function PartyOrderCard({
     <Link href={`/party-orders/${order.id}`} className="card p-5 hover:shadow-md transition-shadow block">
       {notice && <p className="text-xs text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-2 py-1.5 mb-2">{notice}</p>}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-start gap-2 min-w-0">
-          <OrderThumbnail order={order} />
-          <div className="min-w-0">
-            <p className="font-semibold text-brand-900 truncate">{order.shopName}</p>
-            {order.phone && <p className="text-xs text-brand-400">{order.phone}</p>}
-            <p className="text-brand-600 text-xs font-medium mt-0.5">{order.jobNumber ?? '-'}</p>
-          </div>
-        </div>
+        <ProductCell order={order} />
         <StatusInline order={order} onUpdated={() => onUpdated?.()} />
-      </div>
-
-      <div className="mt-2 text-sm text-ink">
-        {productSummary(order)}
-        {order.items.length > 0 && <span className="text-xs text-brand-400"> · {order.items.length} line(s)</span>}
-      </div>
-      <div className="text-xs mt-0.5">
-        {modelNoSummary(order) ? (
-          <span className="font-medium text-ink">Model {modelNoSummary(order)}</span>
-        ) : (
-          <span className="text-brand-400 italic">Model No not updated</span>
-        )}
       </div>
 
       <div className="grid grid-cols-2 gap-2 mt-4 text-sm">

@@ -3,11 +3,12 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, assetUrl } from '@/lib/api';
 import { Modal } from './Modal';
+import { GalleryGrid } from './GalleryGrid';
 import { formatCurrency } from '@/lib/format';
 import { boardFeetPreview } from '@/lib/boardFeet';
-import type { Purchase, RawMaterial, SupplierSummary } from '@/types';
+import type { Purchase, GalleryImage, RawMaterial, SupplierSummary } from '@/types';
 
 interface ItemRow {
   rawMaterialId: string;
@@ -32,12 +33,18 @@ export function PurchaseFormModal({
   initialMaterialId,
   onClose,
   onSaved,
+  inline,
 }: {
   editing: Purchase | null;
   initialSupplierId?: string;
   initialMaterialId?: string;
   onClose: () => void;
   onSaved: () => void;
+  // Renders the exact same form without the Modal overlay - a plain bordered
+  // block meant to sit inline in a page's own layout (e.g. the Supplier
+  // detail page's "+ New Purchase", opened in place under the Purchases
+  // list instead of as a popup).
+  inline?: boolean;
 }) {
   const { data: suppliers } = useSWR<SupplierSummary[]>('/suppliers', fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
@@ -74,6 +81,12 @@ export function PurchaseFormModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Model reference image - picked from the existing Gallery (by Model No),
+  // not a fresh upload. Just a foreign key that rides along with the rest
+  // of the form's payload on save, same as every other field here.
+  const [referenceImage, setReferenceImage] = useState<GalleryImage | null>(editing?.referenceImage ?? null);
+  const [galleryPickerOpen, setGalleryPickerOpen] = useState(false);
+
   function addItemRow() {
     setItems((rows) => [...rows, { ...emptyRow }]);
   }
@@ -106,6 +119,7 @@ export function PurchaseFormModal({
         supplierId,
         purchaseDate,
         notes: notes || undefined,
+        referenceImageId: referenceImage?.id ?? null,
         items: items
           .filter((i) => i.rawMaterialId && i.unitPrice && (rowIsBoardFeet(i) ? i.thicknessIn && i.widthIn && i.lengthFt && i.pieces : i.quantity))
           .map((i) => {
@@ -134,7 +148,7 @@ export function PurchaseFormModal({
       if (editing) {
         await api.patch(`/purchase-orders/${editing.id}`, payload);
       } else {
-        await api.post('/purchase-orders', payload);
+        await api.post<Purchase>('/purchase-orders', payload);
       }
       onSaved();
       onClose();
@@ -145,9 +159,10 @@ export function PurchaseFormModal({
     }
   }
 
-  return (
-    <Modal title={editing ? `Edit ${editing.purchaseNumber}` : 'New Purchase'} onClose={onClose} wide>
-      <form onSubmit={handleSubmit} className="space-y-3">
+  const title = editing ? `Edit ${editing.purchaseNumber}` : 'New Purchase';
+
+  const form = (
+    <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Supplier</label>
@@ -240,17 +255,82 @@ export function PurchaseFormModal({
           <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
 
+        <div>
+          <label className="label">Model Image</label>
+          {referenceImage ? (
+            <div className="relative h-16 w-16">
+              <img src={assetUrl(referenceImage.url) ?? ''} alt={referenceImage.fileName} className="h-16 w-16 object-cover rounded-md border border-brand-200" />
+              <button
+                type="button"
+                onClick={() => setReferenceImage(null)}
+                className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-red-600 text-white text-[10px] leading-4 text-center"
+                aria-label="Remove image"
+              >
+                &times;
+              </button>
+              {referenceImage.modelNo && <p className="text-[11px] text-brand-500 mt-1">{referenceImage.modelNo}</p>}
+            </div>
+          ) : (
+            <button type="button" className="text-brand-600 text-xs hover:underline" onClick={() => setGalleryPickerOpen(true)}>
+              Select from Gallery
+            </button>
+          )}
+        </div>
+
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
+          {!inline && (
+            <button type="button" className="btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+          )}
           <button type="submit" disabled={submitting} className="btn-primary">
             {submitting ? 'Saving...' : 'Save Purchase'}
           </button>
         </div>
       </form>
+  );
+
+  const galleryPicker = galleryPickerOpen && (
+    <Modal title="Select Model Image" onClose={() => setGalleryPickerOpen(false)} wide>
+      <GalleryGrid
+        canManage={false}
+        selectable
+        selectedIds={referenceImage ? [referenceImage.id] : []}
+        onToggle={(image) => {
+          setReferenceImage(image);
+          setGalleryPickerOpen(false);
+        }}
+      />
+      <div className="flex justify-end pt-3">
+        <button type="button" className="btn-secondary text-sm" onClick={() => setGalleryPickerOpen(false)}>
+          Close
+        </button>
+      </div>
     </Modal>
+  );
+
+  // Inline mode (Supplier detail page) is a permanent block, not something
+  // that opens/closes - no X/Cancel, since there's nothing to dismiss.
+  if (inline) {
+    return (
+      <>
+        <div className="card p-5 border-2 border-accent/30">
+          <h2 className="font-semibold text-brand-900 mb-3">{title}</h2>
+          {form}
+        </div>
+        {galleryPicker}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Modal title={title} onClose={onClose} wide>
+        {form}
+      </Modal>
+      {galleryPicker}
+    </>
   );
 }

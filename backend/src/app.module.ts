@@ -16,6 +16,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { CustomerOrdersModule } from './modules/orders/customer/customer-orders.module';
 import { PartyOrdersModule } from './modules/orders/party/party-orders.module';
+import { OrderWorkEntriesModule } from './modules/orders/work-entries/order-work-entries.module';
 import { PurchasesModule } from './modules/orders/purchase/purchases.module';
 import { ProductsModule } from './modules/inventory/products/products.module';
 import { RawMaterialsModule } from './modules/inventory/raw-materials/raw-materials.module';
@@ -37,6 +38,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     UsersModule,
     WhatsappModule,
     AuditModule,
+    OrderWorkEntriesModule,
     CarpenterModule,
     DashboardModule,
     PaymentsModule,

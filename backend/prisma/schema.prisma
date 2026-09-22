@@ -224,6 +224,8 @@ model User {
   purchasesCreated             Purchase[]
   purchasesApproved            Purchase[]             @relation("PurchaseApprovedBy")
   purchasesReceived            Purchase[]             @relation("PurchaseReceivedBy")
+  orderWorkEntries              OrderWorkEntry[]
+  customerOrderItemsModelNoSet  CustomerOrderItem[]    @relation("CustomerOrderItemModelNoSetBy")
   auditLogs                    AuditLog[]
   qualityChecks                QualityCheck[]
   dispatchRecords              DispatchRecord[]
@@ -327,6 +329,7 @@ model CustomerOrder {
   items              CustomerOrderItem[]
   workItems          CarpenterWorkItem[]
   finishedStockItems FinishedStockItem[]
+  workEntries        OrderWorkEntry[]
 
   @@map("customer_orders")
 }
@@ -357,6 +360,14 @@ model CustomerOrderItem {
   color       String?
   quantity    Int           @default(1)
   unitPrice   Decimal       @db.Decimal(12, 2)
+
+  // Who linked/typed this line's own Catalog Model No (via the order
+  // form's search box) and when - shown next to it on the list, same
+  // "by X - date" pattern as CustomerOrder.cotTrack/modelNoUpdatedBy, just
+  // per product line instead of once per order.
+  modelNoSetById String?
+  modelNoSetBy   User?     @relation("CustomerOrderItemModelNoSetBy", fields: [modelNoSetById], references: [id], onDelete: SetNull)
+  modelNoSetAt   DateTime?
 
   // Stock-first allocation split, computed once at create/edit time by
   // StockAllocationService.allocate() - see CustomerOrdersService.
@@ -456,8 +467,39 @@ model PartyOrder {
   updatedAt   DateTime            @updatedAt
   payments    PartyOrderPayment[]
   items       PartyOrderItem[]
+  workEntries OrderWorkEntry[]
 
   @@map("party_orders")
+}
+
+// Manual, historical log of "who worked on this order" - entered by hand by
+// an Admin/Super Admin directly on the Customer/Party Order form (not a
+// separate page or tab), independent of the CarpenterWorkItem production
+// pipeline above. workerName is free text (not a User FK - the person doing
+// the work may not have a system login at all), so entries are an
+// append-only ledger: never edited in place, only added or removed, same as
+// a payment ledger row.
+model OrderWorkEntry {
+  id String @id @default(cuid())
+
+  customerOrderId String?
+  customerOrder   CustomerOrder? @relation(fields: [customerOrderId], references: [id], onDelete: Cascade)
+  partyOrderId    String?
+  partyOrder      PartyOrder?    @relation(fields: [partyOrderId], references: [id], onDelete: Cascade)
+
+  workerName      String
+  workDescription String?
+  workerPrice     Decimal  @db.Decimal(12, 2)
+  extraPrice      Decimal? @db.Decimal(12, 2)
+  workDate        DateTime
+
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([customerOrderId])
+  @@index([partyOrderId])
+  @@map("order_work_entries")
 }
 
 // Multi-line Party Order support (spec: "no fixed limit such as 5 or 10
@@ -912,6 +954,7 @@ model GalleryImage {
   // WhatsApp confirmation images for the whole order, not per line).
   customerOrderItemReferences CustomerOrderItem[] @relation("CustomerOrderItemReferenceImage")
   partyOrderItemReferences    PartyOrderItem[]    @relation("PartyOrderItemReferenceImage")
+  purchaseReferences          Purchase[]          @relation("PurchaseReferenceImage")
 
   @@map("gallery_images")
 }
@@ -1060,6 +1103,13 @@ model Purchase {
   whatsappStatus PurchaseWhatsappStatus?
   whatsappSentAt DateTime?
   whatsappError  String?
+
+  // Picked from the existing Gallery (by Model No), not a fresh upload -
+  // same "link to an existing GalleryImage" pattern as CustomerOrderItem/
+  // PartyOrderItem's own referenceImage. Purely a visual reference for what
+  // was purchased; never affects stock, payable, or the purchase's own PDF.
+  referenceImageId String?
+  referenceImage   GalleryImage? @relation("PurchaseReferenceImage", fields: [referenceImageId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

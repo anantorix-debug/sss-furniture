@@ -15,6 +15,15 @@ export class CustomerOrderItemDto {
   @MinLength(1)
   productName: string;
 
+  // The Model No typed/picked in the order form's search box (see
+  // ModelNoPicker). A match sets productId directly and this is mostly
+  // redundant; a non-match (brand-new Model No) has no productId yet - the
+  // service registers it as a new catalogue Product right here (Admin/
+  // Super Admin only, since only they can reach create/update at all).
+  @IsString()
+  @IsOptional()
+  modelNo?: string;
+
   // Auto-filled from the selected Model No's saved product data when one
   // exists; left for manual entry (or blank) for a brand-new/custom
   // product with no existing stock record.
@@ -109,9 +118,15 @@ export class CreateCustomerOrderDto {
   @IsOptional()
   galleryImageIds?: string[];
 
-  // Model No (cotTrack) is intentionally NOT settable here - only the
-  // production employee assigned to this order can set it, via the
-  // dedicated /model-no endpoint.
+  // Model No (cotTrack). Historically only the assigned production
+  // employee could set this, via the dedicated /model-no endpoint (still
+  // there, unchanged, for that self-service flow). This route is Admin+
+  // only already (see the controller), so accepting it here too just
+  // extends who can set it - an Admin/Super Admin can now also enter it
+  // directly on the order form, same as a Carpenter can.
+  @IsString()
+  @IsOptional()
+  cotTrack?: string;
 
   @IsDateString()
   @IsOptional()

@@ -107,6 +107,53 @@ export class CustomerOrdersService {
     private whatsapp: WhatsappService,
   ) {}
 
+  // The item-level Model No field (ModelNoPicker on the frontend) is a
+  // search-and-autofill box: picking an existing match already sets
+  // productId directly, so there's nothing to do here for those lines. A
+  // typed Model No with NO match is treated as a brand-new catalogue
+  // product - Admin/Super Admin (the only roles that can reach create/
+  // update at all, see the controller) can register it right from the
+  // order form instead of it being silently discarded. `upsert` on the
+  // unique modelNo makes this race-safe: two lines (or two concurrent
+  // saves) with the same new Model No land on the same Product row instead
+  // of erroring or duplicating. An existing Product's catalogue data is
+  // never overwritten by an order line's snapshot values (`update: {}`).
+  private async resolveItemModelNos<T extends CustomerOrderItemDto>(
+    items: T[],
+    userId: string,
+  ): Promise<(T & { modelNoSetById?: string; modelNoSetAt?: Date })[]> {
+    const pending = items.filter((i) => !i.productId && i.modelNo?.trim());
+    const resolved = new Map<string, string>();
+    for (const i of pending) {
+      const modelNo = i.modelNo!.trim();
+      if (resolved.has(modelNo)) continue;
+      const product = await this.prisma.product.upsert({
+        where: { modelNo },
+        update: {},
+        create: {
+          modelNo,
+          name: i.productName,
+          category: i.category,
+          modelSize: i.size,
+          sizeUnit: i.sizeUnit,
+          materialFinish: i.color,
+          retailPrice: i.unitPrice,
+          unit: 'Nos',
+        },
+      });
+      resolved.set(modelNo, product.id);
+    }
+
+    return items.map((i) => {
+      const modelNo = i.modelNo?.trim();
+      const productId = !i.productId && modelNo && resolved.has(modelNo) ? resolved.get(modelNo) : i.productId;
+      // Stamp who/when this line's Model No was set whenever one is
+      // present on this save - same "by X - date" the list shows next to
+      // it, per product line.
+      return { ...i, productId, ...(modelNo ? { modelNoSetById: userId, modelNoSetAt: new Date() } : {}) };
+    });
+  }
+
   // When line items are given, they're the source of truth for `product`
   // (a joined summary) and `orderValue` (their sum) - the plain fields stay
   // the single-product path for orders that don't need a line-item list.
@@ -148,12 +195,12 @@ export class CustomerOrdersService {
         where,
         include: {
           payments: true,
-          items: { include: { referenceImage: true } },
+          items: { include: { referenceImage: true, product: { select: { modelNo: true } }, modelNoSetBy: { select: { id: true, name: true, role: true } } } },
           galleryImages: { include: { galleryImage: true } },
           createdBy: { select: { id: true, name: true } },
           assignedEmployee: { select: { id: true, name: true } },
           assignedBy: { select: { id: true, name: true } },
-          modelNoUpdatedBy: { select: { id: true, name: true } },
+          modelNoUpdatedBy: { select: { id: true, name: true, role: true } },
         },
         orderBy: { orderDate: 'desc' },
         ...(paginated ? toSkipTake(page, limit) : {}),
@@ -170,12 +217,12 @@ export class CustomerOrdersService {
       where: { id },
       include: {
         payments: { orderBy: { date: 'asc' } },
-        items: { include: { referenceImage: true } },
+        items: { include: { referenceImage: true, product: { select: { modelNo: true } }, modelNoSetBy: { select: { id: true, name: true, role: true } } } },
         galleryImages: { include: { galleryImage: true } },
         createdBy: { select: { id: true, name: true } },
         assignedEmployee: { select: { id: true, name: true } },
         assignedBy: { select: { id: true, name: true } },
-        modelNoUpdatedBy: { select: { id: true, name: true } },
+        modelNoUpdatedBy: { select: { id: true, name: true, role: true } },
       },
     });
     if (!order) throw new NotFoundException('Customer order not found');
@@ -187,6 +234,7 @@ export class CustomerOrdersService {
     if (existing) throw new ConflictException('An order with this Order ID already exists');
 
     const jobNumber = await generateJobNumber(this.prisma);
+    const resolvedItems = dto.items?.length ? await this.resolveItemModelNos(dto.items, userId) : undefined;
     const { product, orderValue } = this.deriveFromItems(dto);
 
     const order = await this.prisma.customerOrder.create({
@@ -203,10 +251,13 @@ export class CustomerOrdersService {
         orderValue,
         actualDeliveryDate: dto.actualDeliveryDate ? new Date(dto.actualDeliveryDate) : undefined,
         deliveryStatus: dto.deliveryStatus,
+        cotTrack: dto.cotTrack?.trim() || undefined,
+        modelNoUpdatedById: dto.cotTrack?.trim() ? userId : undefined,
+        modelNoUpdatedAt: dto.cotTrack?.trim() ? new Date() : undefined,
         createdById: userId,
-        items: dto.items?.length
+        items: resolvedItems?.length
           ? {
-              create: dto.items.map((i) => ({
+              create: resolvedItems.map((i) => ({
                 productId: i.productId,
                 productName: i.productName,
                 category: i.category,
@@ -215,6 +266,8 @@ export class CustomerOrdersService {
                 color: i.color,
                 quantity: i.quantity ?? 1,
                 unitPrice: i.unitPrice,
+                modelNoSetById: i.modelNoSetById,
+                modelNoSetAt: i.modelNoSetAt,
                 referenceImageId: i.referenceImageId,
               })),
             }
@@ -223,7 +276,7 @@ export class CustomerOrdersService {
           ? { create: dto.galleryImageIds.map((galleryImageId) => ({ galleryImageId })) }
           : undefined,
       },
-      include: { payments: true, items: { include: { referenceImage: true } } },
+      include: { payments: true, items: { include: { referenceImage: true, product: { select: { modelNo: true } }, modelNoSetBy: { select: { id: true, name: true, role: true } } } } },
     });
 
     await this.allocateItems(order.id, order.jobNumber ?? order.orderId, order.items, userId);
@@ -291,6 +344,7 @@ export class CustomerOrdersService {
     // reallocate stock. Only do that expensive (and sometimes blocked-by-
     // dispatch) dance when the line contents actually changed.
     const usingItems = Boolean(dto.items?.length) && itemsDiffer(current.items ?? [], dto.items!);
+    const resolvedItems = dto.items?.length ? await this.resolveItemModelNos(dto.items, userId) : undefined;
     if (usingItems) {
       // Release whatever stock/production this order previously held
       // before replacing its lines - refuses (ConflictException) if any of
@@ -333,9 +387,12 @@ export class CustomerOrdersService {
         orderValue: derived.orderValue,
         actualDeliveryDate: dto.actualDeliveryDate ? new Date(dto.actualDeliveryDate) : undefined,
         deliveryStatus: dto.deliveryStatus,
+        cotTrack: dto.cotTrack?.trim() || undefined,
+        modelNoUpdatedById: dto.cotTrack?.trim() ? userId : undefined,
+        modelNoUpdatedAt: dto.cotTrack?.trim() ? new Date() : undefined,
         items: usingItems
           ? {
-              create: dto.items!.map((i) => ({
+              create: resolvedItems!.map((i) => ({
                 productId: i.productId,
                 productName: i.productName,
                 category: i.category,
@@ -344,6 +401,8 @@ export class CustomerOrdersService {
                 color: i.color,
                 quantity: i.quantity ?? 1,
                 unitPrice: i.unitPrice,
+                modelNoSetById: i.modelNoSetById,
+                modelNoSetAt: i.modelNoSetAt,
                 referenceImageId: i.referenceImageId,
               })),
             }
@@ -352,7 +411,7 @@ export class CustomerOrdersService {
           ? { create: dto.galleryImageIds!.map((galleryImageId) => ({ galleryImageId })) }
           : undefined,
       },
-      include: { payments: true, items: { include: { referenceImage: true } } },
+      include: { payments: true, items: { include: { referenceImage: true, product: { select: { modelNo: true } }, modelNoSetBy: { select: { id: true, name: true, role: true } } } } },
     });
 
     if (usingItems) {

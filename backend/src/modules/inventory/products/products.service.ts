@@ -252,6 +252,15 @@ export class ProductsService {
 
     await this.assertUnique({ modelNo: trimmed }, id);
     await this.prisma.product.update({ where: { id }, data: { modelNo: trimmed } });
+    // Whoever actually set this Model No - Admin via the order form, or a
+    // Carpenter here via their own piece - is who every order line linking
+    // to this product should credit, not whoever created the line
+    // originally. Every CustomerOrderItem across every order sharing this
+    // catalog product gets re-attributed to this call's user.
+    await this.prisma.customerOrderItem.updateMany({
+      where: { productId: id },
+      data: { modelNoSetById: userId, modelNoSetAt: new Date() },
+    });
     await this.audit.log({
       userId,
       action: 'MODEL_NO_UPDATED',
