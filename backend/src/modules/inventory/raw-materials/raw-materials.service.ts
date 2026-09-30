@@ -691,7 +691,7 @@ export class RawMaterialsService {
           <td style="text-align:right">${escapeHtml(qty)}</td>
           <td style="text-align:right">${m.lengthFt != null ? `${m.lengthFt} ft` : '-'}</td>
           <td style="text-align:right">${m.widthIn != null ? `${m.widthIn} in` : '-'}</td>
-          <td style="text-align:right">${m.amount != null ? `Rs. ${Number(m.amount).toLocaleString('en-IN')}` : '-'}</td>
+          <td style="text-align:right">${m.amount != null ? `₹${Number(m.amount).toLocaleString('en-IN')}` : '-'}</td>
           <td>${escapeHtml(supplierOrEmployee)}</td>
           <td>${escapeHtml(role)}</td>
           <td>${escapeHtml(reference)}</td>
@@ -766,8 +766,8 @@ export class RawMaterialsService {
       <div><div class="label">Purchased</div><div class="value">${material.totalPurchased} ${escapeHtml(material.unit)}</div></div>
       <div><div class="label">Consumed</div><div class="value">${material.totalConsumed} ${escapeHtml(material.unit)}</div></div>
       <div><div class="label">Adjusted</div><div class="value">${material.totalAdjusted} ${escapeHtml(material.unit)}</div></div>
-      ${material.purchaseRate != null ? `<div><div class="label">Purchase Rate</div><div class="value">Rs. ${Number(material.purchaseRate).toLocaleString('en-IN')}</div></div>` : ''}
-      ${material.stockValue != null ? `<div><div class="label">Stock Value</div><div class="value">Rs. ${Number(material.stockValue).toLocaleString('en-IN')}</div></div>` : ''}
+      ${material.purchaseRate != null ? `<div><div class="label">Purchase Rate</div><div class="value">₹${Number(material.purchaseRate).toLocaleString('en-IN')}</div></div>` : ''}
+      ${material.stockValue != null ? `<div><div class="label">Stock Value</div><div class="value">₹${Number(material.stockValue).toLocaleString('en-IN')}</div></div>` : ''}
     </div>
     ${sectionHtml}
   </div>

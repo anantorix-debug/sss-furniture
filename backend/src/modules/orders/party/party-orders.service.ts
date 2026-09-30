@@ -949,9 +949,9 @@ export class PartyOrdersService {
           <td>${escapeHtml(l.polishColor)}</td>
           <td>${escapeHtml(l.size)}</td>
           <td>${escapeHtml(l.pattern)}</td>
-          ${isEmployee ? '' : `<td style="text-align:right">${l.price != null ? `Rs. ${l.price.toLocaleString('en-IN')}` : '-'}</td>`}
+          ${isEmployee ? '' : `<td style="text-align:right">${l.price != null ? `₹${l.price.toLocaleString('en-IN')}` : '-'}</td>`}
           <td>${escapeHtml(l.modelNo)}</td>
-          ${isEmployee ? '' : `<td style="text-align:right">Rs. ${l.value.toLocaleString('en-IN')}</td>`}
+          ${isEmployee ? '' : `<td style="text-align:right">₹${l.value.toLocaleString('en-IN')}</td>`}
         </tr>`;
       })
       .join('');
@@ -975,7 +975,7 @@ export class PartyOrdersService {
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>
-  body { font-family: Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; background: #fff; }
+  body { font-family: 'Noto Sans', Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; background: #fff; }
   .banner { width: 100%; display: block; }
   .body { padding: 20px 28px 28px; }
   .title { text-align: center; margin: 10px 0 18px; }
@@ -1019,9 +1019,9 @@ export class PartyOrdersService {
       isEmployee
         ? ''
         : `<div class="summary">
-      <div><div class="label">Total Order Value</div><div class="value">Rs. ${totalOrderValue.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Received</div><div class="value" style="color:#15803d">Rs. ${received.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">Rs. ${balance.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Total Order Value</div><div class="value">₹${totalOrderValue.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Received</div><div class="value" style="color:#15803d">₹${received.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">₹${balance.toLocaleString('en-IN')}</div></div>
     </div>`
     }
     ${deliveryBlock}
@@ -1079,9 +1079,9 @@ export class PartyOrdersService {
           ${
             hide
               ? ''
-              : `<td style="text-align:right">Rs. ${Number(o.totalAmount ?? 0).toLocaleString('en-IN')}</td>
-          <td style="text-align:right">Rs. ${Number(o.receivedAmount ?? 0).toLocaleString('en-IN')}</td>
-          <td style="text-align:right">Rs. ${Number(o.balanceAmount ?? 0).toLocaleString('en-IN')}</td>`
+              : `<td style="text-align:right">₹${Number(o.totalAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${Number(o.receivedAmount ?? 0).toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${Number(o.balanceAmount ?? 0).toLocaleString('en-IN')}</td>`
           }
           <td>${escapeHtml(String(o.deliveryStatus).replace(/_/g, ' '))}</td>
         </tr>`,
@@ -1106,9 +1106,9 @@ export class PartyOrdersService {
       ? ''
       : `<div class="summary">
       <div><div class="label">Total Orders</div><div class="value">${orders.length}</div></div>
-      <div><div class="label">Total Value</div><div class="value">Rs. ${filtered.reduce((s, o) => s + Number(o.totalAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">Rs. ${filtered.reduce((s, o) => s + Number(o.receivedAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Balance Due</div><div class="value" style="color:#b91c1c">Rs. ${filtered.reduce((s, o) => s + Number(o.balanceAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Total Value</div><div class="value">₹${filtered.reduce((s, o) => s + Number(o.totalAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">₹${filtered.reduce((s, o) => s + Number(o.receivedAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Balance Due</div><div class="value" style="color:#b91c1c">₹${filtered.reduce((s, o) => s + Number(o.balanceAmount ?? 0), 0).toLocaleString('en-IN')}</div></div>
     </div>`;
 
     const html = `<!DOCTYPE html>
@@ -1234,7 +1234,7 @@ export class PartyOrdersService {
     const supplyRows = buildSupplyRows(filteredOrders, hide);
     const ledgerRows = buildPaymentLedger(filteredOrders, summary.totalValue, hide);
 
-    const rupees = (n: number) => `Rs. ${n.toLocaleString('en-IN')}`;
+    const rupees = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
     const supplyBody = supplyRows
       .map(

@@ -128,7 +128,7 @@ export class PaymentsService {
           <td>${escapeHtml(SOURCE_LABEL[p.source])}</td>
           <td>${escapeHtml(p.relatedName)}</td>
           <td>${p.direction === 'IN' ? 'In' : 'Out'}</td>
-          <td style="text-align:right">Rs. ${p.amount.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${p.amount.toLocaleString('en-IN')}</td>
           <td>${p.mode ? escapeHtml(p.mode) : '-'}</td>
           <td>${p.note ? escapeHtml(p.note) : '-'}</td>
         </tr>`,
@@ -145,7 +145,7 @@ export class PaymentsService {
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>
-  body { font-family: Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; }
+  body { font-family: 'Noto Sans', Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; }
   .header { background: #80011f; color: #fff; padding: 24px 28px; }
   .header h1 { margin: 0; font-size: 20px; }
   .header p { margin: 4px 0 0; font-size: 12px; color: #f5c2c9; }
@@ -168,9 +168,9 @@ export class PaymentsService {
   <div class="body">
     ${filterParts.length ? `<div class="filters"><strong>Filters:</strong> ${filterParts.map((f) => escapeHtml(f as string)).join(' &middot; ')}</div>` : ''}
     <div class="summary">
-      <div><div class="label">Money In</div><div class="value" style="color:#15803d">Rs. ${result.totalIn.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Money Out</div><div class="value" style="color:#b91c1c">Rs. ${result.totalOut.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Net</div><div class="value">Rs. ${result.net.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Money In</div><div class="value" style="color:#15803d">₹${result.totalIn.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Money Out</div><div class="value" style="color:#b91c1c">₹${result.totalOut.toLocaleString('en-IN')}</div></div>
+      <div><div class="label">Net</div><div class="value">₹${result.net.toLocaleString('en-IN')}</div></div>
     </div>
     <table>
       <thead><tr><th>Date</th><th>Source</th><th>Party</th><th>Direction</th><th style="text-align:right">Amount</th><th>Mode</th><th>Note</th></tr></thead>

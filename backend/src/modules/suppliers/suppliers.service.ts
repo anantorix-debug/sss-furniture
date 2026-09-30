@@ -194,9 +194,9 @@ export class SuppliersService {
         (s) => `<tr>
           <td>${escapeHtml(s.name)}</td>
           <td>${escapeHtml(s.phone ?? '-')}</td>
-          <td style="text-align:right">Rs. ${s.totalPurchaseValue.toLocaleString('en-IN')}</td>
-          <td style="text-align:right">Rs. ${s.totalPaid.toLocaleString('en-IN')}</td>
-          <td style="text-align:right">Rs. ${s.balance.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${s.totalPurchaseValue.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${s.totalPaid.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">₹${s.balance.toLocaleString('en-IN')}</td>
           <td>${s.status === 'DUE' ? 'Due' : 'Settled'}</td>
         </tr>`,
       )
@@ -238,12 +238,7 @@ export class SuppliersService {
       orderBy: { purchaseDate: 'desc' },
     });
 
-    // "Rs." not "₹" - the server's headless Chromium (used to render every
-    // PDF) renders the ₹ glyph as a blank box regardless of font-family, so
-    // every PDF in this app uses the plain-text "Rs." prefix instead (see
-    // PurchasesService.buildPdfHtml, the original place this was worked
-    // around).
-    const rupees = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const rupees = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     // One row per PurchaseItem (not one per Purchase) - each line has its
     // own Quantity/Unit/Purchase Rate, per the required column set.
@@ -286,6 +281,30 @@ export class SuppliersService {
       )
       .join('');
 
+    // Solid-fill phone icon (Heroicons "phone", 24x24 viewBox) - an inline
+    // SVG path, not a Unicode glyph, so it renders correctly regardless of
+    // what fonts are installed on the PDF-rendering server (see the ₹ glyph
+    // issue this app hit with text-based symbols).
+    const phoneIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:5px"><path d="M2.25 6.75c0 8.284 6.716 15 15 15h1.5a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>`;
+
+    // Two-column letterhead: supplier identity (with a "Supplier Name"
+    // eyebrow label, since "SSS Furniture" now occupies the corner where a
+    // reader would otherwise expect the issuing company's own name) on the
+    // left, "SSS Furniture" right-aligned on the right - same maroon
+    // .header band as every other report, just restructured for this one
+    // statement rather than via the shared renderReportHeader().
+    const header = `<div class="header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px">
+      <div>
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#f5c2c9;margin-bottom:4px">Supplier Name</div>
+        <h1 style="margin:0 0 8px">${escapeHtml(supplier.name)}</h1>
+        ${supplier.phone ? `<div style="font-size:12px;color:#f5c2c9">${phoneIcon}${escapeHtml(supplier.phone)}</div>` : ''}
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <div style="font-size:17px;font-weight:bold">SSS Furniture</div>
+        <div style="font-size:10.5px;color:#f5c2c9;margin-top:2px">Retail &middot; Wholesale</div>
+      </div>
+    </div>`;
+
     const summaryBlock = `<div class="summary">
       <div><div class="label">Total Purchases</div><div class="value">${rupees(supplier.totalPurchaseValue)}</div></div>
       <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">${rupees(supplier.totalPaid)}</div></div>
@@ -298,9 +317,8 @@ export class SuppliersService {
 <html><head><meta charset="utf-8" />
 <style>${REPORT_PDF_STYLES}</style></head>
 <body>
-  ${renderReportHeader(supplier.name)}
+  ${header}
   <div class="body">
-    <p style="margin:0 0 14px;color:#6b7280;font-size:12px">${supplier.phone ? escapeHtml(supplier.phone) : ''}</p>
     <h3 style="font-size:13px;margin:0 0 8px">Purchase Summary</h3>
     ${summaryBlock}
     <h3 style="font-size:13px;margin:18px 0 8px">Purchase Details</h3>
@@ -315,13 +333,15 @@ export class SuppliersService {
         ${paymentRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No payments</td></tr>'}
         ${
           supplier.payments.length > 0
-            ? `<tr style="font-weight:bold"><td colspan="2">Total Paid</td><td style="text-align:right">${rupees(supplier.totalPaid)}</td><td></td><td></td></tr>`
+            ? `<tr style="font-weight:bold"><td colspan="2">Total Paid</td><td style="text-align:right">${rupees(supplier.totalPaid)}</td><td></td><td></td></tr>
+               <tr style="font-weight:bold;border-top:2px solid #1f2933"><td colspan="3">Balance Payable</td><td style="text-align:right">${rupees(supplier.balance)}</td><td></td></tr>`
             : ''
         }
       </tbody>
     </table>
     <h3 style="font-size:13px;margin:18px 0 8px">Financial Summary</h3>
     ${summaryBlock}
+    <p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #e3e1d9;font-size:11.5px;color:#6b7280;font-style:italic">Thank you for your continued partnership with SSS Furniture.</p>
     ${renderGeneratedFooter(itemCount, 'purchase item')}
   </div>
 </body></html>`;

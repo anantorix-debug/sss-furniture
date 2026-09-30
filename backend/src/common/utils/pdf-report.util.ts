@@ -9,8 +9,13 @@ export function escapeHtml(s: string): string {
 }
 
 // Shared <style> block - same visual language as the existing Payments PDF.
+// 'Noto Sans' must stay first in the stack - the server's headless Chromium
+// renders the ₹ glyph as a blank box under Arial/Helvetica/the default
+// sans-serif fallback (confirmed by direct screenshot test), and Noto Sans
+// (installed via `apt-get install fonts-noto-core` on the VPS) is the one
+// font on this server confirmed to have it.
 export const REPORT_PDF_STYLES = `
-  body { font-family: Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; }
+  body { font-family: 'Noto Sans', Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; }
   .header { background: #80011f; color: #fff; padding: 24px 28px; }
   .header h1 { margin: 0; font-size: 20px; }
   .header p { margin: 4px 0 0; font-size: 12px; color: #f5c2c9; }
@@ -28,9 +33,9 @@ export const REPORT_PDF_STYLES = `
   .generated { margin-top: 18px; font-size: 10.5px; color: #9ca3af; }
 `;
 
-// The "SSS Company" branded title bar every report opens with.
+// The "SSS Furniture" branded title bar every report opens with.
 export function renderReportHeader(title: string): string {
-  return `<div class="header"><h1>${escapeHtml(title)}</h1><p>SSS Company</p></div>`;
+  return `<div class="header"><h1>${escapeHtml(title)}</h1><p>SSS Furniture</p></div>`;
 }
 
 // The "Applied Filters" line - only the filters actually set are shown,

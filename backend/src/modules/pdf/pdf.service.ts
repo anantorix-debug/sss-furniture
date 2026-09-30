@@ -30,7 +30,7 @@ export class PdfService {
               displayHeaderFooter: true,
               headerTemplate: '<span></span>',
               footerTemplate:
-                '<div style="width:100%;font-size:9px;color:#9ca3af;text-align:center;font-family:Arial,Helvetica,sans-serif;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
+                '<div style="width:100%;font-size:9px;color:#9ca3af;text-align:center;font-family:&quot;Noto Sans&quot;,Arial,Helvetica,sans-serif;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
             }
           : {}),
       });

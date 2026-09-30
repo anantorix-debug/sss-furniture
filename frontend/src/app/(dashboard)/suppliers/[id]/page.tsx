@@ -12,6 +12,9 @@ import { StatCard } from '@/components/StatCard';
 import { RoleGate } from '@/components/RoleGate';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { PurchaseFormModal } from '@/components/PurchaseFormModal';
+import { WhatsAppModal } from '@/components/WhatsAppModal';
+import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
+import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { PURCHASE_STATUS_LABEL } from '@/types';
 import type { SupplierDetail, SupplierPayment, Purchase, PurchaseStatus } from '@/types';
 
@@ -56,6 +59,23 @@ function SupplierDetailContent() {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const canEdit = hasRole('ADMIN');
+  const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
+
+  // Same "auto-attach and let the sender pick the chat" pattern as the
+  // Customer/Party Order PDFs - fetches this same statement PDF the
+  // Download PDF button produces and pre-fills the supplier's own phone
+  // number from the record, so nothing needs to be typed in manually.
+  function handleSendPdfViaWhatsApp() {
+    if (!supplier) return;
+    openWhatsApp({
+      recipientName: supplier.name || 'Supplier',
+      recipientPhone: supplier.phone ?? undefined,
+      defaultMessage: '',
+      pdfUrl: `/suppliers/${id}/pdf`,
+      pdfFilename: `${supplier.name}-detail.pdf`,
+      autoAttachPdf: true,
+    });
+  }
 
   async function downloadPdf() {
     setDownloading(true);
@@ -140,9 +160,17 @@ function SupplierDetailContent() {
           <h1 className="text-2xl font-bold text-brand-900">{supplier.name}</h1>
           {supplier.phone && <p className="text-sm text-brand-500">{supplier.phone}</p>}
         </div>
-        <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
-          {downloading ? 'Preparing...' : 'Download PDF'}
-        </button>
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
+            {downloading ? 'Preparing...' : 'Download PDF'}
+          </button>
+          <WhatsAppActionButton
+            recipientName={supplier.name || 'Supplier'}
+            recipientPhone={supplier.phone ?? undefined}
+            onClick={handleSendPdfViaWhatsApp}
+            size="md"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -313,6 +341,20 @@ function SupplierDetailContent() {
           </div>
         </div>
       </div>
+
+      {showModal && whatsappOptions && (
+        <WhatsAppModal
+          onClose={closeWhatsApp}
+          recipientInfo={{
+            name: whatsappOptions.recipientName,
+            phone: whatsappOptions.recipientPhone,
+          }}
+          defaultMessage={whatsappOptions.defaultMessage}
+          pdfUrl={whatsappOptions.pdfUrl}
+          pdfFilename={whatsappOptions.pdfFilename}
+          autoAttachPdf={whatsappOptions.autoAttachPdf}
+        />
+      )}
     </div>
   );
 }
