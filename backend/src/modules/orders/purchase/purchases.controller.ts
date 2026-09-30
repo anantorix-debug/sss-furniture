@@ -52,7 +52,7 @@ export class PurchasesController {
 
   @Post()
   create(@Body() dto: CreatePurchaseDto, @CurrentUser() user: AuthUser) {
-    return this.service.create(dto, user.userId);
+    return this.service.create(dto, user.userId, user.role as Role);
   }
 
   @Patch(':id')
@@ -83,6 +83,16 @@ export class PurchasesController {
   @Post(':id/receive')
   receive(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.receive(id, user.userId);
+  }
+
+  // Super Admin only - jumps an already-existing PENDING_APPROVAL/APPROVED
+  // purchase straight to RECORDED, for old/historical purchases that were
+  // logged before the "Old Purchase" create-time toggle existed (or simply
+  // left un-approved). Same override pattern as approve() above.
+  @Roles(Role.SUPERADMIN)
+  @Post(':id/record-direct')
+  recordDirect(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.recordDirect(id, user.userId, user.role as Role);
   }
 
   @Get(':id/pdf')

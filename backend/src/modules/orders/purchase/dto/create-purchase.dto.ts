@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsDateString, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 
 class PurchaseItemDto {
   @IsString()
@@ -64,4 +64,15 @@ export class CreatePurchaseDto {
   @ValidateNested({ each: true })
   @Type(() => PurchaseItemDto)
   items: PurchaseItemDto[];
+
+  // "Old Purchase (already happened)" toggle - Super Admin only (re-checked
+  // server-side in PurchasesService.create, never trusted from a non-Super
+  // Admin caller). When true, the purchase skips PENDING_APPROVAL/APPROVED
+  // entirely and is created straight into RECORDED, exactly as if it had
+  // gone through approve()+receive() already - for logging historical
+  // purchases that already physically happened, not new orders awaiting
+  // approval.
+  @IsBoolean()
+  @IsOptional()
+  directRecord?: boolean;
 }

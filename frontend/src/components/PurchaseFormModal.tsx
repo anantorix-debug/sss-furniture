@@ -4,8 +4,10 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, assetUrl } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import { Modal } from './Modal';
 import { GalleryGrid } from './GalleryGrid';
+import { MaterialPicker } from './MaterialPicker';
 import { formatCurrency } from '@/lib/format';
 import { boardFeetPreview } from '@/lib/boardFeet';
 import type { Purchase, GalleryImage, RawMaterial, SupplierSummary } from '@/types';
@@ -46,12 +48,20 @@ export function PurchaseFormModal({
   // list instead of as a popup).
   inline?: boolean;
 }) {
+  const { user } = useAuth();
   const { data: suppliers } = useSWR<SupplierSummary[]>('/suppliers', fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
 
   const materialOf = (id: string) => materials?.find((m) => m.id === id);
   const materialUnit = (id: string) => materialOf(id)?.unit ?? '';
   const rowIsBoardFeet = (row: ItemRow) => materialOf(row.rawMaterialId)?.measurementKind === 'BOARD_FEET';
+
+  // "Old Purchase (already happened)" - Super Admin only (hidden entirely
+  // for Admin, who always goes through the normal Pending Approval ->
+  // Approve -> Receive flow). Only meaningful for a brand-new purchase, not
+  // an edit of one already in progress - an existing purchase's status is
+  // whatever it already is.
+  const [directRecord, setDirectRecord] = useState(false);
 
   const [supplierId, setSupplierId] = useState(editing?.supplierId ?? initialSupplierId ?? '');
   const [purchaseDate, setPurchaseDate] = useState(editing ? editing.purchaseDate.slice(0, 10) : new Date().toISOString().slice(0, 10));
@@ -120,6 +130,7 @@ export function PurchaseFormModal({
         purchaseDate,
         notes: notes || undefined,
         referenceImageId: referenceImage?.id ?? null,
+        ...(!editing && user?.role === 'SUPERADMIN' ? { directRecord } : {}),
         items: items
           .filter((i) => i.rawMaterialId && i.unitPrice && (rowIsBoardFeet(i) ? i.thicknessIn && i.widthIn && i.lengthFt && i.pieces : i.quantity))
           .map((i) => {
@@ -163,6 +174,18 @@ export function PurchaseFormModal({
 
   const form = (
     <form onSubmit={handleSubmit} className="space-y-3">
+        {!editing && user?.role === 'SUPERADMIN' && (
+          <div className="flex items-center gap-4 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <input type="radio" name="directRecord" checked={!directRecord} onChange={() => setDirectRecord(false)} />
+              New Purchase Order
+            </label>
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <input type="radio" name="directRecord" checked={directRecord} onChange={() => setDirectRecord(true)} />
+              Old Purchase (already happened)
+            </label>
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Supplier</label>
@@ -190,19 +213,10 @@ export function PurchaseFormModal({
               return (
                 <div key={idx} className="border border-brand-100 rounded-lg p-3 space-y-2">
                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-start">
-                    <select
-                      className="input"
-                      required
+                    <MaterialPicker
                       value={row.rawMaterialId}
-                      onChange={(e) => updateItemRow(idx, { rawMaterialId: e.target.value, quantity: '', thicknessIn: '', widthIn: '', lengthFt: '', pieces: '' })}
-                    >
-                      <option value="">Select material</option>
-                      {materials?.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name} ({m.unit})
-                        </option>
-                      ))}
-                    </select>
+                      onSelect={(m) => updateItemRow(idx, { rawMaterialId: m.id, quantity: '', thicknessIn: '', widthIn: '', lengthFt: '', pieces: '' })}
+                    />
                     <button type="button" className="text-red-500 text-xs px-2 py-2" onClick={() => removeItemRow(idx)} disabled={items.length === 1}>
                       Remove
                     </button>

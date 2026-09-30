@@ -17,11 +17,11 @@ export function SuccessTick({ message, onDone, durationMs = 1400 }: { message?: 
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 animate-success-backdrop" onClick={onDone}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/55 animate-success-backdrop" onClick={onDone}>
       <div className="flex flex-col items-center gap-3 animate-success-pop">
-        <svg width="88" height="88" viewBox="0 0 60 60" fill="none">
-          <circle cx="30" cy="30" r="26" stroke="#16a34a" strokeWidth="4" className="animate-success-circle" strokeLinecap="round" />
-          <path d="M18 30.5 L26 38.5 L42 21" stroke="#16a34a" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" className="animate-success-check" fill="none" />
+        <svg width="96" height="96" viewBox="0 0 60 60" fill="none" style={{ filter: 'drop-shadow(0 8px 18px rgba(22, 163, 74, 0.45))' }}>
+          <circle cx="30" cy="30" r="28" fill="#16a34a" />
+          <path d="M18 30.5 L26 38.5 L42 21" stroke="#ffffff" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" className="animate-success-check" fill="none" />
         </svg>
         {message && <p className="bg-white rounded-full px-4 py-1.5 text-sm font-medium text-ink shadow-lg">{message}</p>}
       </div>

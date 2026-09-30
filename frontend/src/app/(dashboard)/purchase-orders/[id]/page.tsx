@@ -39,6 +39,8 @@ function PurchaseDetailContent() {
   const [approving, setApproving] = useState(false);
   const [receiving, setReceiving] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [recordDirectOpen, setRecordDirectOpen] = useState(false);
+  const [recordingDirect, setRecordingDirect] = useState(false);
   const {
     showModal,
     whatsappOptions,
@@ -97,6 +99,21 @@ function PurchaseDetailContent() {
       setNotice(err instanceof ApiError ? err.message : 'Failed to mark purchase as received');
     } finally {
       setReceiving(false);
+    }
+  }
+
+  async function handleRecordDirect() {
+    setRecordingDirect(true);
+    setNotice(null);
+    try {
+      await api.post(`/purchase-orders/${id}/record-direct`);
+      setRecordDirectOpen(false);
+      mutate();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to record purchase directly');
+      setRecordDirectOpen(false);
+    } finally {
+      setRecordingDirect(false);
     }
   }
 
@@ -188,6 +205,11 @@ function PurchaseDetailContent() {
                 <button className="btn-secondary text-red-600 border-red-200 hover:bg-red-50" onClick={() => setCancelOpen(true)}>
                   Cancel Purchase
                 </button>
+                {hasRole('SUPERADMIN') && (purchase.status === 'PENDING_APPROVAL' || purchase.status === 'APPROVED') && (
+                  <button className="btn-secondary text-emerald-700 border-emerald-200 hover:bg-emerald-50" onClick={() => setRecordDirectOpen(true)}>
+                    Mark as Old (Skip Approval)
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -312,6 +334,18 @@ function PurchaseDetailContent() {
           danger
           onConfirm={handleCancel}
           onCancel={() => setCancelOpen(false)}
+        />
+      )}
+
+      {recordDirectOpen && (
+        <ConfirmDialog
+          title="Mark as Old Purchase"
+          message={`Mark ${purchase.purchaseNumber} as an old/already-happened purchase? It will skip ${
+            purchase.status === 'PENDING_APPROVAL' ? 'Approve and Receive' : 'Receive'
+          } and go straight to Recorded - stock and supplier balance update immediately.`}
+          confirmLabel={recordingDirect ? 'Recording...' : 'Mark as Old'}
+          onConfirm={handleRecordDirect}
+          onCancel={() => setRecordDirectOpen(false)}
         />
       )}
 

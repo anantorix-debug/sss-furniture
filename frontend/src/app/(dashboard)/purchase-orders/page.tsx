@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, getAccessToken, assetUrl } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import { RoleGate } from '@/components/RoleGate';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
@@ -43,6 +44,7 @@ function itemsSummary(purchase: Purchase): string {
 }
 
 function PurchaseOrdersContent() {
+  const { hasRole } = useAuth();
   const searchParams = useSearchParams();
   const [page, setPage] = useState(1);
   const [values, setValues] = useState<Record<string, string>>(emptyFilters);
@@ -95,6 +97,8 @@ function PurchaseOrdersContent() {
   const [notice, setNotice] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Purchase | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [recordDirectTarget, setRecordDirectTarget] = useState<Purchase | null>(null);
+  const [recordingDirect, setRecordingDirect] = useState(false);
 
   // Deep-linked from a raw material's "Record a Purchase" button - opens
   // the New Purchase form with that material pre-selected on the first
@@ -141,6 +145,21 @@ function PurchaseOrdersContent() {
       setCancelTarget(null);
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function handleRecordDirect() {
+    if (!recordDirectTarget) return;
+    setRecordingDirect(true);
+    try {
+      await api.post(`/purchase-orders/${recordDirectTarget.id}/record-direct`);
+      setRecordDirectTarget(null);
+      mutate();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : 'Failed to record purchase directly');
+      setRecordDirectTarget(null);
+    } finally {
+      setRecordingDirect(false);
     }
   }
 
@@ -261,6 +280,11 @@ function PurchaseOrdersContent() {
                       </button>
                     </>
                   )}
+                  {hasRole('SUPERADMIN') && (purchase.status === 'PENDING_APPROVAL' || purchase.status === 'APPROVED') && (
+                    <button className="text-emerald-700 hover:underline text-xs" onClick={() => setRecordDirectTarget(purchase)}>
+                      Mark as Old
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -288,6 +312,18 @@ function PurchaseOrdersContent() {
           danger
           onConfirm={handleCancel}
           onCancel={() => setCancelTarget(null)}
+        />
+      )}
+
+      {recordDirectTarget && (
+        <ConfirmDialog
+          title="Mark as Old Purchase"
+          message={`Mark ${recordDirectTarget.purchaseNumber} as an old/already-happened purchase? It will skip ${
+            recordDirectTarget.status === 'PENDING_APPROVAL' ? 'Approve and Receive' : 'Receive'
+          } and go straight to Recorded - stock and supplier balance update immediately.`}
+          confirmLabel={recordingDirect ? 'Recording...' : 'Mark as Old'}
+          onConfirm={handleRecordDirect}
+          onCancel={() => setRecordDirectTarget(null)}
         />
       )}
 

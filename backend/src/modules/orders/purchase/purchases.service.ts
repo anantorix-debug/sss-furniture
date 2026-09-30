@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { PdfService } from '../../pdf/pdf.service';
 import { AuditService } from '../../audit/audit.service';
+import { Role } from '../../../common/enums/role.enum';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
@@ -27,6 +28,16 @@ export class PurchasesService {
   private withTotal<T extends { items: { quantity: any; unitPrice: any }[] }>(purchase: T) {
     const totalValue = purchase.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
     return { ...purchase, totalValue };
+  }
+
+  // Shared by approve()/update()/the directRecord path in create() below -
+  // every place that books/re-books the supplier-payable ledger entry needs
+  // the same two derived values from a purchase's items.
+  private itemsTotalValue(items: { quantity: any; unitPrice: any }[]) {
+    return items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
+  }
+  private itemsParticulars(items: { quantity: any; rawMaterial: { name: string; unit: string } }[]) {
+    return items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
   }
 
   // Resolves each line's RawMaterial (one batch query, not N) and, for a
@@ -114,34 +125,165 @@ export class PurchasesService {
   // Admin raises a Purchase Order - PENDING_APPROVAL only. No stock or
   // supplier-payable effect happens here at all; that's entirely deferred
   // to approve() below, which only a Super Admin can call.
-  async create(dto: CreatePurchaseDto, userId: string) {
+  //
+  // Exception: dto.directRecord (Super Admin only, re-checked here - never
+  // trusted just because the frontend hid the toggle for anyone else). Used
+  // for logging a purchase that already physically happened (historical
+  // data entry) - it skips PENDING_APPROVAL/APPROVED and is created
+  // straight into RECORDED, applying the same stock + supplier-payable
+  // effects approve()+receive() would normally apply across two gated
+  // steps, in one shot inside a single transaction with the create itself.
+  async create(dto: CreatePurchaseDto, userId: string, actingRole?: Role) {
+    if (dto.directRecord && actingRole !== Role.SUPERADMIN) {
+      throw new ForbiddenException('Only Super Admin can record a purchase directly without approval');
+    }
+    const directRecord = dto.directRecord === true;
+
     const items = await this.resolveItemsInput(dto.items);
     const purchaseNumber = await generatePurchaseNumber(this.prisma);
     const purchaseDate = new Date(dto.purchaseDate);
 
-    const purchase = await this.prisma.purchase.create({
-      data: {
-        purchaseNumber,
-        supplierId: dto.supplierId,
-        purchaseDate,
-        notes: dto.notes,
-        referenceImageId: dto.referenceImageId || null,
-        status: 'PENDING_APPROVAL',
-        createdById: userId,
-        items: { create: items },
-      },
-      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
+    const purchase = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.purchase.create({
+        data: {
+          purchaseNumber,
+          supplierId: dto.supplierId,
+          purchaseDate,
+          notes: dto.notes,
+          referenceImageId: dto.referenceImageId || null,
+          status: directRecord ? 'RECORDED' : 'PENDING_APPROVAL',
+          createdById: userId,
+          ...(directRecord
+            ? { approvedById: userId, approvedAt: purchaseDate, receivedById: userId, receivedAt: purchaseDate }
+            : {}),
+          items: { create: items },
+        },
+        include: {
+          items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } },
+          referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } },
+        },
+      });
+
+      if (directRecord) {
+        await tx.supplierPurchase.create({
+          data: {
+            supplierId: dto.supplierId,
+            date: purchaseDate,
+            particulars: this.itemsParticulars(created.items),
+            value: this.itemsTotalValue(created.items),
+            purchaseId: created.id,
+            createdById: userId,
+          },
+        });
+        await tx.stockMovement.createMany({
+          data: created.items.map((item) => ({
+            rawMaterialId: item.rawMaterialId,
+            type: 'IN' as const,
+            quantity: item.quantity,
+            unitCost: item.unitPrice,
+            reason: 'Purchase (recorded directly - historical entry)',
+            purchaseId: created.id,
+            date: purchaseDate,
+            createdById: userId,
+          })),
+        });
+      }
+
+      return created;
     });
 
     await this.audit.log({
       userId,
-      action: 'PURCHASE_ORDER_CREATED',
+      action: directRecord ? 'PURCHASE_ORDER_RECORDED_DIRECT' : 'PURCHASE_ORDER_CREATED',
       targetType: 'Purchase',
       targetId: purchase.id,
-      metadata: { purchaseNumber, supplierId: dto.supplierId },
+      metadata: { purchaseNumber, supplierId: dto.supplierId, directRecord },
     });
 
     return this.withTotal(purchase);
+  }
+
+  // Super Admin only - for a purchase already sitting in PENDING_APPROVAL
+  // or APPROVED (created before this "Old Purchase" toggle existed, or
+  // simply left un-approved) that turns out to be old/historical data too.
+  // Jumps straight to RECORDED, applying whichever of the payable/stock
+  // effects hasn't already happened yet - PENDING_APPROVAL needs both
+  // (same as create()'s directRecord path), APPROVED only needs the stock
+  // side (its payable was already booked by approve()). Same atomic-claim
+  // idempotency pattern as approve()/receive().
+  async recordDirect(id: string, userId: string, actingRole?: Role) {
+    if (actingRole !== Role.SUPERADMIN) {
+      throw new ForbiddenException('Only Super Admin can record a purchase directly without approval');
+    }
+    const existing = await this.prisma.purchase.findUnique({
+      where: { id },
+      include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
+    });
+    if (!existing) throw new NotFoundException('Purchase not found');
+    if (existing.status === 'CANCELLED') {
+      throw new BadRequestException('A cancelled purchase cannot be recorded');
+    }
+    if (existing.status === 'RECORDED') {
+      // Already recorded - idempotent no-op, no reprocessing.
+      return this.findOne(id);
+    }
+
+    const fromStatus = existing.status;
+    const needsPayable = fromStatus === 'PENDING_APPROVAL';
+    const recordedDate = new Date();
+
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.purchase.updateMany({
+        where: { id, status: fromStatus },
+        data: {
+          status: 'RECORDED',
+          ...(needsPayable ? { approvedById: userId, approvedAt: recordedDate } : {}),
+          receivedById: userId,
+          receivedAt: recordedDate,
+        },
+      });
+      if (claim.count === 0) return false; // lost the race - someone else's call already moved it on
+
+      if (needsPayable) {
+        await tx.supplierPurchase.create({
+          data: {
+            supplierId: existing.supplierId,
+            date: existing.purchaseDate,
+            particulars: this.itemsParticulars(existing.items),
+            value: this.itemsTotalValue(existing.items),
+            purchaseId: id,
+            createdById: userId,
+          },
+        });
+      }
+
+      await tx.stockMovement.createMany({
+        data: existing.items.map((item) => ({
+          rawMaterialId: item.rawMaterialId,
+          type: 'IN' as const,
+          quantity: item.quantity,
+          unitCost: item.unitPrice,
+          reason: 'Purchase (recorded directly - historical entry)',
+          purchaseId: id,
+          date: recordedDate,
+          createdById: userId,
+        })),
+      });
+
+      return true;
+    });
+
+    if (claimed) {
+      await this.audit.log({
+        userId,
+        action: 'PURCHASE_ORDER_RECORDED_DIRECT',
+        targetType: 'Purchase',
+        targetId: id,
+        metadata: { purchaseNumber: existing.purchaseNumber, fromStatus },
+      });
+    }
+
+    return this.findOne(id);
   }
 
   // Super Admin approval - books the supplier payable/ledger (the
@@ -168,8 +310,8 @@ export class PurchasesService {
       return this.findOne(id);
     }
 
-    const totalValue = existing.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
-    const particulars = existing.items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
+    const totalValue = this.itemsTotalValue(existing.items);
+    const particulars = this.itemsParticulars(existing.items);
 
     const claimed = await this.prisma.$transaction(async (tx) => {
       const claim = await tx.purchase.updateMany({
@@ -349,8 +491,8 @@ export class PurchasesService {
           })),
         });
 
-        const totalValue = created.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
-        const particulars = created.items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
+        const totalValue = this.itemsTotalValue(created.items);
+        const particulars = this.itemsParticulars(created.items);
         // The ledger only ever needs to reflect this purchase's *current*
         // total (unlike StockMovement, no row-by-row ledger UI renders
         // SupplierPurchase directly) - update the existing row in place.
@@ -369,8 +511,8 @@ export class PurchasesService {
           where: { id },
           include: { items: { include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } } }, referenceImage: { select: { id: true, url: true, fileName: true, modelNo: true } } },
         });
-        const totalValue = created.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
-        const particulars = created.items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
+        const totalValue = this.itemsTotalValue(created.items);
+        const particulars = this.itemsParticulars(created.items);
         await tx.supplierPurchase.updateMany({
           where: { purchaseId: id },
           data: { supplierId, date: purchaseDate, particulars, value: totalValue },
