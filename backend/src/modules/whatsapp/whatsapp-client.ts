@@ -76,6 +76,18 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   // code on its own, without requiring a server restart.
   private restarting = false;
 
+  // Detects the class of Puppeteer error that means the underlying Chrome
+  // page/frame has gone stale (WhatsApp Web reloaded internally, the tab
+  // crashed, etc.) - the client keeps reporting state=READY/operational
+  // forever in this case (nothing else notices), so every single chat
+  // fetch or send silently fails with the identical error until someone
+  // manually restarts pm2. Callers that hit this should trigger
+  // restartClient() themselves so the app self-heals instead.
+  private isFatalPageError(err: unknown): boolean {
+    const msg = err instanceof Error ? err.message : String(err);
+    return /detached Frame|Execution context was destroyed|Session closed|Target closed|Protocol error/i.test(msg);
+  }
+
   private async restartClient(delayMs = 3000) {
     if (this.restarting) return;
     this.restarting = true;
@@ -473,6 +485,10 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       // All methods failed
       this.logger.error(`[WHATSAPP LID] ALL METHODS FAILED for ${chatId}:`);
       methodResults.forEach((msg) => this.logger.error(`[WHATSAPP LID]   ${msg}`));
+      // Same stale-page recovery as fetchChatsWithDiagnostics - if every
+      // method died on the same detached-frame class of error, the page is
+      // stuck, not the contact. Restart so the next lookup gets a fresh one.
+      if (methodResults.some((msg) => this.isFatalPageError(new Error(msg)))) void this.restartClient();
 
       throw new Error(`This WhatsApp contact uses a LID and could not be resolved. Open the conversation in WhatsApp Web first and retry. (${chatId})`);
     }
@@ -693,6 +709,11 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(`[WA SEND] Final error: chatId=${chatId}, error=${errorMsg}`);
+      // A stale/detached page fails every send identically until the
+      // client is restarted (see fetchChatsWithDiagnostics) - this send
+      // still fails and throws below, but kicks off recovery so the next
+      // attempt has a working client instead of hitting the same wall.
+      if (this.isFatalPageError(err)) void this.restartClient();
       throw err;
     }
   }
@@ -711,6 +732,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       await this.client.sendMessage(numberId._serialized, message);
     } catch (err) {
       this.logger.error(`Failed to send message: ${err}`);
+      if (this.isFatalPageError(err)) void this.restartClient();
       throw err;
     }
   }
@@ -725,6 +747,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       await this.client.sendMessage(chatId, message);
     } catch (err) {
       this.logger.error(`Failed to send group message: ${err}`);
+      if (this.isFatalPageError(err)) void this.restartClient();
       throw err;
     }
   }
@@ -797,6 +820,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
 
   private async fetchChatsWithDiagnostics(): Promise<any[]> {
     this.logger.log(`[CHATS] Starting chat retrieval`);
+    let sawFatalPageError = false;
 
     // STEP 1: Try official whatsapp-web.js API first. This call is known to
     // hang on some WhatsApp Web versions (see fetchChatsWithRetry comment
@@ -816,6 +840,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
         return normalized;
       }
     } catch (apiErr) {
+      if (this.isFatalPageError(apiErr)) sawFatalPageError = true;
       this.logger.warn(`[CHATS] getChats() failed, attempting fallback: ${apiErr instanceof Error ? apiErr.message : String(apiErr)}`);
     }
 
@@ -892,11 +917,20 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
         return chatsFromFallback;
       }
     } catch (fallbackErr) {
+      if (this.isFatalPageError(fallbackErr)) sawFatalPageError = true;
       this.logger.warn(`[CHATS] Fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
     }
 
-    // STEP 3: Return empty array on complete failure
+    // STEP 3: Return empty array on complete failure. If both attempts hit
+    // the same stale-frame error, the client will keep returning empty
+    // forever otherwise (state stays READY/operational, nothing else
+    // notices) - kick off a restart now so the *next* request gets a fresh,
+    // working page instead of requiring a manual pm2 restart.
     this.logger.warn(`[CHATS] Unable to retrieve chats via any method, returning empty array`);
+    if (sawFatalPageError) {
+      this.logger.warn(`[CHATS] Detected a stale/detached page - restarting the WhatsApp client to recover`);
+      void this.restartClient();
+    }
     return [];
   }
 
@@ -1059,6 +1093,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       await this.client.sendMessage(numberId._serialized, media, sendMediaOptions);
     } catch (err) {
       this.logger.error(`Failed to send document: ${err}`);
+      if (this.isFatalPageError(err)) void this.restartClient();
       throw err;
     }
   }
