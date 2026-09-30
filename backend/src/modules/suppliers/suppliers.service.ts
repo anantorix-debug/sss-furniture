@@ -194,9 +194,9 @@ export class SuppliersService {
         (s) => `<tr>
           <td>${escapeHtml(s.name)}</td>
           <td>${escapeHtml(s.phone ?? '-')}</td>
-          <td style="text-align:right">₹${s.totalPurchaseValue.toLocaleString('en-IN')}</td>
-          <td style="text-align:right">₹${s.totalPaid.toLocaleString('en-IN')}</td>
-          <td style="text-align:right">₹${s.balance.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${s.totalPurchaseValue.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${s.totalPaid.toLocaleString('en-IN')}</td>
+          <td style="text-align:right">Rs. ${s.balance.toLocaleString('en-IN')}</td>
           <td>${s.status === 'DUE' ? 'Due' : 'Settled'}</td>
         </tr>`,
       )
@@ -238,7 +238,12 @@ export class SuppliersService {
       orderBy: { purchaseDate: 'desc' },
     });
 
-    const rupees = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // "Rs." not "₹" - the server's headless Chromium (used to render every
+    // PDF) renders the ₹ glyph as a blank box regardless of font-family, so
+    // every PDF in this app uses the plain-text "Rs." prefix instead (see
+    // PurchasesService.buildPdfHtml, the original place this was worked
+    // around).
+    const rupees = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     // One row per PurchaseItem (not one per Purchase) - each line has its
     // own Quantity/Unit/Purchase Rate, per the required column set.
