@@ -124,9 +124,18 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
 
     if (this.initWatchdog) clearTimeout(this.initWatchdog);
     this.initWatchdog = setTimeout(() => {
-      if (this.state === 'INITIALIZING') {
+      // Covers every state between "just started" and actually READY, not
+      // just INITIALIZING - a real incident hit LOADING_SCREEN (client.on
+      // ('authenticated') fires, then it just never reaches 'ready') and
+      // the old version of this watchdog only ever checked for
+      // INITIALIZING, so setState() disarmed it the instant progress was
+      // made to LOADING_SCREEN, leaving that state with no timeout
+      // protection at all. QR_REQUIRED is deliberately excluded - it's a
+      // legitimate, indefinite "waiting for a human to scan" state, not a
+      // stuck one (see the matching exclusion in setState() below).
+      if (this.state === 'INITIALIZING' || this.state === 'LOADING_SCREEN' || this.state === 'AUTHENTICATED') {
         this.logger.error(
-          `[WhatsApp] Stuck in INITIALIZING for ${WhatsappClientWrapper.INIT_TIMEOUT_MS}ms - forcing a restart`,
+          `[WhatsApp] Stuck in ${this.state} for ${WhatsappClientWrapper.INIT_TIMEOUT_MS}ms - forcing a restart`,
         );
         this.restartClient();
       }
@@ -242,12 +251,17 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       this.restartClient();
     });
 
-    // Error event - unexpected error
+    // Error event - unexpected error. Unlike disconnected/auth_failure
+    // above, this one previously just logged and sat in ERROR forever with
+    // nothing ever trying to recover - same class of gap as the
+    // LOADING_SCREEN watchdog issue, fixed the same way: restart instead
+    // of silently dead-ending.
     this.client.on('error', (err: any) => {
       const errorMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(`[WhatsApp] Error: ${errorMsg}`);
       this.setState('ERROR');
       this.lastError = errorMsg;
+      this.restartClient();
     });
 
     // Initialize the client
@@ -264,10 +278,14 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       this.logger.log(`[STATE] ${this.state} → ${newState}`);
       this.state = newState;
     }
-    // Any forward progress out of INITIALIZING means client.initialize()
-    // is actually alive - disarm the watchdog. It only fires again once
-    // startClient() re-arms it (a fresh init or a restart).
-    if (newState !== 'INITIALIZING' && this.initWatchdog) {
+    // Disarm only once a stable resting state is actually reached - READY
+    // (success) or QR_REQUIRED (legitimately waiting on a human, not
+    // stuck). Every other state in between (INITIALIZING/LOADING_SCREEN/
+    // AUTHENTICATED) stays covered by the same watchdog armed in
+    // startClient() - getting stuck in any of them still triggers a
+    // restart instead of silently disarming the moment any forward
+    // progress happens.
+    if ((newState === 'READY' || newState === 'QR_REQUIRED') && this.initWatchdog) {
       clearTimeout(this.initWatchdog);
       this.initWatchdog = null;
     }

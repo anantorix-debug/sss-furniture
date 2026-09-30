@@ -1,11 +1,36 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { join } from 'path';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import type { Request, Response } from 'express';
 import { AppModule } from './app.module';
+
+// Node 15+ crashes the entire process on ANY unhandled promise rejection by
+// default - and WhatsappClientWrapper drives a real (unofficial) Puppeteer/
+// Chromium session internally, whose background operations can reject
+// outside any try/catch this app controls. Without this handler, one stray
+// rejection buried in that library (e.g. a page navigating away mid-call)
+// takes down the whole API, not just WhatsApp - confirmed as a real gap
+// this app had and a sibling project's own WhatsApp integration already
+// guards against. Known-transient Puppeteer/whatsapp-web.js noise is
+// logged at 'warn' and left there; anything else is logged at 'error' so
+// it's still visible and investigable - but the process is never allowed
+// to crash over an unhandled rejection either way. A synchronous
+// uncaughtException is deliberately NOT handled the same way here - Node's
+// own guidance is to let the process exit and have pm2 restart it cleanly
+// rather than keep running with potentially corrupted state.
+const unhandledRejectionLogger = new Logger('UnhandledRejection');
+const KNOWN_TRANSIENT_REJECTION = /EBUSY|resource busy or locked|Execution context was destroyed|Protocol error \(Runtime|detached Frame|Target closed|Session closed/i;
+process.on('unhandledRejection', (reason: unknown) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  if (KNOWN_TRANSIENT_REJECTION.test(message)) {
+    unhandledRejectionLogger.warn(`Known-transient rejection suppressed: ${message.split('\n')[0]}`);
+    return;
+  }
+  unhandledRejectionLogger.error(`Unhandled promise rejection (process kept alive): ${message}`, reason instanceof Error ? reason.stack : undefined);
+});
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
