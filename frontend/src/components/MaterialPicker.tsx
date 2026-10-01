@@ -30,6 +30,18 @@ export function MaterialPicker({ value, onSelect }: { value: string; onSelect: (
   const trimmed = query.trim().toLowerCase();
   const matches = (materials ?? []).filter((m) => !trimmed || m.name.toLowerCase().includes(trimmed));
 
+  // Keyboard nav over the list: index 0 is the "+ Add Material" row,
+  // 1..matches.length map to matches[0..length-1] - one flat list so
+  // Up/Down/Enter work the same way regardless of where the cursor is.
+  const [highlightIndex, setHighlightIndex] = useState(0);
+  useEffect(() => {
+    setHighlightIndex(0);
+  }, [query, open]);
+  useEffect(() => {
+    if (mode !== 'list') return;
+    portalRef.current?.querySelector('[data-highlighted="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [highlightIndex, mode]);
+
   function openDropdown() {
     const el = wrapperRef.current;
     if (el) {
@@ -39,6 +51,30 @@ export function MaterialPicker({ value, onSelect }: { value: string; onSelect: (
     setMode('list');
     setQuery('');
     setOpen(true);
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!open || mode !== 'list') return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIndex((i) => Math.min(i + 1, matches.length));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightIndex === 0) {
+        setMode('add');
+      } else {
+        const m = matches[highlightIndex - 1];
+        if (m) {
+          onSelect(m);
+          setOpen(false);
+        }
+      }
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
   }
 
   useEffect(() => {
@@ -96,6 +132,7 @@ export function MaterialPicker({ value, onSelect }: { value: string; onSelect: (
           else setOpen(true);
         }}
         onFocus={openDropdown}
+        onKeyDown={handleSearchKeyDown}
         onBlur={() => {
           // The "+ Add Material" form's own inputs live in the portal, not
           // inside wrapperRef (document.body, not a DOM descendant) - a
@@ -124,7 +161,9 @@ export function MaterialPicker({ value, onSelect }: { value: string; onSelect: (
               <>
                 <button
                   type="button"
-                  className="w-full text-left px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50 border-b border-brand-100"
+                  data-highlighted={highlightIndex === 0}
+                  className={`w-full text-left px-3 py-2 text-sm font-medium text-brand-600 border-b border-brand-100 ${highlightIndex === 0 ? 'bg-brand-50' : 'hover:bg-brand-50'}`}
+                  onMouseEnter={() => setHighlightIndex(0)}
                   onClick={() => setMode('add')}
                 >
                   + Add Material
@@ -132,11 +171,13 @@ export function MaterialPicker({ value, onSelect }: { value: string; onSelect: (
                 {matches.length === 0 ? (
                   <p className="px-3 py-2 text-xs text-brand-400 italic">No materials match</p>
                 ) : (
-                  matches.map((m) => (
+                  matches.map((m, idx) => (
                     <button
                       key={m.id}
                       type="button"
-                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-brand-50 border-b border-brand-50 last:border-0"
+                      data-highlighted={highlightIndex === idx + 1}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm border-b border-brand-50 last:border-0 ${highlightIndex === idx + 1 ? 'bg-brand-50' : 'hover:bg-brand-50'}`}
+                      onMouseEnter={() => setHighlightIndex(idx + 1)}
                       onClick={() => {
                         onSelect(m);
                         setOpen(false);

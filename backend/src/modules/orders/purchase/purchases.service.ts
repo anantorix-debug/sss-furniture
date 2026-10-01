@@ -36,8 +36,16 @@ export class PurchasesService {
   private itemsTotalValue(items: { quantity: any; unitPrice: any }[]) {
     return items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
   }
+  // Capped at 5 items (+N more) - same "+N more" convention already used
+  // by the frontend's own items-summary helpers. The particulars column is
+  // @db.Text now so an uncapped string would no longer overflow the DB,
+  // but a purchase with many lines (a timber order with a dozen size
+  // variants, say) would otherwise dump a huge wall of text into every
+  // ledger table that renders this field - this keeps it readable.
   private itemsParticulars(items: { quantity: any; rawMaterial: { name: string; unit: string } }[]) {
-    return items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`).join(', ');
+    const parts = items.map((i) => `${i.rawMaterial.name} (${Number(i.quantity)} ${i.rawMaterial.unit})`);
+    if (parts.length <= 5) return parts.join(', ');
+    return `${parts.slice(0, 5).join(', ')} +${parts.length - 5} more`;
   }
 
   // Resolves each line's RawMaterial (one batch query, not N) and, for a

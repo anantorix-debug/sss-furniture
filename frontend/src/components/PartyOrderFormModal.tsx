@@ -365,6 +365,7 @@ export function PartyOrderFormModal({
           <div className="space-y-3 max-h-[45vh] overflow-y-auto">
             {items.map((item, idx) => (
               <div key={idx} className="border border-brand-100 rounded-lg p-3 space-y-2">
+                <span className="text-xs font-medium text-brand-400">Product {idx + 1}</span>
                 <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr_auto] gap-2 items-start">
                   <ModelNoPicker
                     modelNo={item.modelNo ?? ''}

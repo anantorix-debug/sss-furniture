@@ -562,6 +562,7 @@ function CustomerOrdersContent() {
                   const productionPortion = qty - stockPortion;
                   return (
                     <div key={idx} className="space-y-1 border border-brand-100 rounded-lg p-2">
+                      <span className="text-xs font-medium text-brand-400">Product {idx + 1}</span>
                       <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-2">
                         <ModelNoPicker
                           modelNo={row.modelNo ?? ''}

@@ -264,12 +264,12 @@ function PurchaseDetailContent() {
           <thead>
             <tr>
               <th>Material</th>
-              <th className="text-right">Width</th>
-              <th className="text-right">Thickness</th>
-              <th className="text-right">Length</th>
-              <th className="text-right">Pieces</th>
-              <th className="text-right">CFT</th>
-              <th className="text-right">Qty</th>
+              <th className="!text-right">Width</th>
+              <th className="!text-right">Thickness</th>
+              <th className="!text-right">Length</th>
+              <th className="!text-right">Pieces</th>
+              <th className="!text-right">CFT</th>
+              <th className="!text-right">Qty</th>
               <th>Unit</th>
               <th>Rate</th>
               <th>Total</th>

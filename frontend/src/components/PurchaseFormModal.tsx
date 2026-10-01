@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, assetUrl } from '@/lib/api';
@@ -23,6 +23,41 @@ interface ItemRow {
 }
 
 const emptyRow: ItemRow = { rawMaterialId: '', quantity: '', unitPrice: '', thicknessIn: '', widthIn: '', lengthFt: '', pieces: '' };
+
+interface PurchaseDraft {
+  supplierId: string;
+  purchaseDate: string;
+  notes: string;
+  items: ItemRow[];
+}
+
+// A failed save (see the "particulars too long" incident) or an accidental
+// page reload used to wipe out everything already typed into a New
+// Purchase - a real problem for a long multi-item timber order that takes
+// a while to enter. Autosaved to localStorage as the form is filled in and
+// restored on mount; never used for an edit (editing already has its own
+// source of truth - the purchase being edited - and resurrecting a stale
+// draft there would be confusing, not helpful). Scoped per supplier (or
+// "generic" for the list page's untargeted New Purchase) so opening a
+// different supplier's page doesn't show a leftover draft from another one.
+function draftKey(initialSupplierId?: string) {
+  return `purchase-draft:${initialSupplierId ?? 'generic'}`;
+}
+function readDraft(initialSupplierId?: string): PurchaseDraft | null {
+  try {
+    const raw = localStorage.getItem(draftKey(initialSupplierId));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function clearDraft(initialSupplierId?: string) {
+  try {
+    localStorage.removeItem(draftKey(initialSupplierId));
+  } catch {
+    // ignore
+  }
+}
 
 // Create/edit form for a Purchase Order - shared by the list page's "+ New
 // Purchase" / "Edit" action and the Supplier detail page's own "+ New
@@ -63,9 +98,12 @@ export function PurchaseFormModal({
   // whatever it already is.
   const [directRecord, setDirectRecord] = useState(false);
 
-  const [supplierId, setSupplierId] = useState(editing?.supplierId ?? initialSupplierId ?? '');
-  const [purchaseDate, setPurchaseDate] = useState(editing ? editing.purchaseDate.slice(0, 10) : new Date().toISOString().slice(0, 10));
-  const [notes, setNotes] = useState(editing?.notes ?? '');
+  const draft = !editing ? readDraft(initialSupplierId) : null;
+  const [supplierId, setSupplierId] = useState(editing?.supplierId ?? draft?.supplierId ?? initialSupplierId ?? '');
+  const [purchaseDate, setPurchaseDate] = useState(
+    editing ? editing.purchaseDate.slice(0, 10) : (draft?.purchaseDate ?? new Date().toISOString().slice(0, 10)),
+  );
+  const [notes, setNotes] = useState(editing?.notes ?? draft?.notes ?? '');
   const [items, setItems] = useState<ItemRow[]>(() => {
     if (editing) {
       return editing.items.map((i) => {
@@ -85,9 +123,26 @@ export function PurchaseFormModal({
         };
       });
     }
+    if (draft?.items?.length) return draft.items;
     if (initialMaterialId) return [{ ...emptyRow, rawMaterialId: initialMaterialId }];
     return [{ ...emptyRow }];
   });
+
+  // Autosave the in-progress draft as it's filled in - see the comment on
+  // readDraft() above for why. Skipped entirely while editing.
+  useEffect(() => {
+    if (editing) return;
+    const hasContent = supplierId || notes.trim() || items.some((i) => i.rawMaterialId || i.quantity || i.unitPrice);
+    try {
+      if (hasContent) {
+        localStorage.setItem(draftKey(initialSupplierId), JSON.stringify({ supplierId, purchaseDate, notes, items }));
+      } else {
+        localStorage.removeItem(draftKey(initialSupplierId));
+      }
+    } catch {
+      // ignore - localStorage can throw in private browsing / quota-full
+    }
+  }, [editing, initialSupplierId, supplierId, purchaseDate, notes, items]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -167,6 +222,7 @@ export function PurchaseFormModal({
         await api.patch(`/purchase-orders/${editing.id}`, payload);
       } else {
         await api.post<Purchase>('/purchase-orders', payload);
+        clearDraft(initialSupplierId);
       }
       onSaved();
       onClose();
@@ -219,6 +275,7 @@ export function PurchaseFormModal({
               const bf = isBoardFeet ? boardFeetPreview(row.thicknessIn, row.widthIn, row.lengthFt, row.pieces) : null;
               return (
                 <div key={idx} className="border border-brand-100 rounded-lg p-3 space-y-2">
+                  <span className="text-xs font-medium text-brand-400">Material {idx + 1}</span>
                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-start">
                     <MaterialPicker
                       value={row.rawMaterialId}

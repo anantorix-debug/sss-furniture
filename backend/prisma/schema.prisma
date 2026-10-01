@@ -593,7 +593,12 @@ model SupplierPurchase {
   supplierId  String
   supplier    Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   date        DateTime
-  particulars String // e.g. "18mm 8*4 PLYWOOD"
+  // @db.Text, not the Prisma String default (MySQL VARCHAR(191)) - a
+  // multi-item purchase's generated particulars (see
+  // PurchasesService.itemsParticulars) can run well past 191 characters
+  // and was failing the insert outright for a purchase with several line
+  // items.
+  particulars String @db.Text // e.g. "18mm 8*4 PLYWOOD"
   qty         Decimal? @db.Decimal(12, 2)
   // Unit the qty/price are measured in - e.g. "Sathuram" for round/sawn
   // timber logs (Maghagani, Teakwood), "Sheet" for plywood/chipboard,
