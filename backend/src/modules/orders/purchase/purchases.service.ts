@@ -590,6 +590,13 @@ export class PurchasesService {
   }
 
   private buildPdfHtml(purchase: Awaited<ReturnType<PurchasesService['findOne']>>): string {
+    // Board-feet (timber) lines only - a plain Sheet/Liquid/Count material
+    // has no dimensions and contributes nothing here. Qty is already
+    // stored in Board Feet for those lines, so CFT is just Qty/12.
+    const totalCft = purchase.items
+      .filter((i) => i.rawMaterial.measurementKind === 'BOARD_FEET')
+      .reduce((s, i) => s + Number(i.quantity) / 12, 0);
+
     const rows = purchase.items
       .map((i) => {
         // Timber is priced per CFT, not per Board Foot - unitPrice is stored
@@ -598,8 +605,16 @@ export class PurchasesService {
         // supplier.
         const isBoardFeet = i.rawMaterial.measurementKind === 'BOARD_FEET';
         const rateLabel = isBoardFeet ? `₹${(Number(i.unitPrice) * 12).toLocaleString('en-IN')}/CFT` : `₹${Number(i.unitPrice).toLocaleString('en-IN')}`;
+        // Width/Thickness/Length/Pieces/CFT only ever apply to a board-feet
+        // row - a plain material shows "-" for all five, same as the
+        // detail page.
         return `<tr>
           <td>${escapeHtml(i.rawMaterial.name)}</td>
+          <td style="text-align:right">${isBoardFeet ? `${i.widthIn}w` : '-'}</td>
+          <td style="text-align:right">${isBoardFeet ? `${i.thicknessIn}t` : '-'}</td>
+          <td style="text-align:right">${isBoardFeet ? `${i.lengthFt}l` : '-'}</td>
+          <td style="text-align:right">${isBoardFeet ? i.pieces : '-'}</td>
+          <td style="text-align:right">${isBoardFeet ? (Number(i.quantity) / 12).toFixed(2) : '-'}</td>
           <td style="text-align:right">${Number(i.quantity)}</td>
           <td>${escapeHtml(i.rawMaterial.unit)}</td>
           <td style="text-align:right">${rateLabel}</td>
@@ -627,7 +642,7 @@ export class PurchasesService {
 <body>
   <div class="header">
     <h1>Purchase - ${escapeHtml(purchase.purchaseNumber)}</h1>
-    <p>SSS Company</p>
+    <p>SSS Furniture</p>
   </div>
   <div class="body">
     <div class="meta">
@@ -642,10 +657,26 @@ export class PurchasesService {
       </div>
     </div>
     <table>
-      <thead><tr><th>Material</th><th style="text-align:right">Qty</th><th>Unit</th><th style="text-align:right">Rate</th><th style="text-align:right">Line Total</th></tr></thead>
+      <thead><tr>
+        <th>Material</th>
+        <th style="text-align:right">Width</th>
+        <th style="text-align:right">Thickness</th>
+        <th style="text-align:right">Length</th>
+        <th style="text-align:right">Pieces</th>
+        <th style="text-align:right">CFT</th>
+        <th style="text-align:right">Qty</th>
+        <th>Unit</th>
+        <th style="text-align:right">Rate</th>
+        <th style="text-align:right">Line Total</th>
+      </tr></thead>
       <tbody>
         ${rows}
-        <tr class="total-row"><td colspan="4" style="text-align:right">Total</td><td style="text-align:right">₹${purchase.totalValue.toLocaleString('en-IN')}</td></tr>
+        <tr class="total-row">
+          <td colspan="5"></td>
+          <td style="text-align:right">${totalCft > 0 ? `${totalCft.toFixed(2)} CFT` : ''}</td>
+          <td colspan="3" style="text-align:right">Total</td>
+          <td style="text-align:right">₹${purchase.totalValue.toLocaleString('en-IN')}</td>
+        </tr>
       </tbody>
     </table>
     ${purchase.notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(purchase.notes)}</div>` : ''}
@@ -670,7 +701,7 @@ export class PurchasesService {
       buffer,
       filename: `${purchase.purchaseNumber}.pdf`,
       mimetype: 'application/pdf',
-      caption: `Purchase ${purchase.purchaseNumber} - SSS Company`,
+      caption: `Purchase ${purchase.purchaseNumber} - SSS Furniture`,
     });
   }
 

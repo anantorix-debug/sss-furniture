@@ -162,6 +162,12 @@ function PurchaseDetailContent() {
   if (isLoading || !purchase) return <p className="text-brand-400 text-sm">Loading purchase...</p>;
 
   const cancelled = purchase.status === 'CANCELLED';
+  // Board-feet (timber) lines only - a plain Sheet/Liquid/Count material
+  // has no dimensions and contributes nothing here. Qty is already stored
+  // in Board Feet for those lines, so CFT is just Qty/12 (1 CFT = 12 BF).
+  const totalCft = purchase.items
+    .filter((i) => i.rawMaterial?.measurementKind === 'BOARD_FEET')
+    .reduce((s, i) => s + i.quantity / 12, 0);
 
   return (
     <div className="space-y-6">
@@ -258,39 +264,50 @@ function PurchaseDetailContent() {
           <thead>
             <tr>
               <th>Material</th>
-              <th>Qty</th>
+              <th className="text-right">Width</th>
+              <th className="text-right">Thickness</th>
+              <th className="text-right">Length</th>
+              <th className="text-right">Pieces</th>
+              <th className="text-right">CFT</th>
+              <th className="text-right">Qty</th>
               <th>Unit</th>
               <th>Rate</th>
               <th>Total</th>
             </tr>
           </thead>
           <tbody>
-            {purchase.items.map((item) => (
-              <tr key={item.id}>
-                <td className="font-medium">
-                  {item.rawMaterial?.name}
-                  {item.pieces != null && (
-                    <span className="block text-[11px] text-brand-400">
-                      {item.thicknessIn}&quot; &times; {item.widthIn}&quot; &times; {item.lengthFt}&apos;, {item.pieces} pcs
-                    </span>
-                  )}
-                </td>
-                <td>{item.quantity}</td>
-                <td className="text-brand-500">{item.rawMaterial?.unit}</td>
-                <td>
-                  {/* Timber is priced per CFT, not per Board Foot - unitPrice is
-                      stored as its per-BF equivalent (see Purchase Orders'
-                      handleSubmit), so show it back out as the /CFT rate that
-                      was actually agreed with the supplier. */}
-                  {item.rawMaterial?.measurementKind === 'BOARD_FEET' ? `${formatCurrency(item.unitPrice * 12)}/CFT` : formatCurrency(item.unitPrice)}
-                </td>
-                <td className="font-medium">{formatCurrency(item.quantity * item.unitPrice)}</td>
-              </tr>
-            ))}
+            {purchase.items.map((item) => {
+              // These five columns only ever apply to a board-feet (timber)
+              // line - a plain Sheet/Liquid/Count material has no
+              // dimensions at all, so they just show "-" for those rows.
+              const isBoardFeet = item.rawMaterial?.measurementKind === 'BOARD_FEET';
+              return (
+                <tr key={item.id}>
+                  <td className="font-medium">{item.rawMaterial?.name}</td>
+                  <td className="text-right">{isBoardFeet ? `${item.widthIn}w` : '-'}</td>
+                  <td className="text-right">{isBoardFeet ? `${item.thicknessIn}t` : '-'}</td>
+                  <td className="text-right">{isBoardFeet ? `${item.lengthFt}l` : '-'}</td>
+                  <td className="text-right">{isBoardFeet ? item.pieces : '-'}</td>
+                  <td className="text-right">{isBoardFeet ? (item.quantity / 12).toFixed(2) : '-'}</td>
+                  <td className="text-right">{item.quantity}</td>
+                  <td className="text-brand-500">{item.rawMaterial?.unit}</td>
+                  <td>
+                    {/* Timber is priced per CFT, not per Board Foot - unitPrice is
+                        stored as its per-BF equivalent (see Purchase Orders'
+                        handleSubmit), so show it back out as the /CFT rate that
+                        was actually agreed with the supplier. */}
+                    {isBoardFeet ? `${formatCurrency(item.unitPrice * 12)}/CFT` : formatCurrency(item.unitPrice)}
+                  </td>
+                  <td className="font-medium">{formatCurrency(item.quantity * item.unitPrice)}</td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={4} className="text-right font-semibold text-ink">
+              <td colSpan={5}></td>
+              <td className="text-right font-semibold text-ink">{totalCft > 0 ? `${totalCft.toFixed(2)} CFT` : ''}</td>
+              <td colSpan={3} className="text-right font-semibold text-ink">
                 Total
               </td>
               <td className="font-semibold text-ink">{formatCurrency(purchase.totalValue)}</td>

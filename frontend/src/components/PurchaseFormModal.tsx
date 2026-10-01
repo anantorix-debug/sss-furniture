@@ -119,6 +119,13 @@ export function PurchaseFormModal({
     return (parseFloat(row.quantity) || 0) * price;
   };
   const formTotal = items.reduce((s, r) => s + lineTotal(r), 0);
+  // Board-feet (timber) rows only - a plain Sheet/Liquid/Count row has no
+  // dimensions and contributes nothing here.
+  const formTotalCft = items.reduce((s, r) => {
+    if (!rowIsBoardFeet(r)) return s;
+    const bf = boardFeetPreview(r.thicknessIn, r.widthIn, r.lengthFt, r.pieces);
+    return s + (bf?.totalCft ?? 0);
+  }, 0);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -260,7 +267,10 @@ export function PurchaseFormModal({
             <button type="button" className="text-brand-600 text-xs hover:underline" onClick={addItemRow}>
               + Add Material
             </button>
-            <p className="text-sm font-semibold text-brand-900">Total: {formatCurrency(formTotal)}</p>
+            <div className="text-right">
+              {formTotalCft > 0 && <p className="text-xs text-brand-500">Total CFT: {formTotalCft.toFixed(2)} CFT</p>}
+              <p className="text-sm font-semibold text-brand-900">Total: {formatCurrency(formTotal)}</p>
+            </div>
           </div>
         </div>
 
