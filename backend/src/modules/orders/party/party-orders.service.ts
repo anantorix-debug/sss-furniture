@@ -1046,7 +1046,7 @@ export class PartyOrdersService {
       buffer,
       filename: `Order Confirmation - ${order.jobNumber ?? order.id}.pdf`,
       mimetype: 'application/pdf',
-      caption: `Order confirmation ${order.jobNumber ?? ''} - ${order.shopName} - SSS Company`,
+      caption: `Order confirmation ${order.jobNumber ?? ''} - ${order.shopName} - SSS Furniture`,
     });
   }
 
@@ -1292,7 +1292,7 @@ export class PartyOrdersService {
 <body>
   <div class="header">
     <h1>${escapeHtml(shop.name)}</h1>
-    <p>SSS Company${shop.contactPhone ? ` &middot; ${escapeHtml(shop.contactPhone)}` : ''} &middot; Product Supply Details</p>
+    <p>SSS Furniture${shop.contactPhone ? ` &middot; ${escapeHtml(shop.contactPhone)}` : ''} &middot; Product Supply Details</p>
   </div>
   <div class="body">
     ${filterSummary}

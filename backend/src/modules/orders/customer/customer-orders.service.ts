@@ -862,7 +862,7 @@ export class CustomerOrdersService {
       buffer,
       filename: `Order Confirmation - ${order.orderId}.pdf`,
       mimetype: 'application/pdf',
-      caption: `Order confirmation ${order.orderId} - ${order.product} - SSS Company`,
+      caption: `Order confirmation ${order.orderId} - ${order.product} - SSS Furniture`,
     });
   }
 }

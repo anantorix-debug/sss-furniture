@@ -81,7 +81,7 @@ export class WhatsappService implements OnModuleInit {
   private buildWorkAssignmentText(msg: WorkAssignmentMessage): string {
     const dateStr = msg.workDate.toLocaleDateString('en-IN');
     const lines = [
-      `*New Work Assigned - SSS Company*`,
+      `*New Work Assigned - SSS Furniture*`,
       ``,
       `Carpenter: ${msg.carpenterName}`,
       `Date: ${dateStr}`,

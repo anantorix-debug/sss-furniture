@@ -163,7 +163,7 @@ export class PaymentsService {
 <body>
   <div class="header">
     <h1>Payments Statement</h1>
-    <p>SSS Company</p>
+    <p>SSS Furniture</p>
   </div>
   <div class="body">
     ${filterParts.length ? `<div class="filters"><strong>Filters:</strong> ${filterParts.map((f) => escapeHtml(f as string)).join(' &middot; ')}</div>` : ''}
