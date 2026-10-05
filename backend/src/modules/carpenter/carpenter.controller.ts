@@ -240,6 +240,14 @@ export class CarpenterController {
     return this.service.removeHistoricalBatch(batchId, user.userId);
   }
 
+  // Static route - must come before the dynamic :id route below. Read-only
+  // unified production list (see CarpenterService.listProductionItems).
+  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.CARPENTER, Role.CARVER, Role.POLISHER)
+  @Get('carpenter-work-items/production-items')
+  listProductionItems(@CurrentUser() user: AuthUser) {
+    return this.service.listProductionItems({ viewerRole: user.role as Role, viewerUserId: user.userId });
+  }
+
   @Get('carpenter-work-items/:id')
   findOneWorkItem(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
     return this.service.findOneWorkItem(id, user?.role as Role);

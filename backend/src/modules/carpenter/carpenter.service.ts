@@ -587,6 +587,95 @@ export class CarpenterService {
     return { ...workItem, whatsapp };
   }
 
+  // Phase 1 unified production list (read-only). One logical row per
+  // production run: work items that share the same source order line and
+  // batchId are one run across the Carpenter -> Carving -> Polish stages.
+  // Identity comes from sourceCustomerOrderItemId / sourcePartyOrderItemId /
+  // batchId - never from Model No, which two different orders can share.
+  // Stock production rows have no source order line, so each stock run is
+  // keyed by its batchId.
+  async listProductionItems(params: { viewerRole?: Role; viewerUserId?: string }) {
+    const isEmployee = params.viewerRole === Role.CARPENTER || params.viewerRole === Role.CARVER || params.viewerRole === Role.POLISHER;
+    const rows = await this.prisma.carpenterWorkItem.findMany({
+      include: {
+        carpenter: { select: { id: true, name: true, userId: true } },
+        sourceCustomerOrderItem: {
+          select: {
+            id: true,
+            size: true,
+            sizeUnit: true,
+            order: { select: { id: true, orderId: true, customerName: true, orderDate: true, deliveryStatus: true, actualDeliveryDate: true } },
+          },
+        },
+        sourcePartyOrderItem: {
+          select: {
+            id: true,
+            modelNo: true,
+            order: { select: { id: true, jobNumber: true, shopName: true, orderDate: true, deliveryStatus: true, actualDeliveryDate: true } },
+          },
+        },
+      },
+      orderBy: { workDate: 'asc' },
+    });
+
+    const stageIndex: Record<string, number> = { CARPENTER: 0, CARVING: 1, POLISH: 2 };
+    const groups = new Map<string, any[]>();
+    for (const r of rows as any[]) {
+      const sourceKey = r.sourceCustomerOrderItemId ?? r.sourcePartyOrderItemId ?? 'STOCK';
+      const key = `${sourceKey}::${r.batchId ?? r.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
+    }
+
+    const items: any[] = [];
+    for (const [key, group] of groups) {
+      if (isEmployee && !group.some((r) => r.carpenter?.userId === params.viewerUserId)) continue;
+
+      const ordered = [...group].sort((a, b) => stageIndex[a.stage] - stageIndex[b.stage] || a.workDate.getTime() - b.workDate.getTime());
+      const active = ordered.find((r) => r.status !== 'COMPLETED') ?? null;
+      const current = active ?? ordered[ordered.length - 1];
+      const allCompleted = !active;
+      const first = ordered[0];
+      const order = first.sourceCustomerOrderItem?.order ?? first.sourcePartyOrderItem?.order ?? null;
+      const sourceType = first.sourceCustomerOrderItemId ? 'CUSTOMER_ORDER' : first.sourcePartyOrderItemId ? 'PARTY_ORDER' : 'STOCK_PRODUCTION';
+      const money = !isEmployee;
+
+      items.push({
+        id: key,
+        sourceType,
+        sourceId: order?.id ?? null,
+        sourceItemId: first.sourceCustomerOrderItemId ?? first.sourcePartyOrderItemId ?? null,
+        productionId: first.batchId ?? first.id,
+        orderNumber: first.sourceCustomerOrderItem ? first.sourceCustomerOrderItem.order.orderId : (first.sourcePartyOrderItem?.order.jobNumber ?? null),
+        modelNo: first.modelNo ?? first.sourcePartyOrderItem?.modelNo ?? null,
+        productName: first.productName,
+        category: first.category ?? null,
+        size: [first.size, first.sizeUnit].filter(Boolean).join(' ') || null,
+        quantity: first.quantity,
+        colour: current.color ?? null,
+        customerName: first.sourceCustomerOrderItem?.order.customerName ?? null,
+        partyName: first.sourcePartyOrderItem?.order.shopName ?? null,
+        currentWorkItemId: current.id,
+        currentStage: allCompleted ? 'COMPLETED' : active.stage,
+        employeeId: current.carpenter?.id ?? null,
+        employeeName: current.carpenter?.name ?? null,
+        workerPrice: money ? Number(current.price) : null,
+        workerExtra: money ? Number(current.extra) : null,
+        workerTotal: money ? Number(current.total) : null,
+        productionStatus: allCompleted ? 'COMPLETED' : active.status,
+        deliveryStatus: order?.deliveryStatus ?? null,
+        orderDate: order?.orderDate ?? null,
+        productionDate: ordered.map((r) => r.startedAt ?? r.workDate).sort((a, b) => a.getTime() - b.getTime())[0] ?? null,
+        completedDate: allCompleted ? (ordered.map((r) => r.finishedAt).filter(Boolean).sort((a, b) => b.getTime() - a.getTime())[0] ?? null) : null,
+        deliveryDate: order?.actualDeliveryDate ?? null,
+        workItemIds: ordered.map((r) => r.id),
+      });
+    }
+
+    items.sort((a, b) => (b.productionDate?.getTime?.() ?? 0) - (a.productionDate?.getTime?.() ?? 0));
+    return { items, total: items.length };
+  }
+
   // "Old entry" - an already-finished job logged after the fact. Stored as
   // COMPLETED historical work with its worker price, extra and total kept
   // (never zeroed), so it counts toward that worker's earnings. Skips
