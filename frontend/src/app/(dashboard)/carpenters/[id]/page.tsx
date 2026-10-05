@@ -362,6 +362,8 @@ Please confirm receipt.`,
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">{notice}</p>}
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      <div className="space-y-6">
       <div className="card p-5">
         <h2 className="font-semibold text-brand-900 mb-3 pb-3 border-b border-brand-100">Work List</h2>
         <div className="max-h-80 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
@@ -531,6 +533,8 @@ Please confirm receipt.`,
         </div>
       </div>
 
+      </div>
+      <div className="space-y-6">
       <div className="card p-5">
         <h2 className="font-semibold text-brand-900 mb-3 pb-3 border-b border-brand-100">Payments</h2>
         <div className="max-h-56 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
@@ -596,6 +600,8 @@ Please confirm receipt.`,
             </button>
           </form>
         )}
+      </div>
+      </div>
       </div>
 
       {forcePrompt && (
