@@ -64,7 +64,11 @@ export class PaymentsService {
       !params.source || params.source === 'EXPENSE'
         ? this.prisma.expense.findMany({
             where: { date: dateFilter },
-            include: { category: { select: { id: true, name: true } }, paymentMode: { select: { name: true } } },
+            include: {
+              category: { select: { id: true, name: true } },
+              paymentMode: { select: { name: true } },
+              employee: { select: { name: true } },
+            },
           })
         : [],
     ]);
@@ -121,7 +125,7 @@ export class PaymentsService {
         amount: Number(e.amount),
         mode: e.paymentMode.name,
         note: e.particulars,
-        relatedName: e.vendorName ?? e.category.name,
+        relatedName: e.employee?.name ?? e.vendorName ?? e.category.name,
         relatedId: e.id,
         categoryId: e.category.id,
         direction: 'OUT' as const,
