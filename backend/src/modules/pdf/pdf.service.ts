@@ -14,25 +14,26 @@ export class PdfService implements OnModuleDestroy {
 
   constructor(private config: ConfigService) {}
 
-  private getBrowser() {
-    if (!this.browserPromise) {
-      this.browserPromise = puppeteer
-        .launch({
-          headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-          executablePath: this.config.get<string>('PUPPETEER_EXECUTABLE_PATH') || undefined,
-        })
-        .catch((err: unknown) => {
-          this.browserPromise = null;
-          throw err;
-        });
-      this.browserPromise.then((browser: any) => {
+  private getBrowser(): Promise<any> {
+    if (this.browserPromise) return this.browserPromise;
+    const launching: Promise<any> = puppeteer
+      .launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+        executablePath: this.config.get<string>('PUPPETEER_EXECUTABLE_PATH') || undefined,
+      })
+      .then((browser: any) => {
         browser.on('disconnected', () => {
           this.browserPromise = null;
         });
+        return browser;
+      })
+      .catch((err: unknown) => {
+        this.browserPromise = null;
+        throw err;
       });
-    }
-    return this.browserPromise;
+    this.browserPromise = launching;
+    return launching;
   }
 
   // pageNumbers is opt-in (default off) so every existing report keeps its
