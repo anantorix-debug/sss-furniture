@@ -70,6 +70,13 @@ export class CreateWorkItemDto {
   @IsOptional()
   notifyWhatsapp?: boolean;
 
+  // "Old entry (already happened)" - Super Admin only, re-checked in
+  // CarpenterService.createWorkItem. Records the work straight as completed
+  // with its price/extra/total stored, skipping assignment, WhatsApp and the
+  // live stage handoff. Mirrors the purchase order's directRecord flag.
+  @IsOptional()
+  directRecord?: boolean;
+
   // Optional link to an existing Godown Stock product this item's output
   // should feed once completed - "manufacture without any order" (source
   // stays the default STOCK either way). Omit to have completion create a

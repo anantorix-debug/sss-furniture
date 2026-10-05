@@ -464,9 +464,67 @@ export class CarpenterService {
       assignedById?: string;
     },
   ) {
+    if (dto.directRecord) {
+      return this.recordDirectWorkItem(dto, userId, viewerRole);
+    }
     const workItem = await this.createWorkItemRow(dto, userId, viewerRole, sourceInfo);
     const whatsapp = await this.finalizeAssignment(workItem, dto.notifyWhatsapp);
     return { ...workItem, whatsapp };
+  }
+
+  // "Old entry" - an already-finished job logged after the fact. Stored as
+  // COMPLETED historical work with its worker price, extra and total kept
+  // (never zeroed), so it counts toward that worker's earnings. Skips
+  // assignment, WhatsApp and the live stage handoff on purpose - none of
+  // that should fire for work that already happened.
+  private async recordDirectWorkItem(dto: CreateWorkItemDto, userId: string, viewerRole?: Role) {
+    if (viewerRole !== Role.SUPERADMIN) {
+      throw new ForbiddenException('Only Super Admin can record a work entry as already completed');
+    }
+    if (!dto.carpenterId) {
+      throw new BadRequestException('Choose the worker who did this work');
+    }
+    const carpenter = await this.prisma.carpenter.findUnique({ where: { id: dto.carpenterId } });
+    if (!carpenter) throw new NotFoundException('Carpenter not found');
+
+    const price = dto.price ?? 0;
+    const extra = dto.extra ?? 0;
+    const quantity = dto.quantity ?? 1;
+    const workDate = new Date(dto.workDate);
+
+    const item = await this.prisma.carpenterWorkItem.create({
+      data: {
+        carpenterId: dto.carpenterId,
+        stage: (dto.stage ?? 'CARPENTER') as any,
+        workDate,
+        modelNo: dto.modelNo,
+        productName: dto.productName,
+        category: dto.category,
+        size: dto.size,
+        sizeUnit: dto.sizeUnit,
+        price,
+        extra,
+        quantity,
+        total: (price + extra) * quantity,
+        status: 'COMPLETED',
+        startedAt: workDate,
+        finishedAt: workDate,
+        entryType: 'HISTORICAL',
+        notes: dto.notes,
+        createdById: userId,
+        assignedById: userId,
+      },
+    });
+
+    await this.audit.log({
+      userId,
+      action: 'WORK_ITEM_RECORDED_DIRECT',
+      targetType: 'CarpenterWorkItem',
+      targetId: item.id,
+      metadata: { carpenterId: dto.carpenterId, productName: dto.productName, price, extra, quantity, total: Number(item.total) },
+    });
+
+    return { ...item, whatsapp: null };
   }
 
   // Customer/Party Order production already gets an unassigned placeholder

@@ -30,6 +30,7 @@ const emptyWork = {
   extra: '0',
   quantity: '1',
   notifyWhatsapp: true,
+  directRecord: false,
 };
 
 const STAGE_LABEL: Record<ProductionStage, string> = { CARPENTER: 'Carpenter', CARVING: 'Carving', POLISH: 'Polish' };
@@ -65,7 +66,8 @@ const emptyIssueRow: IssueRow = { rawMaterialId: '', quantity: '', thicknessIn: 
 function CarpenterDetailContent() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPERADMIN';
   const { forcePrompt, closeForcePrompt, runForceable } = useForceable();
   const { data: carpenter, isLoading, mutate } = useSWR<CarpenterDetail>(`/carpenters/${id}`, fetcher);
   const { data: materials } = useSWR<RawMaterial[]>('/raw-materials', fetcher);
@@ -124,11 +126,12 @@ function CarpenterDetailContent() {
         extra: parseFloat(workForm.extra || '0'),
         quantity: parseInt(workForm.quantity, 10) || 1,
         total,
-        notifyWhatsapp: workForm.notifyWhatsapp,
+        notifyWhatsapp: workForm.directRecord ? false : workForm.notifyWhatsapp,
+        ...(workForm.directRecord ? { directRecord: true } : {}),
       });
       setWorkForm(emptyWork);
       mutate();
-      if (workForm.notifyWhatsapp) {
+      if (workForm.notifyWhatsapp && !workForm.directRecord) {
         setNotice(
           created.whatsapp?.sent
             ? 'Work assigned and WhatsApp notification sent.'
@@ -401,6 +404,18 @@ Please confirm receipt.`,
         </div>
 
         <form onSubmit={addWork} className="space-y-2">
+          {isSuperAdmin && (
+            <div className="flex items-center gap-4 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input type="radio" name="workEntryType" checked={!workForm.directRecord} onChange={() => setWorkForm((f) => ({ ...f, directRecord: false }))} />
+                New Assignment
+              </label>
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input type="radio" name="workEntryType" checked={workForm.directRecord} onChange={() => setWorkForm((f) => ({ ...f, directRecord: true }))} />
+                Old Entry (already done)
+              </label>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
             <select className="input" value={workForm.stage} onChange={(e) => setWorkForm((f) => ({ ...f, stage: e.target.value as ProductionStage }))}>
               <option value="CARPENTER">Carpenter</option>
@@ -421,12 +436,14 @@ Please confirm receipt.`,
             <input type="number" step="0.01" className="input" placeholder="Extra" value={workForm.extra} onChange={(e) => setWorkForm((f) => ({ ...f, extra: e.target.value }))} />
             <div className="text-sm text-brand-600 font-medium">Total: {formatCurrency(total || 0)}</div>
           </div>
-          <label className="flex items-center gap-2 text-sm text-brand-600">
-            <input type="checkbox" checked={workForm.notifyWhatsapp} onChange={(e) => setWorkForm((f) => ({ ...f, notifyWhatsapp: e.target.checked }))} />
-            Notify carpenter on WhatsApp when assigned
-          </label>
+          {!workForm.directRecord && (
+            <label className="flex items-center gap-2 text-sm text-brand-600">
+              <input type="checkbox" checked={workForm.notifyWhatsapp} onChange={(e) => setWorkForm((f) => ({ ...f, notifyWhatsapp: e.target.checked }))} />
+              Notify carpenter on WhatsApp when assigned
+            </label>
+          )}
           <button type="submit" className="btn-primary w-full">
-            Assign Work
+            {workForm.directRecord ? 'Record Old Entry' : 'Assign Work'}
           </button>
         </form>
       </div>
