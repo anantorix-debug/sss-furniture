@@ -1599,6 +1599,29 @@ function ProductionRunsTab({ view }: { view: 'COMPLETED' | 'DELIVERED' }) {
   const title = view === 'COMPLETED' ? 'Completed production' : 'Delivered production';
   const dateOf = (r: ProductionRunRow) => (view === 'COMPLETED' ? r.completedDate : (r.dispatchDate ?? r.completedDate));
   const emptyText = view === 'COMPLETED' ? 'No completed production yet.' : 'No delivered production yet.';
+  const [search, setSearch] = useState('');
+  const [source, setSource] = useState<'ALL' | ProductionRunRow['sourceType']>('ALL');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const from = dateFrom ? new Date(dateFrom).getTime() : null;
+    const to = dateTo ? new Date(dateTo).getTime() + 86399999 : null;
+    return (data?.items ?? []).filter((r) => {
+      if (source !== 'ALL' && r.sourceType !== source) return false;
+      const d = dateOf(r);
+      const t = d ? new Date(d).getTime() : null;
+      if (from !== null && (t === null || t < from)) return false;
+      if (to !== null && (t === null || t > to)) return false;
+      if (q) {
+        const hay = [r.modelNo, r.productName, r.orderNumber, r.customerName, r.partyName, r.employeeName].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, search, source, dateFrom, dateTo]);
+  const anyFilter = search || source !== 'ALL' || dateFrom || dateTo;
 
   return (
     <div className="card overflow-hidden">
@@ -1606,9 +1629,28 @@ function ProductionRunsTab({ view }: { view: 'COMPLETED' | 'DELIVERED' }) {
         <h2 className="font-semibold text-brand-900">{title}</h2>
         {data && (
           <span className="text-sm text-brand-500">
-            {data.total} {data.total === 1 ? 'record' : 'records'}
+            {anyFilter ? `Showing ${filtered.length} of ${data.total}` : `${data.total} ${data.total === 1 ? 'record' : 'records'}`}
           </span>
         )}
+      </div>
+      <div className="px-5 py-3 border-b border-brand-100 grid grid-cols-1 sm:grid-cols-5 gap-2 items-end">
+        <input className="input" placeholder="Search model, product, order, customer, employee" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="input" value={source} onChange={(e) => setSource(e.target.value as 'ALL' | ProductionRunRow['sourceType'])}>
+          <option value="ALL">All sources</option>
+          <option value="CUSTOMER_ORDER">Customer Order</option>
+          <option value="PARTY_ORDER">Party Order</option>
+          <option value="STOCK_PRODUCTION">Stock Production</option>
+        </select>
+        <input type="date" className="input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
+        <input type="date" className="input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
+        <button
+          type="button"
+          className="btn-secondary text-sm"
+          disabled={!anyFilter}
+          onClick={() => { setSearch(''); setSource('ALL'); setDateFrom(''); setDateTo(''); }}
+        >
+          Clear filters
+        </button>
       </div>
       <div className="overflow-x-auto">
         <table className="table-shell">
@@ -1640,12 +1682,12 @@ function ProductionRunsTab({ view }: { view: 'COMPLETED' | 'DELIVERED' }) {
                 <td colSpan={13} className="text-center text-red-600 py-6">Could not load production records.</td>
               </tr>
             )}
-            {data && data.items.length === 0 && (
+            {data && filtered.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center text-brand-400 py-6">{emptyText}</td>
+                <td colSpan={13} className="text-center text-brand-400 py-6">{anyFilter ? 'No records match these filters.' : emptyText}</td>
               </tr>
             )}
-            {data?.items.map((r) => {
+            {filtered.map((r) => {
               const date = dateOf(r);
               return (
                 <tr key={r.id}>
