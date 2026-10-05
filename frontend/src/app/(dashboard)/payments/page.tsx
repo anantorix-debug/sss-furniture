@@ -14,6 +14,15 @@ import type { PaymentSource, UnifiedPaymentsResponse } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
+const SOURCE_TABS: { value: '' | PaymentSource; label: string }[] = [
+  { value: '', label: 'All' },
+  { value: 'CUSTOMER_ORDER', label: 'Customer Orders' },
+  { value: 'PARTY_ORDER', label: 'Party Orders' },
+  { value: 'SUPPLIER', label: 'Suppliers' },
+  { value: 'CARPENTER', label: 'Carpenters' },
+  { value: 'EXPENSE', label: 'Expenses' },
+];
+
 const SOURCE_LABEL: Record<PaymentSource, string> = {
   CUSTOMER_ORDER: 'Customer Order',
   PARTY_ORDER: 'Party Order',
@@ -86,7 +95,7 @@ function PaymentsContent() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-900">Payments</h1>
-          <p className="text-sm text-brand-500 mt-1">All customer, party, supplier and carpenter payments in one place.</p>
+          <p className="text-sm text-brand-500 mt-1">Money received from customers and parties, and money paid to suppliers, carpenters and for expenses.</p>
         </div>
         <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
           {downloading ? 'Preparing...' : 'Download PDF'}
@@ -94,35 +103,56 @@ function PaymentsContent() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard label="Money In" value={formatCurrency(data?.totalIn ?? 0)} accent="success" sub="Customer + Party" />
-        <StatCard label="Money Out" value={formatCurrency(data?.totalOut ?? 0)} accent="warning" sub="Supplier + Carpenter + Expenses" />
-        <StatCard label="Net" value={formatCurrency(data?.net ?? 0)} />
+        <StatCard label="Money Received" value={formatCurrency(data?.totalIn ?? 0)} accent="success" sub="From customers and party orders" />
+        <StatCard label="Money Paid" value={formatCurrency(data?.totalOut ?? 0)} accent="warning" sub="To suppliers, carpenters and expenses" />
+        <StatCard label="Balance" value={formatCurrency(data?.net ?? 0)} sub="Received minus paid" />
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <input className="input max-w-xs" placeholder="Search customer, shop, supplier, carpenter..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        <select className="input max-w-[180px]" value={source} onChange={(e) => setSource(e.target.value)}>
-          <option value="">All sources</option>
-          <option value="CUSTOMER_ORDER">Customer Orders</option>
-          <option value="PARTY_ORDER">Party Orders</option>
-          <option value="SUPPLIER">Suppliers</option>
-          <option value="CARPENTER">Carpenters</option>
-          <option value="EXPENSE">Expenses</option>
-        </select>
-        <select className="input max-w-[180px]" value={mode} onChange={(e) => setMode(e.target.value)} aria-label="Payment mode">
-          <option value="">All modes</option>
+      <div className="flex gap-1 border-b border-brand-200 overflow-x-auto">
+        {SOURCE_TABS.map((t) => (
+          <button
+            key={t.label}
+            onClick={() => setSource(t.value)}
+            className={`px-3.5 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${
+              source === t.value ? 'border-brand-700 text-brand-900' : 'border-transparent text-ink-muted hover:text-ink'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-xs text-ink-muted">
+          Search
+          <input className="input max-w-xs" placeholder="Name, shop, supplier or carpenter" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-ink-muted">
+          Payment mode
+          <select className="input max-w-[180px]" value={mode} onChange={(e) => setMode(e.target.value)}>
+          <option value="">All payment modes</option>
           {(paymentModes ?? []).map((m) => (
             <option key={m.id} value={m.name}>{m.name}</option>
           ))}
-        </select>
-        <select className="input max-w-[200px]" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Expense category">
-          <option value="">All categories</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-ink-muted">
+          Expense category
+          <select className="input max-w-[200px]" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="">All expense categories</option>
           {(categories ?? []).map((c) => (
             <option key={c.id} value={c.id}>{c.name}</option>
           ))}
-        </select>
-        <input type="date" className="input max-w-[160px]" value={from} onChange={(e) => setFrom(e.target.value)} />
-        <input type="date" className="input max-w-[160px]" value={to} onChange={(e) => setTo(e.target.value)} />
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-ink-muted">
+          From date
+          <input type="date" className="input max-w-[160px]" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-ink-muted">
+          To date
+          <input type="date" className="input max-w-[160px]" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
         <button
           type="button"
           className="btn-secondary text-sm"
