@@ -6,7 +6,7 @@ function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-export type PaymentSource = 'CUSTOMER_ORDER' | 'PARTY_ORDER' | 'SUPPLIER' | 'CARPENTER';
+export type PaymentSource = 'CUSTOMER_ORDER' | 'PARTY_ORDER' | 'SUPPLIER' | 'CARPENTER' | 'EXPENSE';
 
 export interface UnifiedPayment {
   id: string;
@@ -17,6 +17,7 @@ export interface UnifiedPayment {
   note: string | null;
   relatedName: string;
   relatedId: string;
+  categoryId?: string | null;
   direction: 'IN' | 'OUT';
 }
 
@@ -25,6 +26,7 @@ const SOURCE_LABEL: Record<PaymentSource, string> = {
   PARTY_ORDER: 'Party Order',
   SUPPLIER: 'Supplier',
   CARPENTER: 'Carpenter',
+  EXPENSE: 'Expense',
 };
 
 @Injectable()
@@ -34,13 +36,13 @@ export class PaymentsService {
     private pdf: PdfService,
   ) {}
 
-  async findAll(params: { source?: PaymentSource; from?: string; to?: string; search?: string }) {
+  async findAll(params: { source?: PaymentSource; from?: string; to?: string; search?: string; mode?: string; category?: string }) {
     const dateFilter =
       params.from || params.to
         ? { gte: params.from ? new Date(params.from) : undefined, lte: params.to ? new Date(params.to) : undefined }
         : undefined;
 
-    const [customerPayments, partyPayments, supplierPayments, carpenterPayments] = await Promise.all([
+    const [customerPayments, partyPayments, supplierPayments, carpenterPayments, expenses] = await Promise.all([
       !params.source || params.source === 'CUSTOMER_ORDER'
         ? this.prisma.customerOrderPayment.findMany({
             where: { date: dateFilter },
@@ -58,6 +60,12 @@ export class PaymentsService {
         : [],
       !params.source || params.source === 'CARPENTER'
         ? this.prisma.carpenterPayment.findMany({ where: { date: dateFilter }, include: { carpenter: { select: { id: true, name: true } } } })
+        : [],
+      !params.source || params.source === 'EXPENSE'
+        ? this.prisma.expense.findMany({
+            where: { date: dateFilter },
+            include: { category: { select: { id: true, name: true } }, paymentMode: { select: { name: true } } },
+          })
         : [],
     ]);
 
@@ -106,11 +114,28 @@ export class PaymentsService {
         relatedId: p.carpenter.id,
         direction: 'OUT' as const,
       })),
+      ...expenses.map((e) => ({
+        id: e.id,
+        source: 'EXPENSE' as const,
+        date: e.date,
+        amount: Number(e.amount),
+        mode: e.paymentMode.name,
+        note: e.particulars,
+        relatedName: e.vendorName ?? e.category.name,
+        relatedId: e.id,
+        categoryId: e.category.id,
+        direction: 'OUT' as const,
+      })),
     ];
 
-    const filtered = params.search
-      ? unified.filter((p) => p.relatedName.toLowerCase().includes(params.search!.toLowerCase()))
-      : unified;
+    const modeFilter = params.mode?.trim().toLowerCase();
+    const categoryFilter = params.category?.trim();
+    const filtered = unified.filter((p) => {
+      if (params.search && !p.relatedName.toLowerCase().includes(params.search.toLowerCase())) return false;
+      if (modeFilter && (p.mode ?? '').trim().toLowerCase() !== modeFilter) return false;
+      if (categoryFilter && (p.source !== 'EXPENSE' || p.categoryId !== categoryFilter)) return false;
+      return true;
+    });
 
     filtered.sort((a, b) => b.date.getTime() - a.date.getTime());
 
@@ -120,7 +145,7 @@ export class PaymentsService {
     return { payments: filtered, totalIn, totalOut, net: totalIn - totalOut };
   }
 
-  private buildPdfHtml(result: Awaited<ReturnType<PaymentsService['findAll']>>, params: { source?: PaymentSource; from?: string; to?: string; search?: string }): string {
+  private buildPdfHtml(result: Awaited<ReturnType<PaymentsService['findAll']>>, params: { source?: PaymentSource; from?: string; to?: string; search?: string; mode?: string; category?: string }): string {
     const rows = result.payments
       .map(
         (p) => `<tr>
@@ -183,7 +208,7 @@ export class PaymentsService {
 </body></html>`;
   }
 
-  async generatePdf(params: { source?: PaymentSource; from?: string; to?: string; search?: string }): Promise<Buffer> {
+  async generatePdf(params: { source?: PaymentSource; from?: string; to?: string; search?: string; mode?: string; category?: string }): Promise<Buffer> {
     const result = await this.findAll(params);
     const html = this.buildPdfHtml(result, params);
     return this.pdf.renderHtmlToPdf(html);

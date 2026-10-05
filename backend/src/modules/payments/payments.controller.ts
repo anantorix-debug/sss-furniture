@@ -21,8 +21,10 @@ export class PaymentsController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('search') search?: string,
+    @Query('mode') mode?: string,
+    @Query('category') category?: string,
   ) {
-    return this.service.findAll({ source, from, to, search });
+    return this.service.findAll({ source, from, to, search, mode, category });
   }
 
   @Get('pdf')
@@ -32,8 +34,10 @@ export class PaymentsController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('search') search?: string,
+    @Query('mode') mode?: string,
+    @Query('category') category?: string,
   ) {
-    const buffer = await this.service.generatePdf({ source, from, to, search });
+    const buffer = await this.service.generatePdf({ source, from, to, search, mode, category });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="payments-statement-${new Date().toISOString().slice(0, 10)}.pdf"`);
     res.send(buffer);

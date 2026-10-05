@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { getAccessToken } from '@/lib/api';
@@ -9,6 +9,7 @@ import { StatCard } from '@/components/StatCard';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
 import { PaymentDetailModal } from '@/components/PaymentDetailModal';
+import { Pagination } from '@/components/Pagination';
 import type { PaymentSource, UnifiedPaymentsResponse } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -18,6 +19,7 @@ const SOURCE_LABEL: Record<PaymentSource, string> = {
   PARTY_ORDER: 'Party Order',
   SUPPLIER: 'Supplier',
   CARPENTER: 'Carpenter',
+  EXPENSE: 'Expense',
 };
 
 const SOURCE_CHIP: Record<PaymentSource, ChipColor> = {
@@ -25,6 +27,7 @@ const SOURCE_CHIP: Record<PaymentSource, ChipColor> = {
   PARTY_ORDER: 'blue',
   SUPPLIER: 'amber',
   CARPENTER: 'gray',
+  EXPENSE: 'gray',
 };
 
 function PaymentsContent() {
@@ -32,6 +35,19 @@ function PaymentsContent() {
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [mode, setMode] = useState('');
+  const [category, setCategory] = useState('');
+  const { data: categories } = useSWR<{ id: string; name: string }[]>('/expense-config/categories', fetcher);
+  const { data: paymentModes } = useSWR<{ id: string; name: string }[]>('/expense-config/payment-modes', fetcher);
+  const filtersActive = Boolean(source || search || from || to || mode || category);
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    setPage(1);
+  }, [source, search, from, to, mode, category]);
+  const allRows = data?.payments ?? [];
+  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const pageRows = allRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const [detailTarget, setDetailTarget] = useState<{ source: PaymentSource; relatedId: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
 
@@ -40,6 +56,8 @@ function PaymentsContent() {
     ...(search ? { search } : {}),
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
+    ...(mode ? { mode } : {}),
+    ...(category ? { category } : {}),
   });
   const { data, isLoading } = useSWR<UnifiedPaymentsResponse>(`/payments?${queryParams}`, fetcher);
 
@@ -77,7 +95,7 @@ function PaymentsContent() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard label="Money In" value={formatCurrency(data?.totalIn ?? 0)} accent="success" sub="Customer + Party" />
-        <StatCard label="Money Out" value={formatCurrency(data?.totalOut ?? 0)} accent="warning" sub="Supplier + Carpenter" />
+        <StatCard label="Money Out" value={formatCurrency(data?.totalOut ?? 0)} accent="warning" sub="Supplier + Carpenter + Expenses" />
         <StatCard label="Net" value={formatCurrency(data?.net ?? 0)} />
       </div>
 
@@ -89,9 +107,30 @@ function PaymentsContent() {
           <option value="PARTY_ORDER">Party Orders</option>
           <option value="SUPPLIER">Suppliers</option>
           <option value="CARPENTER">Carpenters</option>
+          <option value="EXPENSE">Expenses</option>
+        </select>
+        <select className="input max-w-[180px]" value={mode} onChange={(e) => setMode(e.target.value)} aria-label="Payment mode">
+          <option value="">All modes</option>
+          {(paymentModes ?? []).map((m) => (
+            <option key={m.id} value={m.name}>{m.name}</option>
+          ))}
+        </select>
+        <select className="input max-w-[200px]" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Expense category">
+          <option value="">All categories</option>
+          {(categories ?? []).map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
         </select>
         <input type="date" className="input max-w-[160px]" value={from} onChange={(e) => setFrom(e.target.value)} />
         <input type="date" className="input max-w-[160px]" value={to} onChange={(e) => setTo(e.target.value)} />
+        <button
+          type="button"
+          className="btn-secondary text-sm"
+          disabled={!filtersActive}
+          onClick={() => { setSearch(''); setSource(''); setFrom(''); setTo(''); setMode(''); setCategory(''); }}
+        >
+          Clear filters
+        </button>
       </div>
 
       <div className="card overflow-x-auto">
@@ -115,14 +154,14 @@ function PaymentsContent() {
                 </td>
               </tr>
             )}
-            {!isLoading && data?.payments.length === 0 && (
+            {!isLoading && allRows.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center py-8 text-brand-400">
                   No payments found
                 </td>
               </tr>
             )}
-            {data?.payments.map((p) => (
+            {pageRows.map((p) => (
               <tr
                 key={`${p.source}-${p.id}`}
                 className="cursor-pointer hover:bg-brand-50"
@@ -141,6 +180,9 @@ function PaymentsContent() {
             ))}
           </tbody>
         </table>
+        {allRows.length > PAGE_SIZE && (
+          <Pagination page={page} totalPages={totalPages} total={allRows.length} limit={PAGE_SIZE} onPageChange={setPage} />
+        )}
       </div>
 
       {detailTarget && (

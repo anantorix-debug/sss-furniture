@@ -719,7 +719,7 @@ export interface Purchase {
 
 // --- Unified payments & reports ---------------------------------------------
 
-export type PaymentSource = 'CUSTOMER_ORDER' | 'PARTY_ORDER' | 'SUPPLIER' | 'CARPENTER';
+export type PaymentSource = 'CUSTOMER_ORDER' | 'PARTY_ORDER' | 'SUPPLIER' | 'CARPENTER' | 'EXPENSE';
 
 export interface UnifiedPayment {
   id: string;

@@ -14,6 +14,7 @@ const SOURCE_ENDPOINT: Record<PaymentSource, string> = {
   PARTY_ORDER: '/party-orders',
   SUPPLIER: '/suppliers',
   CARPENTER: '/carpenters',
+  EXPENSE: '/expenses',
 };
 
 const SOURCE_LINK: Record<PaymentSource, string> = {
@@ -21,6 +22,7 @@ const SOURCE_LINK: Record<PaymentSource, string> = {
   PARTY_ORDER: '/party-orders',
   SUPPLIER: '/suppliers',
   CARPENTER: '/carpenters',
+  EXPENSE: '/expenses',
 };
 
 // Clicking a payment row opens this - fetches the full record behind that
