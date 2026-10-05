@@ -316,38 +316,39 @@ Please confirm receipt.`,
         <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.push('/carpenters')}>
           &larr; All carpenters
         </button>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-brand-900">{carpenter.name}</h1>
-            {carpenter.phone && <p className="text-sm text-brand-500">{carpenter.phone}</p>}
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold text-brand-900">{carpenter.name}</h1>
+              <span className="badge bg-brand-50 text-brand-700">{carpenter.workerType ?? 'CARPENTER'}</span>
+            </div>
+            {carpenter.phone && <p className="text-sm text-brand-500 mt-1">{carpenter.phone}</p>}
           </div>
-          {carpenter.phone && (
-            <WhatsAppActionButton
-              recipientName={carpenter.name ?? 'Carpenter'}
-              recipientPhone={carpenter.phone}
-              onClick={handleSendWhatsApp}
-              size="md"
-            />
-          )}
+          <div className="flex flex-wrap gap-2">
+            {canEdit &&
+              (
+                [
+                  ['WORK', 'Work Statement'],
+                  ['SALARY', 'Salary Ledger'],
+                  ['VOUCHER', 'Payment Voucher'],
+                  ['COMBINED', 'Combined Statement'],
+                ] as const
+              ).map(([kind, label]) => (
+                <button key={kind} type="button" className="btn-secondary text-sm" onClick={() => downloadWorkerPdf(kind)}>
+                  {label}
+                </button>
+              ))}
+            {carpenter.phone && (
+              <WhatsAppActionButton
+                recipientName={carpenter.name ?? 'Carpenter'}
+                recipientPhone={carpenter.phone}
+                onClick={handleSendWhatsApp}
+                size="md"
+              />
+            )}
+          </div>
         </div>
       </div>
-
-      {canEdit && (
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              ['WORK', 'Work Statement'],
-              ['SALARY', 'Salary Ledger'],
-              ['VOUCHER', 'Payment Voucher'],
-              ['COMBINED', 'Combined Statement'],
-            ] as const
-          ).map(([kind, label]) => (
-            <button key={kind} type="button" className="btn-secondary text-sm" onClick={() => downloadWorkerPdf(kind)}>
-              {label} PDF
-            </button>
-          ))}
-        </div>
-      )}
 
       {canEdit && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -362,7 +363,7 @@ Please confirm receipt.`,
       {notice && <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">{notice}</p>}
 
       <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3">Work List</h2>
+        <h2 className="font-semibold text-brand-900 mb-3 pb-3 border-b border-brand-100">Work List</h2>
         <div className="max-h-80 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell">
             <thead>
@@ -489,7 +490,7 @@ Please confirm receipt.`,
       </div>
 
       <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3">Materials Used</h2>
+        <h2 className="font-semibold text-brand-900 mb-3 pb-3 border-b border-brand-100">Materials Used</h2>
         <p className="text-xs text-brand-400 mb-3">Every material issued against this employee&apos;s work items, most recent first.</p>
         <div className="max-h-64 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100">
           <table className="table-shell">
@@ -531,7 +532,7 @@ Please confirm receipt.`,
       </div>
 
       <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3">Payments</h2>
+        <h2 className="font-semibold text-brand-900 mb-3 pb-3 border-b border-brand-100">Payments</h2>
         <div className="max-h-56 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell">
             <thead>
