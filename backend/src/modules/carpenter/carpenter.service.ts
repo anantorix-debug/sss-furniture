@@ -205,7 +205,7 @@ export class CarpenterService {
     const payTable = (title: string) => `
       <h3 style="font-size:13px;margin:18px 0 8px">${title}</h3>
       <table>
-        <thead><tr><th>Date</th><th>Reference</th><th>Type</th><th>Mode</th><th>Remarks</th><th style="text-align:right">Amount</th></tr></thead>
+        <thead><tr><th>Date</th><th>Voucher No.</th><th>Type</th><th>Mode</th><th>Remarks</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>
           ${payRows
             .map(

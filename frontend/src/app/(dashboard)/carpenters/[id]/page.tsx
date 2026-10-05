@@ -78,6 +78,7 @@ function CarpenterDetailContent() {
   } = useWhatsApp();
 
   const [workForm, setWorkForm] = useState(emptyWork);
+  const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().slice(0, 10), amount: '', mode: 'CASH', note: '', paymentType: 'SALARY' as CarpenterPaymentType, reference: '' });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -260,19 +261,37 @@ Please confirm receipt.`,
             {carpenter.phone && <p className="text-sm text-brand-500 mt-1">{carpenter.phone}</p>}
           </div>
           <div className="flex flex-wrap gap-2">
-            {canEdit &&
-              (
-                [
-                  ['WORK', 'Work Statement'],
-                  ['SALARY', 'Salary Ledger'],
-                  ['VOUCHER', 'Payment Voucher'],
-                  ['COMBINED', 'Combined Statement'],
-                ] as const
-              ).map(([kind, label]) => (
-                <button key={kind} type="button" className="btn-secondary text-sm" onClick={() => downloadWorkerPdf(kind)}>
-                  {label}
+            {canEdit && (
+              <div className="relative">
+                <button type="button" className="btn-secondary text-sm" onClick={() => setPdfMenuOpen((open) => !open)}>
+                  Download PDF
                 </button>
-              ))}
+                {pdfMenuOpen && (
+                  <div className="absolute right-0 z-20 mt-1 w-52 bg-white border border-brand-200 rounded-lg shadow-lg py-1">
+                    {(
+                      [
+                        ['WORK', 'Work Statement'],
+                        ['SALARY', 'Salary Ledger'],
+                        ['VOUCHER', 'Payment Voucher'],
+                        ['COMBINED', 'Combined Statement'],
+                      ] as const
+                    ).map(([kind, label]) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-brand-50"
+                        onClick={() => {
+                          setPdfMenuOpen(false);
+                          downloadWorkerPdf(kind);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {carpenter.phone && (
               <WhatsAppActionButton
                 recipientName={carpenter.name ?? 'Carpenter'}
@@ -463,7 +482,7 @@ Please confirm receipt.`,
               <tr>
                 <th>Date</th>
                 <th>Type</th>
-                <th>Reference</th>
+                <th>Voucher No.</th>
                 <th>Amount</th>
                 <th>Mode</th>
                 <th>Note</th>
@@ -499,7 +518,7 @@ Please confirm receipt.`,
           </table>
         </div>
         {canEdit && (
-          <form onSubmit={addPayment} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 items-end">
+          <form onSubmit={addPayment} className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
             <input type="date" className="input" required value={paymentForm.date} onChange={(e) => setPaymentForm((f) => ({ ...f, date: e.target.value }))} />
             <select className="input" value={paymentForm.paymentType} onChange={(e) => setPaymentForm((f) => ({ ...f, paymentType: e.target.value as CarpenterPaymentType }))}>
               {(Object.keys(CARPENTER_PAYMENT_TYPE_LABEL) as CarpenterPaymentType[]).map((t) => (
@@ -508,7 +527,7 @@ Please confirm receipt.`,
                 </option>
               ))}
             </select>
-            <input className="input" placeholder="Reference (e.g. SSS-250)" value={paymentForm.reference} onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))} />
+            <input className="input" placeholder="Voucher No. (e.g. SSS-250)" value={paymentForm.reference} onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))} />
             <input type="number" step="0.01" className="input" placeholder="Amount" required value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))} />
             <select className="input" value={paymentForm.mode} onChange={(e) => setPaymentForm((f) => ({ ...f, mode: e.target.value }))}>
               <option>CASH</option>
