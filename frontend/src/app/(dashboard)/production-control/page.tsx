@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
@@ -1622,6 +1622,13 @@ function ProductionRunsTab({ view }: { view: 'COMPLETED' | 'DELIVERED' }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, search, source, dateFrom, dateTo]);
   const anyFilter = search || source !== 'ALL' || dateFrom || dateTo;
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    setPage(1);
+  }, [search, source, dateFrom, dateTo]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="card overflow-hidden">
@@ -1687,7 +1694,7 @@ function ProductionRunsTab({ view }: { view: 'COMPLETED' | 'DELIVERED' }) {
                 <td colSpan={13} className="text-center text-brand-400 py-6">{anyFilter ? 'No records match these filters.' : emptyText}</td>
               </tr>
             )}
-            {filtered.map((r) => {
+            {pageRows.map((r) => {
               const date = dateOf(r);
               return (
                 <tr key={r.id}>
@@ -1713,6 +1720,9 @@ function ProductionRunsTab({ view }: { view: 'COMPLETED' | 'DELIVERED' }) {
           </tbody>
         </table>
       </div>
+      {filtered.length > PAGE_SIZE && (
+        <Pagination page={page} totalPages={totalPages} total={filtered.length} limit={PAGE_SIZE} onPageChange={setPage} />
+      )}
     </div>
   );
 }
