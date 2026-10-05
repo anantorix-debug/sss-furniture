@@ -1560,14 +1560,130 @@ function WorkEntriesTab() {
   );
 }
 
+// --- Completed / Delivered views (read from the canonical production list) ---
+
+type ProductionRunRow = {
+  id: string;
+  sourceType: 'CUSTOMER_ORDER' | 'PARTY_ORDER' | 'STOCK_PRODUCTION';
+  orderNumber: string | null;
+  modelNo: string | null;
+  productName: string;
+  size: string | null;
+  quantity: number;
+  customerName: string | null;
+  partyName: string | null;
+  currentStage: string;
+  employeeName: string | null;
+  workerPrice: number | null;
+  workerExtra: number | null;
+  workerTotal: number | null;
+  productionStatus: string;
+  deliveryStatus: string | null;
+  productionDate: string | null;
+  completedDate: string | null;
+  dispatchDate: string | null;
+};
+
+const SOURCE_LABEL: Record<ProductionRunRow['sourceType'], string> = {
+  CUSTOMER_ORDER: 'Customer Order',
+  PARTY_ORDER: 'Party Order',
+  STOCK_PRODUCTION: 'Stock Production',
+};
+const STAGE_NAME: Record<string, string> = { CARPENTER: 'Carpenter', CARVING: 'Carving', POLISH: 'Polishing', COMPLETED: 'Completed' };
+
+function ProductionRunsTab({ view }: { view: 'COMPLETED' | 'DELIVERED' }) {
+  const { data, error, isLoading } = useSWR<{ items: ProductionRunRow[]; total: number }>(
+    `/carpenter-work-items/production-items?view=${view}`,
+    fetcher,
+  );
+  const title = view === 'COMPLETED' ? 'Completed production' : 'Delivered production';
+  const dateOf = (r: ProductionRunRow) => (view === 'COMPLETED' ? r.completedDate : (r.dispatchDate ?? r.completedDate));
+  const emptyText = view === 'COMPLETED' ? 'No completed production yet.' : 'No delivered production yet.';
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-4 border-b border-brand-100 flex items-center justify-between">
+        <h2 className="font-semibold text-brand-900">{title}</h2>
+        {data && (
+          <span className="text-sm text-brand-500">
+            {data.total} {data.total === 1 ? 'record' : 'records'}
+          </span>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="table-shell">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Model No</th>
+              <th>Product</th>
+              <th>Source</th>
+              <th>Customer / Party</th>
+              <th>Stage</th>
+              <th>Employee</th>
+              <th>Qty</th>
+              <th>Worker Price</th>
+              <th>Extra</th>
+              <th>Worker Total</th>
+              <th>Production</th>
+              <th>Delivery</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && (
+              <tr>
+                <td colSpan={13} className="text-center text-brand-400 py-6">Loading...</td>
+              </tr>
+            )}
+            {error && (
+              <tr>
+                <td colSpan={13} className="text-center text-red-600 py-6">Could not load production records.</td>
+              </tr>
+            )}
+            {data && data.items.length === 0 && (
+              <tr>
+                <td colSpan={13} className="text-center text-brand-400 py-6">{emptyText}</td>
+              </tr>
+            )}
+            {data?.items.map((r) => {
+              const date = dateOf(r);
+              return (
+                <tr key={r.id}>
+                  <td>{date ? formatDate(date) : '-'}</td>
+                  <td>{r.modelNo ?? '-'}</td>
+                  <td>
+                    {r.productName}
+                    {r.size && <div className="text-xs text-brand-400">{r.size}</div>}
+                  </td>
+                  <td>{SOURCE_LABEL[r.sourceType] ?? r.sourceType}</td>
+                  <td>{r.customerName ?? r.partyName ?? (r.orderNumber ? '-' : 'Stock')}</td>
+                  <td>{STAGE_NAME[r.currentStage] ?? r.currentStage}</td>
+                  <td>{r.employeeName?.trim() || '-'}</td>
+                  <td>{r.quantity}</td>
+                  <td>{r.workerPrice != null ? formatCurrency(r.workerPrice) : '-'}</td>
+                  <td>{r.workerExtra != null ? formatCurrency(r.workerExtra) : '-'}</td>
+                  <td className="font-medium">{r.workerTotal != null ? formatCurrency(r.workerTotal) : '-'}</td>
+                  <td>{r.productionStatus}</td>
+                  <td>{r.deliveryStatus === 'DISPATCHED' ? 'Dispatched (stock)' : (r.deliveryStatus ?? '-')}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // --- Page shell: one menu entry, five tabs ---
 
-type TopTab = 'overview' | 'dispatch' | 'verification';
+type TopTab = 'overview' | 'dispatch' | 'verification' | 'delivered';
 
 const TOP_TABS: { key: TopTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'dispatch', label: 'Dispatch Pipeline' },
   { key: 'verification', label: 'Ready for Verification' },
+  { key: 'delivered', label: 'Delivered' },
 ];
 
 function ProductionControlContent() {
@@ -1599,6 +1715,7 @@ function ProductionControlContent() {
       {tab === 'overview' && <OverviewTab />}
       {tab === 'dispatch' && <DispatchTab />}
       {tab === 'verification' && <VerificationTab />}
+      {tab === 'delivered' && <ProductionRunsTab view="DELIVERED" />}
     </div>
   );
 }

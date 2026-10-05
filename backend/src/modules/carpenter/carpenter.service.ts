@@ -594,7 +594,7 @@ export class CarpenterService {
   // batchId - never from Model No, which two different orders can share.
   // Stock production rows have no source order line, so each stock run is
   // keyed by its batchId.
-  async listProductionItems(params: { viewerRole?: Role; viewerUserId?: string }) {
+  async listProductionItems(params: { viewerRole?: Role; viewerUserId?: string; view?: 'COMPLETED' | 'DELIVERED' }) {
     const isEmployee = params.viewerRole === Role.CARPENTER || params.viewerRole === Role.CARVER || params.viewerRole === Role.POLISHER;
     const rows = await this.prisma.carpenterWorkItem.findMany({
       include: {
@@ -617,6 +617,19 @@ export class CarpenterService {
       },
       orderBy: { workDate: 'asc' },
     });
+
+    // Stock production has no order link, so its dispatch is matched by the
+    // job number (the work item's modelNo) to a finished-stock row that has a
+    // dispatch record. Dispatch is the only confirmed delivery signal for stock.
+    const stockDispatches = await this.prisma.finishedStockItem.findMany({
+      where: { sourceCustomerOrderItemId: null, sourcePartyOrderItemId: null, dispatchRecords: { some: {} } },
+      select: { jobNumber: true, dispatchRecords: { select: { dispatchDate: true }, orderBy: { dispatchDate: 'desc' }, take: 1 } },
+    });
+    const stockDispatch = new Map<string, Date>();
+    for (const f of stockDispatches) {
+      const d = f.dispatchRecords[0]?.dispatchDate;
+      if (d && !stockDispatch.has(f.jobNumber)) stockDispatch.set(f.jobNumber, d);
+    }
 
     const stageIndex: Record<string, number> = { CARPENTER: 0, CARVING: 1, POLISH: 2 };
     const groups = new Map<string, any[]>();
@@ -663,7 +676,8 @@ export class CarpenterService {
         workerExtra: money ? Number(current.extra) : null,
         workerTotal: money ? Number(current.total) : null,
         productionStatus: allCompleted ? 'COMPLETED' : active.status,
-        deliveryStatus: order?.deliveryStatus ?? null,
+        deliveryStatus: order ? order.deliveryStatus : (stockDispatch?.get(first.modelNo ?? "") ? "DISPATCHED" : null),
+        dispatchDate: order ? null : (stockDispatch?.get(first.modelNo ?? "") ?? null),
         orderDate: order?.orderDate ?? null,
         productionDate: ordered.map((r) => r.startedAt ?? r.workDate).sort((a, b) => a.getTime() - b.getTime())[0] ?? null,
         completedDate: allCompleted ? (ordered.map((r) => r.finishedAt).filter(Boolean).sort((a, b) => b.getTime() - a.getTime())[0] ?? null) : null,
@@ -672,8 +686,13 @@ export class CarpenterService {
       });
     }
 
-    items.sort((a, b) => (b.productionDate?.getTime?.() ?? 0) - (a.productionDate?.getTime?.() ?? 0));
-    return { items, total: items.length };
+    const visible = items.filter((i) => {
+      if (params.view === 'COMPLETED') return i.productionStatus === 'COMPLETED';
+      if (params.view === 'DELIVERED') return i.sourceType === 'STOCK_PRODUCTION' ? i.deliveryStatus === 'DISPATCHED' : i.deliveryStatus === 'DELIVERED';
+      return true;
+    });
+    visible.sort((a, b) => (b.productionDate?.getTime?.() ?? 0) - (a.productionDate?.getTime?.() ?? 0));
+    return { items: visible, total: visible.length };
   }
 
   // "Old entry" - an already-finished job logged after the fact. Stored as

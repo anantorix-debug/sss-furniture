@@ -244,8 +244,9 @@ export class CarpenterController {
   // unified production list (see CarpenterService.listProductionItems).
   @Roles(Role.SUPERADMIN, Role.ADMIN, Role.CARPENTER, Role.CARVER, Role.POLISHER)
   @Get('carpenter-work-items/production-items')
-  listProductionItems(@CurrentUser() user: AuthUser) {
-    return this.service.listProductionItems({ viewerRole: user.role as Role, viewerUserId: user.userId });
+  listProductionItems(@CurrentUser() user: AuthUser, @Query('view') view?: string) {
+    const v = view === 'COMPLETED' || view === 'DELIVERED' ? view : undefined;
+    return this.service.listProductionItems({ viewerRole: user.role as Role, viewerUserId: user.userId, view: v });
   }
 
   @Get('carpenter-work-items/:id')
