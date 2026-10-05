@@ -40,14 +40,6 @@ function PaymentsContent() {
   const { data: categories } = useSWR<{ id: string; name: string }[]>('/expense-config/categories', fetcher);
   const { data: paymentModes } = useSWR<{ id: string; name: string }[]>('/expense-config/payment-modes', fetcher);
   const filtersActive = Boolean(source || search || from || to || mode || category);
-  const PAGE_SIZE = 20;
-  const [page, setPage] = useState(1);
-  useEffect(() => {
-    setPage(1);
-  }, [source, search, from, to, mode, category]);
-  const allRows = data?.payments ?? [];
-  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
-  const pageRows = allRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const [detailTarget, setDetailTarget] = useState<{ source: PaymentSource; relatedId: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
 
@@ -60,6 +52,14 @@ function PaymentsContent() {
     ...(category ? { category } : {}),
   });
   const { data, isLoading } = useSWR<UnifiedPaymentsResponse>(`/payments?${queryParams}`, fetcher);
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    setPage(1);
+  }, [source, search, from, to, mode, category]);
+  const allRows = data?.payments ?? [];
+  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const pageRows = allRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   async function downloadPdf() {
     setDownloading(true);
