@@ -506,13 +506,26 @@ export interface DispatchRecord {
   dispatchedBy?: { id: string; name: string };
 }
 
+export type CarpenterPaymentType = 'SALARY' | 'ADVANCE' | 'BONUS' | 'EXTRA_WORK' | 'DEDUCTION' | 'OTHER';
+
 export interface CarpenterPayment {
   id: string;
   date: string;
   amount: number;
   mode?: string | null;
   note?: string | null;
+  paymentType?: CarpenterPaymentType | null;
+  reference?: string | null;
 }
+
+export const CARPENTER_PAYMENT_TYPE_LABEL: Record<CarpenterPaymentType, string> = {
+  SALARY: 'Salary',
+  ADVANCE: 'Advance',
+  BONUS: 'Bonus',
+  EXTRA_WORK: 'Extra Work',
+  DEDUCTION: 'Deduction',
+  OTHER: 'Other',
+};
 
 export interface CarpenterDetail extends CarpenterSummary {
   workItems: CarpenterWorkItem[];

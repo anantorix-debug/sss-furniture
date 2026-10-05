@@ -824,6 +824,14 @@ model CarpenterPayment {
   amount      Decimal   @db.Decimal(12, 2)
   mode        String?
   note        String?
+  // SALARY (default - every row that predates this field), ADVANCE, BONUS,
+  // EXTRA_WORK, DEDUCTION, OTHER. DEDUCTION reduces the balance payable
+  // without any cash changing hands; every other type is cash paid out.
+  // A string rather than a DB enum so adding a type later doesn't need a
+  // migration.
+  paymentType String    @default("SALARY")
+  // Voucher / reference number (e.g. "SSS-250"). Optional free text.
+  reference   String?
 
   createdById String
   createdBy   User     @relation(fields: [createdById], references: [id])

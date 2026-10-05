@@ -1,14 +1,15 @@
 import { IsDateString, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { CARPENTER_PAYMENT_TYPES } from './create-carpenter-payment.dto';
 
-export const CARPENTER_PAYMENT_TYPES = ['SALARY', 'ADVANCE', 'BONUS', 'EXTRA_WORK', 'DEDUCTION', 'OTHER'] as const;
-
-export class CreateCarpenterPaymentDto {
+export class UpdateCarpenterPaymentDto {
   @IsDateString()
-  date: string;
+  @IsOptional()
+  date?: string;
 
   @IsNumber()
   @Min(0.01)
-  amount: number;
+  @IsOptional()
+  amount?: number;
 
   @IsString()
   @IsOptional()

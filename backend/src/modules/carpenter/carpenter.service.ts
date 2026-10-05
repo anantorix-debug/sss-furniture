@@ -11,6 +11,7 @@ import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { CreateHistoricalWorkItemDto } from './dto/create-historical-work-item.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
+import { UpdateCarpenterPaymentDto } from './dto/update-carpenter-payment.dto';
 import { CreateProductionTeamDto } from './dto/create-production-team.dto';
 import { UpdateProductionTeamDto } from './dto/update-production-team.dto';
 import { Role } from '../../common/enums/role.enum';
@@ -88,7 +89,7 @@ export class CarpenterService {
     ]);
     const mapped = carpenters.map((c) => {
       const totalWorkValue = c.workItems.reduce((sum, w) => sum + Number(w.total), 0);
-      const totalPaid = c.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+      const { totalPaid, totalAdvance, totalDeduction, balance } = this.paymentSummary(c.payments, totalWorkValue);
       return {
         id: c.id,
         name: c.name,
@@ -98,7 +99,7 @@ export class CarpenterService {
         workItemCount: c.workItems.length,
         user: c.user,
         team: c.team,
-        ...(hide ? {} : { totalWorkValue, totalPaid, balance: totalWorkValue - totalPaid }),
+        ...(hide ? {} : { totalWorkValue, totalPaid, totalAdvance, totalDeduction, balance }),
       };
     });
     return paginated ? paginate(mapped, total, page, limit) : mapped;
@@ -117,13 +118,34 @@ export class CarpenterService {
     if (!carpenter) throw new NotFoundException('Carpenter not found');
 
     const totalWorkValue = carpenter.workItems.reduce((sum, w) => sum + Number(w.total), 0);
-    const totalPaid = carpenter.payments.reduce((sum, p) => sum + Number(p.amount), 0);
 
     if (hide) {
       const { payments, workItems, ...rest } = carpenter;
       return { ...rest, workItems: workItems.map((w) => stripWorkItemMoney(w, true)) };
     }
-    return { ...carpenter, totalWorkValue, totalPaid, balance: totalWorkValue - totalPaid };
+    const summary = this.paymentSummary(carpenter.payments, totalWorkValue);
+    return { ...carpenter, totalWorkValue, ...summary };
+  }
+
+  // One consistent accounting model for a worker's money. Every payment type
+  // except DEDUCTION is cash actually paid out - an ADVANCE is cash paid ahead
+  // of earnings, so it's counted once inside totalPaid and never subtracted a
+  // second time. A DEDUCTION reduces what's still owed without any cash moving.
+  // Balance = earned - cash paid - deductions.
+  private paymentSummary(payments: { amount: any; paymentType?: string | null }[], totalWorkValue: number) {
+    let totalPaid = 0;
+    let totalAdvance = 0;
+    let totalDeduction = 0;
+    for (const p of payments) {
+      const amount = Number(p.amount);
+      if (p.paymentType === 'DEDUCTION') {
+        totalDeduction += amount;
+        continue;
+      }
+      totalPaid += amount;
+      if (p.paymentType === 'ADVANCE') totalAdvance += amount;
+    }
+    return { totalPaid, totalAdvance, totalDeduction, balance: totalWorkValue - totalPaid - totalDeduction };
   }
 
   // A team is scoped to one category (Carpenter/Carving/Polish) - refuse a
@@ -1665,23 +1687,67 @@ export class CarpenterService {
 
   async addPayment(carpenterId: string, dto: CreateCarpenterPaymentDto, userId: string) {
     await this.findOneCarpenter(carpenterId);
-    await this.prisma.carpenterPayment.create({
+    const payment = await this.prisma.carpenterPayment.create({
       data: {
         carpenterId,
         date: new Date(dto.date),
         amount: dto.amount,
         mode: dto.mode,
         note: dto.note,
+        paymentType: dto.paymentType ?? 'SALARY',
+        reference: dto.reference,
         createdById: userId,
+      },
+    });
+    await this.audit.log({
+      userId,
+      action: 'CARPENTER_PAYMENT_ADDED',
+      targetType: 'CarpenterPayment',
+      targetId: payment.id,
+      metadata: { carpenterId, amount: Number(payment.amount), paymentType: payment.paymentType, reference: payment.reference },
+    });
+    return this.findOneCarpenter(carpenterId);
+  }
+
+  async updatePayment(carpenterId: string, paymentId: string, dto: UpdateCarpenterPaymentDto, userId: string) {
+    const existing = await this.prisma.carpenterPayment.findUnique({ where: { id: paymentId } });
+    if (!existing || existing.carpenterId !== carpenterId) throw new NotFoundException('Payment not found');
+    const updated = await this.prisma.carpenterPayment.update({
+      where: { id: paymentId },
+      data: {
+        date: dto.date ? new Date(dto.date) : undefined,
+        amount: dto.amount,
+        mode: dto.mode,
+        note: dto.note,
+        paymentType: dto.paymentType,
+        reference: dto.reference,
+      },
+    });
+    await this.audit.log({
+      userId,
+      action: 'CARPENTER_PAYMENT_UPDATED',
+      targetType: 'CarpenterPayment',
+      targetId: paymentId,
+      metadata: {
+        carpenterId,
+        before: { amount: Number(existing.amount), paymentType: existing.paymentType, reference: existing.reference },
+        after: { amount: Number(updated.amount), paymentType: updated.paymentType, reference: updated.reference },
       },
     });
     return this.findOneCarpenter(carpenterId);
   }
 
-  async removePayment(carpenterId: string, paymentId: string) {
+  async removePayment(carpenterId: string, paymentId: string, userId: string) {
     const payment = await this.prisma.carpenterPayment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.carpenterId !== carpenterId) throw new NotFoundException('Payment not found');
     await this.prisma.carpenterPayment.delete({ where: { id: paymentId } });
+    await this.audit.log({
+      userId,
+      action: 'CARPENTER_PAYMENT_REMOVED',
+      targetType: 'CarpenterPayment',
+      targetId: paymentId,
+      metadata: { carpenterId, amount: Number(payment.amount), paymentType: payment.paymentType, reference: payment.reference },
+    });
     return this.findOneCarpenter(carpenterId);
   }
 }

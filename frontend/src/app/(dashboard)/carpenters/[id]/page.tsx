@@ -17,7 +17,7 @@ import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { useForceable } from '@/hooks/useForceable';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { boardFeetPreview } from '@/lib/boardFeet';
-import type { CarpenterDetail, ProductionStage, RawMaterial, StockMovement, WorkStatus } from '@/types';
+import { CARPENTER_PAYMENT_TYPE_LABEL, type CarpenterDetail, type CarpenterPaymentType, type ProductionStage, type RawMaterial, type StockMovement, type WorkStatus } from '@/types';
 
 const emptyWork = {
   stage: 'CARPENTER' as ProductionStage,
@@ -87,7 +87,7 @@ function CarpenterDetailContent() {
   } = useWhatsApp();
 
   const [workForm, setWorkForm] = useState(emptyWork);
-  const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().slice(0, 10), amount: '', mode: 'CASH', note: '' });
+  const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().slice(0, 10), amount: '', mode: 'CASH', note: '', paymentType: 'SALARY' as CarpenterPaymentType, reference: '' });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const canEdit = hasRole('ADMIN');
@@ -254,8 +254,10 @@ function CarpenterDetailContent() {
         amount: parseFloat(paymentForm.amount),
         mode: paymentForm.mode,
         note: paymentForm.note || undefined,
+        paymentType: paymentForm.paymentType,
+        reference: paymentForm.reference || undefined,
       });
-      setPaymentForm({ date: new Date().toISOString().slice(0, 10), amount: '', mode: 'CASH', note: '' });
+      setPaymentForm({ date: new Date().toISOString().slice(0, 10), amount: '', mode: 'CASH', note: '', paymentType: 'SALARY', reference: '' });
       mutate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to add payment');
@@ -478,6 +480,8 @@ Please confirm receipt.`,
             <thead>
               <tr>
                 <th>Date</th>
+                <th>Type</th>
+                <th>Reference</th>
                 <th>Amount</th>
                 <th>Mode</th>
                 <th>Note</th>
@@ -487,7 +491,7 @@ Please confirm receipt.`,
             <tbody>
               {(carpenter.payments ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center text-brand-400 py-4">
+                  <td colSpan={7} className="text-center text-brand-400 py-4">
                     No payments recorded
                   </td>
                 </tr>
@@ -495,6 +499,8 @@ Please confirm receipt.`,
               {(carpenter.payments ?? []).map((p) => (
                 <tr key={p.id}>
                   <td>{formatDate(p.date)}</td>
+                  <td>{CARPENTER_PAYMENT_TYPE_LABEL[(p.paymentType ?? 'SALARY') as CarpenterPaymentType] ?? '-'}</td>
+                  <td>{p.reference ?? '-'}</td>
                   <td className="font-medium">{formatCurrency(p.amount)}</td>
                   <td>{p.mode ?? '-'}</td>
                   <td>{p.note ?? '-'}</td>
@@ -511,8 +517,16 @@ Please confirm receipt.`,
           </table>
         </div>
         {canEdit && (
-          <form onSubmit={addPayment} className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+          <form onSubmit={addPayment} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 items-end">
             <input type="date" className="input" required value={paymentForm.date} onChange={(e) => setPaymentForm((f) => ({ ...f, date: e.target.value }))} />
+            <select className="input" value={paymentForm.paymentType} onChange={(e) => setPaymentForm((f) => ({ ...f, paymentType: e.target.value as CarpenterPaymentType }))}>
+              {(Object.keys(CARPENTER_PAYMENT_TYPE_LABEL) as CarpenterPaymentType[]).map((t) => (
+                <option key={t} value={t}>
+                  {CARPENTER_PAYMENT_TYPE_LABEL[t]}
+                </option>
+              ))}
+            </select>
+            <input className="input" placeholder="Reference (e.g. SSS-250)" value={paymentForm.reference} onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))} />
             <input type="number" step="0.01" className="input" placeholder="Amount" required value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))} />
             <select className="input" value={paymentForm.mode} onChange={(e) => setPaymentForm((f) => ({ ...f, mode: e.target.value }))}>
               <option>CASH</option>

@@ -7,6 +7,7 @@ import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { CreateHistoricalWorkItemDto } from './dto/create-historical-work-item.dto';
 import { UpdateWorkStatusDto } from './dto/update-work-status.dto';
 import { CreateCarpenterPaymentDto } from './dto/create-carpenter-payment.dto';
+import { UpdateCarpenterPaymentDto } from './dto/update-carpenter-payment.dto';
 import { CreateProductionTeamDto } from './dto/create-production-team.dto';
 import { UpdateProductionTeamDto } from './dto/update-production-team.dto';
 import { UpdateModelNoDto } from '../orders/customer/dto/update-model-no.dto';
@@ -79,9 +80,20 @@ export class CarpenterController {
   }
 
   @Roles(Role.ADMIN)
+  @Patch('carpenters/:id/payments/:paymentId')
+  updatePayment(
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: UpdateCarpenterPaymentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.updatePayment(id, paymentId, dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
   @Delete('carpenters/:id/payments/:paymentId')
-  removePayment(@Param('id') id: string, @Param('paymentId') paymentId: string) {
-    return this.service.removePayment(id, paymentId);
+  removePayment(@Param('id') id: string, @Param('paymentId') paymentId: string, @CurrentUser() user: AuthUser) {
+    return this.service.removePayment(id, paymentId, user.userId);
   }
 
   // Production Teams
