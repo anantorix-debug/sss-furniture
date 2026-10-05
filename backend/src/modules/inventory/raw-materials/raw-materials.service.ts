@@ -557,7 +557,19 @@ export class RawMaterialsService {
     const group = params.viewerRole ? GROUP_FOR_ROLE[params.viewerRole] : undefined;
     const isEmployeeViewer =
       params.viewerRole === Role.CARPENTER || params.viewerRole === Role.CARVER || params.viewerRole === Role.POLISHER;
-    const effectiveCreatedById = isEmployeeViewer ? params.viewerUserId : params.createdById;
+    // An employee sees material issued against their own work items, plus
+    // any usage they recorded themselves. Admin/Super Admin see everything
+    // (subject to the filters they pass).
+    const employeeScope =
+      isEmployeeViewer && params.viewerUserId
+        ? {
+            OR: [
+              { createdById: params.viewerUserId },
+              { workItem: { carpenter: { userId: params.viewerUserId } } },
+            ],
+          }
+        : undefined;
+    const effectiveCreatedById = isEmployeeViewer ? undefined : params.createdById;
     const paginated = params.page != null;
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
@@ -576,6 +588,7 @@ export class RawMaterialsService {
       type: (params.type || undefined) as any,
       workItemId: params.workItemId || undefined,
       createdById: effectiveCreatedById || undefined,
+      ...(employeeScope ?? {}),
       workItem:
         params.workerType || params.carpenterId
           ? {

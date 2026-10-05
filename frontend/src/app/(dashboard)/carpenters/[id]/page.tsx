@@ -31,8 +31,6 @@ const emptyWork = {
   price: '',
   extra: '0',
   quantity: '1',
-  notifyWhatsapp: true,
-  directRecord: false,
 };
 
 const STAGE_LABEL: Record<ProductionStage, string> = { CARPENTER: 'Carpenter', CARVING: 'Carving', POLISH: 'Polish' };
@@ -149,18 +147,11 @@ function CarpenterDetailContent() {
         extra: parseFloat(workForm.extra || '0'),
         quantity: parseInt(workForm.quantity, 10) || 1,
         total,
-        notifyWhatsapp: workForm.directRecord ? false : workForm.notifyWhatsapp,
-        ...(workForm.directRecord ? { directRecord: true } : {}),
+        directRecord: true,
       });
       setWorkForm(emptyWork);
       mutate();
-      if (workForm.notifyWhatsapp && !workForm.directRecord) {
-        setNotice(
-          created.whatsapp?.sent
-            ? 'Work assigned and WhatsApp notification sent.'
-            : `Work assigned. WhatsApp notification not sent (${created.whatsapp?.reason ?? 'no phone on file'}).`,
-        );
-      }
+      setNotice('Old entry recorded.');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to add work item');
     }
@@ -376,6 +367,8 @@ Please confirm receipt.`,
                 <th>Product</th>
                 <th>Size</th>
                 <th>Qty</th>
+                {canEdit && <th>Price</th>}
+                {canEdit && <th>Extra</th>}
                 {canEdit && <th>Total</th>}
                 <th>Materials Used</th>
                 <th>Status</th>
@@ -385,7 +378,7 @@ Please confirm receipt.`,
             <tbody>
               {carpenter.workItems.length === 0 && (
                 <tr>
-                  <td colSpan={canEdit ? 10 : 9} className="text-center text-brand-400 py-4">
+                  <td colSpan={canEdit ? 12 : 9} className="text-center text-brand-400 py-4">
                     No work items yet
                   </td>
                 </tr>
@@ -403,6 +396,8 @@ Please confirm receipt.`,
                   </td>
                   <td>{w.size ?? '-'}</td>
                   <td>{w.quantity}</td>
+                  {canEdit && <td>{formatCurrency(w.price ?? 0)}</td>}
+                  {canEdit && <td>{formatCurrency(w.extra ?? 0)}</td>}
                   {canEdit && <td className="font-medium">{formatCurrency(w.total ?? 0)}</td>}
                   <td className="max-w-[220px]">
                     {!w.stockMovements || w.stockMovements.length === 0 ? (
@@ -446,19 +441,8 @@ Please confirm receipt.`,
           </table>
         </div>
 
+        {isSuperAdmin && (
         <form onSubmit={addWork} className="space-y-2">
-          {isSuperAdmin && (
-            <div className="flex items-center gap-4 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">
-              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input type="radio" name="workEntryType" checked={!workForm.directRecord} onChange={() => setWorkForm((f) => ({ ...f, directRecord: false }))} />
-                New Assignment
-              </label>
-              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input type="radio" name="workEntryType" checked={workForm.directRecord} onChange={() => setWorkForm((f) => ({ ...f, directRecord: true }))} />
-                Old Entry (already done)
-              </label>
-            </div>
-          )}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
             <select className="input" value={workForm.stage} onChange={(e) => setWorkForm((f) => ({ ...f, stage: e.target.value as ProductionStage }))}>
               <option value="CARPENTER">Carpenter</option>
@@ -479,16 +463,11 @@ Please confirm receipt.`,
             <input type="number" step="0.01" className="input" placeholder="Extra" value={workForm.extra} onChange={(e) => setWorkForm((f) => ({ ...f, extra: e.target.value }))} />
             <div className="text-sm text-brand-600 font-medium">Total: {formatCurrency(total || 0)}</div>
           </div>
-          {!workForm.directRecord && (
-            <label className="flex items-center gap-2 text-sm text-brand-600">
-              <input type="checkbox" checked={workForm.notifyWhatsapp} onChange={(e) => setWorkForm((f) => ({ ...f, notifyWhatsapp: e.target.checked }))} />
-              Notify carpenter on WhatsApp when assigned
-            </label>
-          )}
           <button type="submit" className="btn-primary w-full">
-            {workForm.directRecord ? 'Record Old Entry' : 'Assign Work'}
+            Record Old Entry
           </button>
         </form>
+        )}
       </div>
 
       <div className="card p-5">
