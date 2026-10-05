@@ -604,7 +604,8 @@ export class CarpenterService {
             id: true,
             size: true,
             sizeUnit: true,
-            order: { select: { id: true, orderId: true, customerName: true, orderDate: true, deliveryStatus: true, actualDeliveryDate: true } },
+            product: { select: { modelNo: true } },
+            order: { select: { id: true, orderId: true, customerName: true, orderDate: true, deliveryStatus: true, actualDeliveryDate: true, cotTrack: true } },
           },
         },
         sourcePartyOrderItem: {
@@ -660,7 +661,7 @@ export class CarpenterService {
         sourceItemId: first.sourceCustomerOrderItemId ?? first.sourcePartyOrderItemId ?? null,
         productionId: first.batchId ?? first.id,
         orderNumber: first.sourceCustomerOrderItem ? first.sourceCustomerOrderItem.order.orderId : (first.sourcePartyOrderItem?.order.jobNumber ?? null),
-        modelNo: first.modelNo ?? first.sourcePartyOrderItem?.modelNo ?? null,
+        modelNo: first.modelNo ?? first.sourcePartyOrderItem?.modelNo ?? first.sourceCustomerOrderItem?.product?.modelNo ?? first.sourceCustomerOrderItem?.order?.cotTrack ?? null,
         productName: first.productName,
         category: first.category ?? null,
         size: [first.size, first.sizeUnit].filter(Boolean).join(' ') || null,
