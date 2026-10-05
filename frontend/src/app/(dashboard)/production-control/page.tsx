@@ -1683,7 +1683,7 @@ const TOP_TABS: { key: TopTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'dispatch', label: 'Dispatch Pipeline' },
   { key: 'verification', label: 'Ready for Verification' },
-  { key: 'delivered', label: 'Delivered' },
+  { key: 'delivered', label: 'PCD' },
 ];
 
 function ProductionControlContent() {
