@@ -1,26 +1,52 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const puppeteer = require('puppeteer');
 
+// One shared headless browser, launched lazily and relaunched if it dies.
+// Previously every PDF launched and tore down its own Chromium and waited
+// for the network to go fully idle, so a single slow image stalled the
+// request until the 30s navigation timeout.
 @Injectable()
-export class PdfService {
+export class PdfService implements OnModuleDestroy {
   private readonly logger = new Logger(PdfService.name);
+  private browserPromise: Promise<any> | null = null;
 
   constructor(private config: ConfigService) {}
+
+  private getBrowser() {
+    if (!this.browserPromise) {
+      this.browserPromise = puppeteer
+        .launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+          executablePath: this.config.get<string>('PUPPETEER_EXECUTABLE_PATH') || undefined,
+        })
+        .catch((err: unknown) => {
+          this.browserPromise = null;
+          throw err;
+        });
+      this.browserPromise.then((browser: any) => {
+        browser.on('disconnected', () => {
+          this.browserPromise = null;
+        });
+      });
+    }
+    return this.browserPromise;
+  }
 
   // pageNumbers is opt-in (default off) so every existing report keeps its
   // current output byte-for-byte - only reports that ask for it (long,
   // multi-page statements) get a "Page X of Y" footer.
   async renderHtmlToPdf(html: string, options?: { pageNumbers?: boolean }): Promise<Buffer> {
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-      executablePath: this.config.get<string>('PUPPETEER_EXECUTABLE_PATH') || undefined,
-    });
+    const browser = await this.getBrowser();
+    const page = await browser.newPage();
+    page.setDefaultTimeout(20000);
     try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      // domcontentloaded is enough for our inline HTML; any remote images
+      // get a short bounded wait below instead of blocking on full idle.
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      await page.waitForNetworkIdle({ idleTime: 500, timeout: 8000 }).catch(() => undefined);
       const pdf = await page.pdf({
         format: 'A4',
         printBackground: true,
@@ -39,7 +65,14 @@ export class PdfService {
       this.logger.error(`Failed to render PDF: ${(err as Error).message}`);
       throw err;
     } finally {
-      await browser.close().catch(() => undefined);
+      await page.close().catch(() => undefined);
     }
+  }
+
+  async onModuleDestroy() {
+    if (!this.browserPromise) return;
+    const browser = await this.browserPromise.catch(() => null);
+    await browser?.close().catch(() => undefined);
+    this.browserPromise = null;
   }
 }
