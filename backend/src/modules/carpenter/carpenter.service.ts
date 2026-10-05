@@ -4,6 +4,8 @@ import { WorkerType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { AuditService } from '../audit/audit.service';
+import { PdfService } from '../pdf/pdf.service';
+import { escapeHtml, REPORT_PDF_STYLES, renderReportHeader, renderGeneratedFooter } from '../../common/utils/pdf-report.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateCarpenterDto } from './dto/create-carpenter.dto';
 import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
@@ -59,6 +61,7 @@ export class CarpenterService {
     private whatsapp: WhatsappService,
     private audit: AuditService,
     private notifications: NotificationsService,
+    private pdf: PdfService,
   ) {}
 
   // --- Carpenters ------------------------------------------------------
@@ -146,6 +149,118 @@ export class CarpenterService {
       if (p.paymentType === 'ADVANCE') totalAdvance += amount;
     }
     return { totalPaid, totalAdvance, totalDeduction, balance: totalWorkValue - totalPaid - totalDeduction };
+  }
+
+  // Worker statements. kind: WORK (work statement), SALARY (earnings +
+  // payments ledger), VOUCHER (payments only), COMBINED (work + ledger).
+  // dateFrom/dateTo narrow the rows shown; the summary totals are always
+  // the worker's full lifetime position so a filtered print never shows a
+  // misleading balance.
+  async generateWorkerPdf(
+    carpenterId: string,
+    kind: 'WORK' | 'SALARY' | 'VOUCHER' | 'COMBINED',
+    range: { dateFrom?: string; dateTo?: string } = {},
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const worker = await this.prisma.carpenter.findUnique({
+      where: { id: carpenterId },
+      include: {
+        workItems: { orderBy: { workDate: 'asc' } },
+        payments: { orderBy: { date: 'asc' } },
+      },
+    });
+    if (!worker) throw new NotFoundException('Carpenter not found');
+
+    const from = range.dateFrom ? new Date(range.dateFrom) : null;
+    const to = range.dateTo ? new Date(range.dateTo) : null;
+    if (to) to.setHours(23, 59, 59, 999);
+    const inRange = (d: Date) => (!from || d >= from) && (!to || d <= to);
+
+    const money = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const fmt = (d: Date) => d.toLocaleDateString('en-IN');
+    const totalWorkValue = worker.workItems.reduce((s, w) => s + Number(w.total), 0);
+    const summary = this.paymentSummary(worker.payments, totalWorkValue);
+    const workRows = worker.workItems.filter((w) => inRange(w.workDate));
+    const payRows = worker.payments.filter((p) => inRange(p.date));
+
+    const workTable = () => `
+      <h3 style="font-size:13px;margin:18px 0 8px">Work Done</h3>
+      <table>
+        <thead><tr><th>Date</th><th>Stage</th><th>Model No</th><th>Product</th><th>Size</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Extra</th><th style="text-align:right">Total</th><th>Status</th></tr></thead>
+        <tbody>
+          ${workRows
+            .map(
+              (w) => `<tr>
+            <td>${fmt(w.workDate)}</td><td>${escapeHtml(w.stage)}</td><td>${escapeHtml(w.modelNo ?? '-')}</td>
+            <td>${escapeHtml(w.productName)}</td><td>${escapeHtml([w.size, w.sizeUnit].filter(Boolean).join(' ') || '-')}</td>
+            <td style="text-align:right">${w.quantity}</td><td style="text-align:right">${money(Number(w.price))}</td>
+            <td style="text-align:right">${money(Number(w.extra))}</td><td style="text-align:right">${money(Number(w.total))}</td>
+            <td>${escapeHtml(w.status)}</td></tr>`,
+            )
+            .join('') || '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:14px">No work in this range</td></tr>'}
+          <tr style="font-weight:bold"><td colspan="8" style="text-align:right">Total earned in range</td>
+            <td style="text-align:right">${money(workRows.reduce((s, w) => s + Number(w.total), 0))}</td><td></td></tr>
+        </tbody>
+      </table>`;
+
+    const payTable = (title: string) => `
+      <h3 style="font-size:13px;margin:18px 0 8px">${title}</h3>
+      <table>
+        <thead><tr><th>Date</th><th>Reference</th><th>Type</th><th>Mode</th><th>Remarks</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>
+          ${payRows
+            .map(
+              (p) => `<tr>
+            <td>${fmt(p.date)}</td><td>${escapeHtml(p.reference ?? '-')}</td><td>${escapeHtml(p.paymentType ?? 'SALARY')}</td>
+            <td>${escapeHtml(p.mode ?? '-')}</td><td>${escapeHtml(p.note ?? '-')}</td>
+            <td style="text-align:right">${money(Number(p.amount))}</td></tr>`,
+            )
+            .join('') || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:14px">No payments in this range</td></tr>'}
+          <tr style="font-weight:bold"><td colspan="5" style="text-align:right">Total paid in range</td>
+            <td style="text-align:right">${money(payRows.reduce((s, p) => s + Number(p.amount), 0))}</td></tr>
+        </tbody>
+      </table>`;
+
+    const summaryBlock = `
+      <div class="summary">
+        <div><div class="label">Total Work Value</div><div class="value">${money(totalWorkValue)}</div></div>
+        <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">${money(summary.totalPaid)}</div></div>
+        <div><div class="label">Deductions</div><div class="value">${money(summary.totalDeduction)}</div></div>
+        <div><div class="label">Balance Payable</div><div class="value" style="color:#b91c1c">${money(summary.balance)}</div></div>
+      </div>`;
+
+    const titles: Record<typeof kind, string> = {
+      WORK: 'Work Statement',
+      SALARY: 'Salary Ledger',
+      VOUCHER: 'Payment Voucher',
+      COMBINED: 'Combined Worker Statement',
+    };
+    const body =
+      kind === 'WORK'
+        ? workTable()
+        : kind === 'VOUCHER'
+          ? payTable('Payments')
+          : kind === 'SALARY'
+            ? `${workTable()}${payTable('Payments')}`
+            : `${workTable()}${payTable('Payments')}`;
+
+    const rangeText = [from ? `From ${fmt(from)}` : null, to ? `To ${fmt(to)}` : null].filter(Boolean).join(' · ') || 'All dates';
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" /><style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${renderReportHeader(titles[kind])}
+  <div class="body">
+    <p style="margin:0 0 4px;font-size:13px"><strong>${escapeHtml(worker.name)}</strong> · ${escapeHtml(worker.workerType)}${worker.phone ? ` · ${escapeHtml(worker.phone)}` : ''}</p>
+    <p style="margin:0 0 14px;color:#6b7280;font-size:12px">Worker ID: ${escapeHtml(worker.id)} · ${escapeHtml(rangeText)}</p>
+    ${summaryBlock}
+    ${body}
+    ${renderGeneratedFooter(workRows.length + payRows.length, 'row')}
+  </div>
+</body></html>`;
+
+    const buffer = await this.pdf.renderHtmlToPdf(html, { pageNumbers: true });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const slug = worker.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    return { buffer, filename: `${slug}-${kind.toLowerCase()}-${stamp}.pdf` };
   }
 
   // A team is scoped to one category (Carpenter/Carving/Polish) - refuse a

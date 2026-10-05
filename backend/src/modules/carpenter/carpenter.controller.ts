@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { CarpenterService } from './carpenter.service';
 import { CreateCarpenterDto } from './dto/create-carpenter.dto';
 import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
@@ -71,6 +72,26 @@ export class CarpenterController {
   @Delete('carpenters/:id')
   removeCarpenter(@Param('id') id: string, @Query('force') force: string | undefined, @CurrentUser() user: AuthUser) {
     return this.service.removeCarpenter(id, user.userId, force === 'true', user.role as Role);
+  }
+
+  // Statements show earnings and payments, so Admin/Super Admin only (the
+  // class-level guard already enforces this; declared again so it reads
+  // clearly at the route).
+  @Roles(Role.ADMIN)
+  @Get('carpenters/:id/pdf')
+  async workerPdf(
+    @Param('id') id: string,
+    @Res() res: Response,
+    @Query('kind') kind?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    const allowed = ['WORK', 'SALARY', 'VOUCHER', 'COMBINED'] as const;
+    const k = (allowed as readonly string[]).includes(kind ?? '') ? (kind as (typeof allowed)[number]) : 'COMBINED';
+    const { buffer, filename } = await this.service.generateWorkerPdf(id, k, { dateFrom, dateTo });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 
   @Roles(Role.ADMIN)

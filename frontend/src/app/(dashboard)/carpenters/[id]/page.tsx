@@ -4,7 +4,9 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, getAccessToken } from '@/lib/api';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
@@ -108,6 +110,27 @@ function CarpenterDetailContent() {
   const [issueDate, setIssueDate] = useState(new Date().toISOString().slice(0, 10));
 
   const total = (parseFloat(workForm.price || '0') + parseFloat(workForm.extra || '0')) * parseInt(workForm.quantity || '1', 10);
+
+  async function downloadWorkerPdf(kind: 'WORK' | 'SALARY' | 'VOUCHER' | 'COMBINED') {
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/carpenters/${id}/pdf?kind=${kind}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error(`PDF failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(carpenter?.name ?? 'worker').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${kind.toLowerCase()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download PDF');
+    }
+  }
 
   async function addWork(e: React.FormEvent) {
     e.preventDefault();
@@ -308,6 +331,23 @@ Please confirm receipt.`,
           )}
         </div>
       </div>
+
+      {canEdit && (
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ['WORK', 'Work Statement'],
+              ['SALARY', 'Salary Ledger'],
+              ['VOUCHER', 'Payment Voucher'],
+              ['COMBINED', 'Combined Statement'],
+            ] as const
+          ).map(([kind, label]) => (
+            <button key={kind} type="button" className="btn-secondary text-sm" onClick={() => downloadWorkerPdf(kind)}>
+              {label} PDF
+            </button>
+          ))}
+        </div>
+      )}
 
       {canEdit && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
