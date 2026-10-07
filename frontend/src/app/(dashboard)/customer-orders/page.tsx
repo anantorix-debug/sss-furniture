@@ -17,6 +17,7 @@ import { WorkItemTimelineCard } from '@/components/WorkItemTimelineCard';
 import { ActionsMenu } from '@/components/ActionsMenu';
 import { RoleGate } from '@/components/RoleGate';
 import { ModelNoPicker } from '@/components/ModelNoPicker';
+import { ProductSelector } from '@/components/ProductSelector';
 import { GalleryGrid } from '@/components/GalleryGrid';
 import type { GalleryImage } from '@/types';
 import { assetUrl } from '@/lib/api';
@@ -132,6 +133,9 @@ function CustomerOrdersContent() {
       category: product.category ?? '',
       size: product.modelSize ?? '',
       sizeUnit: product.sizeUnit ?? '',
+      // Only overwrite Polish Colour when the catalogue product actually has
+      // one on file - never invent a value over whatever's already typed.
+      ...(product.materialFinish ? { color: product.materialFinish } : {}),
       unitPrice: String(product.retailPrice ?? 0),
       availableQuantity: product.availableQuantity,
     });
@@ -570,11 +574,11 @@ function CustomerOrdersContent() {
                           onSelect={(p) => selectItemProduct(idx, p)}
                           placeholder="Catalog Model No."
                         />
-                        <input
-                          className="input"
-                          placeholder="Product Name"
+                        <ProductSelector
                           value={row.productName}
-                          onChange={(e) => updateItemRow(idx, { productName: e.target.value, productId: undefined })}
+                          onChangeName={(v) => updateItemRow(idx, { productName: v, productId: undefined })}
+                          onSelect={(p) => selectItemProduct(idx, p)}
+                          placeholder="Product Name"
                         />
                       </div>
                       <input

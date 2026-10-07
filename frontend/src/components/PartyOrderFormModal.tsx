@@ -11,6 +11,7 @@ import { Modal } from './Modal';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import { ModelNoPicker } from './ModelNoPicker';
+import { ProductSelector } from './ProductSelector';
 import { GalleryGrid } from './GalleryGrid';
 import { OrderWorkEntriesPanel, type StagedWorkEntry } from './OrderWorkEntriesPanel';
 import { SuccessTick } from './SuccessTick';
@@ -171,6 +172,9 @@ export function PartyOrderFormModal({
       size: product.modelSize ?? '',
       pattern: product.pattern ?? '',
       details: product.details ?? '',
+      // Only overwrite Polish Colour when the catalogue product actually has
+      // one on file - never invent a value over whatever's already typed.
+      ...(product.materialFinish ? { color: product.materialFinish } : {}),
       unitPrice: String(product.retailPrice ?? 0),
       modelNo: product.modelNo ?? undefined,
       availableQuantity: product.availableQuantity,
@@ -373,11 +377,11 @@ export function PartyOrderFormModal({
                     onSelect={(p) => selectItemProduct(idx, p)}
                     placeholder="Catalog Model No."
                   />
-                  <input
-                    className="input"
-                    placeholder="Product Name"
+                  <ProductSelector
                     value={item.productName}
-                    onChange={(e) => updateItem(idx, { productName: e.target.value, productId: undefined })}
+                    onChangeName={(v) => updateItem(idx, { productName: v, productId: undefined })}
+                    onSelect={(p) => selectItemProduct(idx, p)}
+                    placeholder="Product Name"
                   />
                   <button
                     type="button"
