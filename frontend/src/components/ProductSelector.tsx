@@ -2,26 +2,25 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import useSWR from 'swr';
-import { fetcher } from '@/lib/swr';
-import type { Product } from '@/types';
+import { COMPANY_PRODUCTS, type CompanyProductEntry } from '@/lib/companyProducts';
 
 // Searchable Product Name dropdown for the Customer Order / Party Order
 // forms - same portal/position/keyboard-nav pattern as MaterialPicker and
 // ModelNoPicker (the field sits inside a scrollable Modal, so a plain
 // position:absolute dropdown gets clipped).
 //
-// Unlike ModelNoPicker (which only lists products that already have a Model
-// No. assigned - see its own note), this searches every catalogue product
-// by name, SKU, Model No. or category via the existing GET /products?search
-// endpoint, so a product can be picked before Production has ever assigned
-// it a Model No. Selecting one hands back the full Product so the caller's
-// existing selectItemProduct() can auto-fill the rest of the row, exactly
-// as it already does when a Model No. is picked via ModelNoPicker.
+// Deliberately NOT backed by the live /products search (that table holds
+// one row per individual physical stock piece, each already carrying its
+// own real Model No. and almost always "Sold" - a confusing source for
+// "what product names exist"). This instead searches the static
+// COMPANY_PRODUCTS reference list taken from the company's own work-list
+// sheets. Selecting one fills in Product Name / Category / Size / Unit
+// Price where the calling form has that field; it never sets a Model No. -
+// that stays exactly as today (unassigned until Production enters it, or
+// picked separately via the existing Catalog Model No. search).
 //
 // Typing without selecting a suggestion keeps the typed text as a free-text
-// product name (onChangeName) and clears any previously-linked productId
-// (same "typing overrides the link" rule already used on this input).
+// product name and clears any previously-linked productId, same as before.
 export function ProductSelector({
   value,
   onChangeName,
@@ -30,19 +29,18 @@ export function ProductSelector({
 }: {
   value: string;
   onChangeName: (name: string) => void;
-  onSelect: (product: Product) => void;
+  onSelect: (entry: CompanyProductEntry) => void;
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
-  const trimmed = value.trim();
+  const trimmed = value.trim().toLowerCase();
 
-  // Opening the field with nothing typed yet shows every existing product
-  // right away, same as ModelNoPicker - typing then narrows it.
-  const { data: results } = useSWR<Product[]>(open ? (trimmed ? `/products?search=${encodeURIComponent(trimmed)}` : '/products') : null, fetcher);
-  const matches = results ?? [];
+  const matches = trimmed
+    ? COMPANY_PRODUCTS.filter((p) => p.name.toLowerCase().includes(trimmed) || p.category.toLowerCase().includes(trimmed))
+    : COMPANY_PRODUCTS;
 
   const [highlightIndex, setHighlightIndex] = useState(0);
   useEffect(() => {
@@ -113,7 +111,6 @@ export function ProductSelector({
         }}
       />
       {open &&
-        results &&
         rect &&
         typeof document !== 'undefined' &&
         createPortal(
@@ -123,15 +120,11 @@ export function ProductSelector({
             style={{ top: rect.top, left: rect.left, width: rect.width }}
           >
             {matches.length === 0 ? (
-              trimmed ? (
-                <p className="px-3 py-2 text-xs text-brand-400 italic">No matching products - this will be saved as a new product name</p>
-              ) : (
-                <p className="px-3 py-2 text-xs text-brand-400 italic">No products yet</p>
-              )
+              <p className="px-3 py-2 text-xs text-brand-400 italic">No matching products - this will be saved as a new product name</p>
             ) : (
               matches.map((p, idx) => (
                 <button
-                  key={p.id}
+                  key={`${p.name}-${p.category}-${p.size ?? ''}-${p.price}-${idx}`}
                   type="button"
                   data-highlighted={highlightIndex === idx}
                   className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm border-b border-brand-50 last:border-0 ${
@@ -145,14 +138,11 @@ export function ProductSelector({
                   }}
                 >
                   <span className="font-medium truncate flex-1">{p.name}</span>
-                  {p.modelNo && <span className="text-brand-400 text-xs shrink-0">{p.modelNo}</span>}
-                  <span className="text-xs shrink-0">
-                    {(p.availableQuantity ?? 0) > 0 ? (
-                      <span className="text-emerald-700">In Stock</span>
-                    ) : (
-                      <span className="text-amber-600">Sold</span>
-                    )}
+                  <span className="text-brand-400 text-xs shrink-0">
+                    {p.category}
+                    {p.size ? ` - ${p.size}` : ''}
                   </span>
+                  <span className="text-xs shrink-0 text-brand-600">₹{p.price}</span>
                 </button>
               ))
             )}

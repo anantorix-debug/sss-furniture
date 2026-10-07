@@ -12,6 +12,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import { ModelNoPicker } from './ModelNoPicker';
 import { ProductSelector } from './ProductSelector';
+import type { CompanyProductEntry } from '@/lib/companyProducts';
 import { GalleryGrid } from './GalleryGrid';
 import { OrderWorkEntriesPanel, type StagedWorkEntry } from './OrderWorkEntriesPanel';
 import { SuccessTick } from './SuccessTick';
@@ -178,6 +179,18 @@ export function PartyOrderFormModal({
       unitPrice: String(product.retailPrice ?? 0),
       modelNo: product.modelNo ?? undefined,
       availableQuantity: product.availableQuantity,
+    });
+  }
+  // Picking a Product Name suggestion (ProductSelector, backed by the static
+  // company reference list - see its own note) fills in the free-text
+  // fields only. It never links productId/modelNo - those stay exactly as
+  // typing a brand-new name already works today.
+  function selectCompanyProduct(idx: number, entry: CompanyProductEntry) {
+    updateItem(idx, {
+      productId: undefined,
+      productName: entry.name,
+      size: entry.size ?? '',
+      unitPrice: String(entry.price),
     });
   }
 
@@ -380,7 +393,7 @@ export function PartyOrderFormModal({
                   <ProductSelector
                     value={item.productName}
                     onChangeName={(v) => updateItem(idx, { productName: v, productId: undefined })}
-                    onSelect={(p) => selectItemProduct(idx, p)}
+                    onSelect={(entry) => selectCompanyProduct(idx, entry)}
                     placeholder="Product Name"
                   />
                   <button

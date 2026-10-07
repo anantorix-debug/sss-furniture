@@ -18,6 +18,7 @@ import { ActionsMenu } from '@/components/ActionsMenu';
 import { RoleGate } from '@/components/RoleGate';
 import { ModelNoPicker } from '@/components/ModelNoPicker';
 import { ProductSelector } from '@/components/ProductSelector';
+import type { CompanyProductEntry } from '@/lib/companyProducts';
 import { GalleryGrid } from '@/components/GalleryGrid';
 import type { GalleryImage } from '@/types';
 import { assetUrl } from '@/lib/api';
@@ -138,6 +139,19 @@ function CustomerOrdersContent() {
       ...(product.materialFinish ? { color: product.materialFinish } : {}),
       unitPrice: String(product.retailPrice ?? 0),
       availableQuantity: product.availableQuantity,
+    });
+  }
+  // Picking a Product Name suggestion (ProductSelector, backed by the static
+  // company reference list - see its own note) fills in the free-text
+  // fields only. It never links productId/modelNo - those stay exactly as
+  // typing a brand-new name already works today.
+  function selectCompanyProduct(idx: number, entry: CompanyProductEntry) {
+    updateItemRow(idx, {
+      productId: undefined,
+      productName: entry.name,
+      category: entry.category,
+      size: entry.size ?? '',
+      unitPrice: String(entry.price),
     });
   }
   const lineTotal = (row: ItemRow) => (parseFloat(row.quantity) || 0) * (parseFloat(row.unitPrice) || 0);
@@ -577,7 +591,7 @@ function CustomerOrdersContent() {
                         <ProductSelector
                           value={row.productName}
                           onChangeName={(v) => updateItemRow(idx, { productName: v, productId: undefined })}
-                          onSelect={(p) => selectItemProduct(idx, p)}
+                          onSelect={(entry) => selectCompanyProduct(idx, entry)}
                           placeholder="Product Name"
                         />
                       </div>
