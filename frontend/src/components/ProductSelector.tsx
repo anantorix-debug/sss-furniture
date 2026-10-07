@@ -61,7 +61,14 @@ export function ProductSelector({
 
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
+    // capture:true sees every scroll on the page, including the dropdown
+    // list's own internal scrolling (scroll events don't bubble, but they
+    // do fire on capturing ancestors) - without the portalRef check below,
+    // scrolling the list itself immediately closed it.
+    const close = (e: Event) => {
+      if (portalRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
     window.addEventListener('scroll', close, true);
     window.addEventListener('resize', close);
     return () => {
@@ -124,10 +131,10 @@ export function ProductSelector({
             ) : (
               matches.map((p, idx) => (
                 <button
-                  key={`${p.name}-${p.category}-${p.size ?? ''}-${p.price}-${idx}`}
+                  key={`${p.name}-${idx}`}
                   type="button"
                   data-highlighted={highlightIndex === idx}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm border-b border-brand-50 last:border-0 ${
+                  className={`w-full px-3 py-2 text-left text-sm font-medium truncate border-b border-brand-50 last:border-0 ${
                     highlightIndex === idx ? 'bg-brand-50' : 'hover:bg-brand-50'
                   }`}
                   onMouseEnter={() => setHighlightIndex(idx)}
@@ -137,12 +144,7 @@ export function ProductSelector({
                     setOpen(false);
                   }}
                 >
-                  <span className="font-medium truncate flex-1">{p.name}</span>
-                  <span className="text-brand-400 text-xs shrink-0">
-                    {p.category}
-                    {p.size ? ` - ${p.size}` : ''}
-                  </span>
-                  <span className="text-xs shrink-0 text-brand-600">₹{p.price}</span>
+                  {p.name}
                 </button>
               ))
             )}
