@@ -7,7 +7,7 @@ import { CommitResult, DuplicateKind, GridRow, ImportContext, ImportHandler } fr
 import { CustomerOrdersImport } from './kinds/customer-orders.import';
 import { PartyOrdersImport } from './kinds/party-orders.import';
 import { ProductsImport, RawMaterialsImport } from './kinds/inventory.import';
-import { PurchasesImport, SuppliersImport } from './kinds/purchasing.import';
+import { PurchasesImport, SupplierPaymentsImport, SupplierPurchasesImport, SuppliersImport } from './kinds/purchasing.import';
 import { ProductionWorkImport, WorkerPaymentsImport, WorkerWorkImport } from './kinds/production.import';
 import { PaymentsImport } from './kinds/payments.import';
 import { ExpensesImport } from './kinds/expenses.import';
@@ -30,13 +30,29 @@ export class ImportsService {
     rawMaterials: RawMaterialsImport,
     suppliers: SuppliersImport,
     purchases: PurchasesImport,
+    supplierPurchases: SupplierPurchasesImport,
+    supplierPayments: SupplierPaymentsImport,
     workerWork: WorkerWorkImport,
     workerPayments: WorkerPaymentsImport,
     productionWork: ProductionWorkImport,
     payments: PaymentsImport,
     expenses: ExpensesImport,
   ) {
-    const all: ImportHandler[] = [customerOrders, partyOrders, products, rawMaterials, suppliers, purchases, workerWork, workerPayments, productionWork, payments, expenses];
+    const all: ImportHandler[] = [
+      customerOrders,
+      partyOrders,
+      products,
+      rawMaterials,
+      suppliers,
+      purchases,
+      supplierPurchases,
+      supplierPayments,
+      workerWork,
+      workerPayments,
+      productionWork,
+      payments,
+      expenses,
+    ];
     this.handlers = new Map(all.map((h) => [h.kind, h]));
   }
 
@@ -58,6 +74,10 @@ export class ImportsService {
     if (cleanScope.carpenterId) {
       const exists = await this.prisma.carpenter.findUnique({ where: { id: cleanScope.carpenterId }, select: { id: true } });
       if (!exists) throw new NotFoundException('Carpenter not found');
+    }
+    if (cleanScope.supplierId) {
+      const exists = await this.prisma.supplier.findUnique({ where: { id: cleanScope.supplierId }, select: { id: true } });
+      if (!exists) throw new NotFoundException('Supplier not found');
     }
     const cleanOptions = Object.fromEntries(Object.entries(options ?? {}).filter(([, v]) => typeof v === 'boolean'));
     const ctx: ImportContext = { userId: user.userId, role: user.role, options: cleanOptions, scope: cleanScope };

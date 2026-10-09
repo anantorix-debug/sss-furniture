@@ -19,6 +19,8 @@ export type ImportKind =
   | 'raw-materials'
   | 'suppliers'
   | 'purchases'
+  | 'supplier-purchases'
+  | 'supplier-payments'
   | 'production-work'
   | 'worker-work'
   | 'worker-payments'
@@ -220,6 +222,47 @@ function configFor(kind: ImportKind, lists: Record<string, Named[] | undefined>,
         switches: isSuperAdmin ? [{ key: 'directRecord', label: 'Already received - record directly and add to stock (otherwise saved as pending approval)' }] : undefined,
       };
     }
+    case 'supplier-purchases': {
+      const materials = (lists.materials ?? []) as Material[];
+      const isBoardFeet = (id: string) => materials.find((m) => m.id === id)?.measurementKind === 'BOARD_FEET';
+      const qty = (r: GridRow) => (isBoardFeet(r.rawMaterialId) ? (boardFeetPreview(r.thicknessIn, r.widthIn, r.lengthFt, r.pieces)?.total ?? 0) : n(r.quantity));
+      return {
+        title: 'Add Multiple Purchases / Upload PDF·Excel',
+        hint: 'One row per material - rows with the same Purchase Ref become one purchase. Timber (board feet) takes its quantity from Thickness × Width × Length × Pieces.',
+        templateFileName: 'supplier-purchases-template',
+        needs: ['materials'],
+        columns: [
+          { key: 'purchaseRef', label: 'Purchase Ref', type: 'text', required: true, width: 'min-w-[110px]' },
+          { key: 'purchaseDate', label: 'Date', type: 'date', required: true, width: 'min-w-[140px]' },
+          { key: 'rawMaterialId', label: 'Material', type: 'select', required: true, options: opts(lists.materials), width: 'min-w-[160px]' },
+          { key: 'quantity', label: 'Qty', type: 'number', width: 'min-w-[80px]' },
+          { key: 'unitPrice', label: 'Rate', type: 'number', required: true, width: 'min-w-[90px]' },
+          { key: 'thicknessIn', label: 'Thickness', type: 'number', width: 'min-w-[90px]' },
+          { key: 'widthIn', label: 'Width', type: 'number', width: 'min-w-[80px]' },
+          { key: 'lengthFt', label: 'Length', type: 'number', width: 'min-w-[80px]' },
+          { key: 'pieces', label: 'Pieces', type: 'number', width: 'min-w-[80px]' },
+          { key: 'notes', label: 'Notes', type: 'text', width: 'min-w-[140px]' },
+        ],
+        emptyRow: () => ({ purchaseRef: '1', purchaseDate: today(), rawMaterialId: '', quantity: '', unitPrice: '', thicknessIn: '', widthIn: '', lengthFt: '', pieces: '', notes: '' }),
+        rowTotal: (r) => qty(r) * n(r.unitPrice),
+        switches: isSuperAdmin ? [{ key: 'directRecord', label: 'Already received - record directly and add to stock (otherwise saved as pending approval)' }] : undefined,
+      };
+    }
+    case 'supplier-payments':
+      return {
+        title: 'Add Multiple Payments / Upload PDF·Excel',
+        templateFileName: 'supplier-payments-template',
+        needs: [],
+        columns: [
+          { key: 'date', label: 'Date', type: 'date', required: true, width: 'min-w-[140px]' },
+          { key: 'voucherNo', label: 'Voucher No', type: 'text', width: 'min-w-[120px]' },
+          { key: 'amount', label: 'Amount', type: 'number', required: true, width: 'min-w-[110px]' },
+          { key: 'mode', label: 'Mode', type: 'text', width: 'min-w-[90px]' },
+          { key: 'particulars', label: 'Particulars', type: 'text', width: 'min-w-[160px]' },
+        ],
+        emptyRow: () => ({ date: today(), voucherNo: '', amount: '', mode: 'CASH', particulars: '' }),
+        rowTotal: (r) => n(r.amount),
+      };
     case 'production-work':
       return {
         title: 'Upload / Add Multiple Old Work Entries',

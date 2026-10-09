@@ -12,7 +12,7 @@ import { ImportsService } from './imports.service';
 import { CustomerOrdersImport } from './kinds/customer-orders.import';
 import { PartyOrdersImport } from './kinds/party-orders.import';
 import { ProductsImport, RawMaterialsImport } from './kinds/inventory.import';
-import { PurchasesImport, SuppliersImport } from './kinds/purchasing.import';
+import { PurchasesImport, SupplierPaymentsImport, SupplierPurchasesImport, SuppliersImport } from './kinds/purchasing.import';
 import { ProductionWorkImport, WorkerPaymentsImport, WorkerWorkImport } from './kinds/production.import';
 import { PaymentsImport } from './kinds/payments.import';
 import { ExpensesImport } from './kinds/expenses.import';
@@ -28,6 +28,8 @@ import { ExpensesImport } from './kinds/expenses.import';
     RawMaterialsImport,
     SuppliersImport,
     PurchasesImport,
+    SupplierPurchasesImport,
+    SupplierPaymentsImport,
     WorkerWorkImport,
     WorkerPaymentsImport,
     ProductionWorkImport,

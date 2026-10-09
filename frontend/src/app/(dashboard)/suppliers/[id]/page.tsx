@@ -14,6 +14,7 @@ import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { PurchaseFormModal } from '@/components/PurchaseFormModal';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
+import { ImportButton } from '@/components/ImportButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { PURCHASE_STATUS_LABEL } from '@/types';
 import type { SupplierDetail, SupplierPayment, Purchase, PurchaseStatus } from '@/types';
@@ -57,6 +58,7 @@ function SupplierDetailContent() {
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editPaymentForm, setEditPaymentForm] = useState(emptyPaymentForm);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   // Which section PDF (Purchases box / Payment Ledger) is being prepared.
   const [downloadingSection, setDownloadingSection] = useState<'purchases' | 'ledger' | null>(null);
@@ -268,14 +270,30 @@ function SupplierDetailContent() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">{notice}</p>}
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="card p-5">
           <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
             <h2 className="font-semibold text-brand-900">Purchases</h2>
-            <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={() => downloadSectionPdf('purchases')} disabled={downloadingSection !== null}>
-              {downloadingSection === 'purchases' ? 'Preparing...' : 'Download Purchases PDF'}
-            </button>
+            <div className="flex items-center gap-2">
+              {canEdit && (
+                <ImportButton
+                  kind="supplier-purchases"
+                  scope={{ supplierId: id }}
+                  label="Add Multiple / Upload PDF·Excel"
+                  className="btn-secondary text-xs px-3 py-1.5"
+                  onSaved={(res) => {
+                    setNotice(`${res.created} purchase${res.created === 1 ? '' : 's'} recorded.`);
+                    mutatePurchases();
+                    mutate();
+                  }}
+                />
+              )}
+              <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={() => downloadSectionPdf('purchases')} disabled={downloadingSection !== null}>
+                {downloadingSection === 'purchases' ? 'Preparing...' : 'Download Purchases PDF'}
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
             <input className="input !py-1.5 text-sm" placeholder="Purchase No." value={purchaseFilter.purchaseNo} onChange={(e) => setPurchaseFilter((f) => ({ ...f, purchaseNo: e.target.value }))} />
@@ -376,9 +394,23 @@ function SupplierDetailContent() {
         <div className="card p-5">
           <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
             <h2 className="font-semibold text-brand-900">Payment Ledger</h2>
-            <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={() => downloadSectionPdf('ledger')} disabled={downloadingSection !== null}>
-              {downloadingSection === 'ledger' ? 'Preparing...' : 'Download Ledger PDF'}
-            </button>
+            <div className="flex items-center gap-2">
+              {canEdit && (
+                <ImportButton
+                  kind="supplier-payments"
+                  scope={{ supplierId: id }}
+                  label="Add Multiple / Upload PDF·Excel"
+                  className="btn-secondary text-xs px-3 py-1.5"
+                  onSaved={(res) => {
+                    setNotice(`${res.created} payment${res.created === 1 ? '' : 's'} recorded (${formatCurrency(res.total)}).`);
+                    mutate();
+                  }}
+                />
+              )}
+              <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={() => downloadSectionPdf('ledger')} disabled={downloadingSection !== null}>
+                {downloadingSection === 'ledger' ? 'Preparing...' : 'Download Ledger PDF'}
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
             <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={ledgerFilter.q} onChange={(e) => setLedgerFilter((f) => ({ ...f, q: e.target.value }))} />
