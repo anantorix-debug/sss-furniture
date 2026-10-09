@@ -189,6 +189,28 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
     fetcher,
   );
   const data = result?.data;
+  // Same filters as the list, without paging - used by both exports.
+  const listFilters = new URLSearchParams({
+    ...(search ? { search } : {}),
+    ...(finishFilter ? { finish: finishFilter } : {}),
+    ...(stockStatusFilter ? { stockStatus: stockStatusFilter } : {}),
+  });
+  const [exporting, setExporting] = useState<'pdf' | 'excel' | null>(null);
+  async function downloadListPdf() {
+    setExporting('pdf');
+    try {
+      const res = await fetch(`${API_BASE_URL}/products/pdf?${listFilters}`, { headers: { Authorization: `Bearer ${getAccessToken()}` } });
+      if (!res.ok) throw new Error('Failed to generate PDF');
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `inventory-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(null);
+    }
+  }
   function updateSearch(value: string) {
     setSearch(value);
     setPage(1);
@@ -371,12 +393,20 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
           </select>
         </div>
         <div className="flex gap-2">
+          <button className="btn-secondary" disabled={exporting !== null} onClick={downloadListPdf}>
+            {exporting === 'pdf' ? 'Preparing...' : 'Download PDF'}
+          </button>
           <button
             className="btn-secondary"
-            onClick={() =>
-              downloadCsv(
-                'products',
-                (data ?? []).map((p) => ({
+            disabled={exporting !== null}
+            onClick={async () => {
+              // Every product matching the filters, not just this page.
+              setExporting('excel');
+              try {
+                const all = await api.get<Product[]>(`/products?${listFilters}`);
+                downloadCsv(
+                  'products',
+                  all.map((p) => ({
                   'Model No': p.modelNo ?? 'Not Updated',
                   Name: p.name,
                   Finish: p.materialFinish ?? '',
@@ -386,11 +416,14 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
                   Details: p.details ?? '',
                   'Unit Price': p.retailPrice,
                   Available: p.availableQuantity ?? 0,
-                })),
-              )
-            }
+                  })),
+                );
+              } finally {
+                setExporting(null);
+              }
+            }}
           >
-            Export Excel
+            {exporting === 'excel' ? 'Preparing...' : 'Export Excel'}
           </button>
           {canEdit && (
             <>

@@ -1,5 +1,6 @@
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Body, Controller, Delete, Get, HttpStatus, Param, ParseFilePipeBuilder, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpStatus, Param, ParseFilePipeBuilder, Patch, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -24,6 +25,22 @@ export class ProductsController {
     private service: ProductsService,
     private sync: ModelNoSyncService,
   ) {}
+
+  // PDF of every product matching the list filters - not just one page.
+  @Get('pdf')
+  async listPdf(
+    @Res() res: Response,
+    @Query('search') search?: string,
+    @Query('category') category?: string,
+    @Query('finish') finish?: string,
+    @Query('stockStatus') stockStatus?: 'IN_STOCK' | 'OUT_OF_STOCK',
+    @CurrentUser() user?: AuthUser,
+  ) {
+    const buffer = await this.service.generateListPdf({ search, category, finish, stockStatus, viewerRole: user?.role as Role });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="inventory-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    res.send(buffer);
+  }
 
   @Get()
   findAll(

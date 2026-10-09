@@ -11,6 +11,8 @@ import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
 import { withNumericPrices } from '../../../common/utils/product-prices.util';
 import { ModelNoService } from '../../model-no/model-no.service';
 import { Prisma } from '@prisma/client';
+import { PdfService } from '../../pdf/pdf.service';
+import { escapeHtml, REPORT_PDF_STYLES, renderFilterSummary, renderGeneratedFooter, renderReportHeader } from '../../../common/utils/pdf-report.util';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'products');
 
@@ -20,6 +22,7 @@ export class ProductsService {
     private prisma: PrismaService,
     private audit: AuditService,
     private modelNos: ModelNoService,
+    private pdf: PdfService,
   ) {}
 
   private readonly imagesInclude = { images: { orderBy: { isPrimary: 'desc' as const } } };
@@ -67,6 +70,52 @@ export class ProductsService {
     const products = pageIds.map((id) => byId.get(id)).filter((p): p is (typeof rows)[number] => !!p);
     const mapped = products.map((p) => withNumericPrices(p, params.viewerRole));
     return paginated ? paginate(mapped, total, page, limit) : mapped;
+  }
+
+  // Stock list PDF - every product matching the page's filters (not just the
+  // page on screen), in the same Model No order as the list.
+  async generateListPdf(params: Omit<Parameters<ProductsService['findAll']>[0], 'page' | 'limit'>): Promise<Buffer> {
+    const products = (await this.findAll({ ...params, page: undefined })) as Array<Record<string, any>>;
+    const money = (v: unknown) => (v == null ? '-' : `&#8377;${Number(v).toLocaleString('en-IN')}`);
+    const rows = products
+      .map(
+        (p, i) => `<tr>
+          <td>${i + 1}</td>
+          <td>${escapeHtml(p.modelNo ?? '-')}</td>
+          <td>${escapeHtml(p.name)}</td>
+          <td>${escapeHtml(p.category ?? '-')}</td>
+          <td>${escapeHtml([p.materialFinish, p.modelSize].filter(Boolean).join(' / ') || '-')}</td>
+          <td style="text-align:right">${money(p.retailPrice)}</td>
+          <td style="text-align:right">${(p.availableQuantity ?? 0) > 0 ? p.availableQuantity : 'Sold'}</td>
+        </tr>`,
+      )
+      .join('');
+    const filters = renderFilterSummary({
+      Search: params.search,
+      Finish: params.finish,
+      'Stock Status': params.stockStatus === 'IN_STOCK' ? 'In Stock' : params.stockStatus === 'OUT_OF_STOCK' ? 'Sold / Out of Stock' : undefined,
+    });
+    const available = products.reduce((sum, p) => sum + Math.max(0, Number(p.availableQuantity ?? 0)), 0);
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${renderReportHeader('Inventory - Stock List')}
+  <div class="body">
+    ${filters}
+    <div class="summary">
+      <div><div class="label">Products</div><div class="value">${products.length}</div></div>
+      <div><div class="label">Available Units</div><div class="value">${available}</div></div>
+      <div><div class="label">Out of Stock</div><div class="value">${products.filter((p) => (p.availableQuantity ?? 0) <= 0).length}</div></div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Model No</th><th>Product</th><th>Category</th><th>Finish / Size</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Available</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="7" style="text-align:center">No products</td></tr>'}</tbody>
+    </table>
+    ${renderGeneratedFooter(products.length, 'product')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html);
   }
 
   async findOne(id: string, viewerRole?: Role) {
