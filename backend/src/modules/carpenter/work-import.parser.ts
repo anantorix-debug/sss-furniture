@@ -37,6 +37,8 @@ export const WORK_SPEC: TableSpec<WorkColumn> = {
   },
   headerRequired: ['date', 'productName', 'price'],
   dateColumn: 'date',
+  // Every work line has a price; some sheets only date a day's first row.
+  anchorColumn: 'price',
   label: 'DATE, MODEL-NO, PRODUCT NAME, PRODUCT, SIZE, PRICE, EXTRA, NO, TOTAL',
 };
 
@@ -54,12 +56,30 @@ export interface ParsedWorkRow {
   warnings: string[];
 }
 
+// Exact text so fillDownDates can recognise and replace it.
+export const DATE_MISSING = 'Date is missing';
+
+// Sheets often write the date once, on a day's first row only. A row with
+// no date at all takes the date of the row above, and says so.
+export function fillDownDates<T extends { workDate: string | null; warnings: string[] }>(rows: T[]): T[] {
+  let last: string | null = null;
+  for (const r of rows) {
+    if (r.workDate) last = r.workDate;
+    else if (last && r.warnings.includes(DATE_MISSING)) {
+      r.workDate = last;
+      const [y, m, d] = last.split('-');
+      r.warnings = r.warnings.map((w) => (w === DATE_MISSING ? `No date on this row - used the date above (${d}-${m}-${y})` : w));
+    }
+  }
+  return rows;
+}
+
 export function buildWorkRow(line: number, cells: Partial<Record<WorkColumn, string>>): ParsedWorkRow {
   const warnings: string[] = [];
   const text = (c: WorkColumn) => clean(cells[c]);
 
   const workDate = parseSheetDate(text('date'));
-  if (!workDate) warnings.push(`Date "${text('date')}" not recognised`);
+  if (!workDate) warnings.push(text('date') ? `Date "${text('date')}" not recognised` : DATE_MISSING);
 
   let modelNo = text('modelNo');
   let productName = text('productName');

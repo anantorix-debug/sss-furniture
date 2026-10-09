@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CarpenterService } from '../../carpenter/carpenter.service';
 import { CreateWorkItemDto } from '../../carpenter/dto/create-work-item.dto';
 import { CreateCarpenterPaymentDto } from '../../carpenter/dto/create-carpenter-payment.dto';
-import { buildWorkRow, paymentTypeOf, WORK_SPEC, WORKER_PAYMENT_SPEC, WorkColumn } from '../../carpenter/work-import.parser';
+import { buildWorkRow, fillDownDates, paymentTypeOf, WORK_SPEC, WORKER_PAYMENT_SPEC, WorkColumn } from '../../carpenter/work-import.parser';
 import { Role } from '../../../common/enums/role.enum';
 import { TableSpec } from '../../../common/import/sheet-reader';
 import { blankToUndef, commitEach, day, gridNum, GridRow, HandlerPreviewRow, ImportContext, ImportHandler, matchByName, normName, num, sheetDate, text, validOrThrow } from '../import-handler';
@@ -19,8 +19,13 @@ function workKey(carpenterId: string, workDate: string, modelNo: string | null |
 
 const workTotal = (v: GridRow) => ((gridNum(v.price) ?? 0) + (gridNum(v.extra) ?? 0)) * (gridNum(v.quantity) ?? 1);
 
-function workValues(line: number, cells: Partial<Record<string, string>>): HandlerPreviewRow {
-  const r = buildWorkRow(line, cells as Partial<Record<WorkColumn, string>>);
+// Sheet rows -> grid rows, with blank dates filled from the row above.
+function workRows(rows: { line: number; cells: Partial<Record<string, string>> }[]): HandlerPreviewRow[] {
+  return fillDownDates(rows.map((r) => buildWorkRow(r.line, r.cells as Partial<Record<WorkColumn, string>>))).map(toWorkValues);
+}
+
+function toWorkValues(r: ReturnType<typeof buildWorkRow>): HandlerPreviewRow {
+  const line = r.line;
   return {
     line,
     warnings: r.warnings,
@@ -90,7 +95,7 @@ export class WorkerWorkImport implements ImportHandler {
   }
 
   async preview(rows: { line: number; cells: Partial<Record<string, string>> }[]) {
-    return rows.map((r) => workValues(r.line, r.cells));
+    return workRows(rows);
   }
 
   commit(items: GridRow[], ctx: ImportContext) {
@@ -128,8 +133,9 @@ export class ProductionWorkImport implements ImportHandler {
 
   async preview(rows: { line: number; cells: Partial<Record<string, string>> }[]) {
     const workers = await this.prisma.carpenter.findMany({ select: { id: true, name: true } });
-    return rows.map(({ line, cells }) => {
-      const out = workValues(line, cells);
+    const base = workRows(rows);
+    return rows.map(({ cells }, i) => {
+      const out = base[i];
       out.values.carpenterId = matchByName(workers, text(cells, 'worker'), 'Worker', out.warnings, 'add the worker under Production first, then pick them here');
       if (!text(cells, 'worker')) out.warnings.push('Worker is missing');
       const stage = normName(text(cells, 'stage'));

@@ -28,6 +28,11 @@ export interface TableSpec<C extends string> {
   // Columns a line must name to count as the header row.
   headerRequired: C[];
   dateColumn: C;
+  // PDF only: the column that's filled on every data line and marks where
+  // a row is. Defaults to the date column; sheets that write the date only
+  // on a day's first row (like Work List & Payment -2) use a number column
+  // such as PRICE instead.
+  anchorColumn?: C;
   // What the sheet is, for error messages.
   label: string;
 }
@@ -129,12 +134,18 @@ async function readPdf<C extends string>(buffer: Buffer, spec: TableSpec<C>): Pr
       .map((i: { str: string; transform: number[]; width: number }) => ({ str: i.str, x: i.transform[4], y: i.transform[5], w: i.width }));
 
     const byY = groupByY(items);
+    // The header may be one line or stacked over a few ("MODEL-" above
+    // "NO", "EXTRA" above "+"), so each line is tried as the top of a ~22pt
+    // header band. headerY is the band's bottom - everything below is data.
     let headerY = Infinity;
     for (const lineItems of byY) {
-      const found = detectHeader(lineItems, spec);
+      const top = lineItems[0].y;
+      const band = items.filter((i) => i.y <= top + 1 && i.y >= top - 22);
+      const found = detectHeader(band, spec);
       if (found) {
         columns = found;
-        headerY = lineItems[0].y;
+        headerY = Math.min(...band.map((i) => i.y));
+        break;
       }
     }
     if (!columns) continue;
@@ -147,12 +158,15 @@ async function readPdf<C extends string>(buffer: Buffer, spec: TableSpec<C>): Pr
       return best.col;
     };
 
-    // A row starts at each text line whose date cell holds a date.
+    // A row starts at each text line whose anchor cell holds a value - a
+    // date by default, or a number for a number anchor column (PRICE).
+    const anchorCol = spec.anchorColumn ?? spec.dateColumn;
+    const isAnchor = (text: string) => (anchorCol === spec.dateColumn ? !!parseSheetDate(text) : parseAmount(text) != null);
     const anchors: number[] = [];
     for (const lineItems of byY) {
       const y = lineItems[0].y;
       if (y >= headerY) continue;
-      if (parseSheetDate(joinCell(lineItems.filter((i) => colOf(i) === spec.dateColumn)))) anchors.push(y);
+      if (isAnchor(joinCell(lineItems.filter((i) => colOf(i) === anchorCol)))) anchors.push(y);
     }
     anchors.sort((a, b) => b - a); // top of page first
 
@@ -240,23 +254,39 @@ function joinCell(items: PdfTextItem[]): string {
     .trim();
 }
 
-function detectHeader<C extends string>(line: PdfTextItem[], spec: TableSpec<C>): { col: C; center: number }[] | null {
-  // Header words can also arrive split ('MODEL' '-' 'NO'), so merge pieces
-  // that touch into whole words first, then map each word to a column.
+function detectHeader<C extends string>(band: PdfTextItem[], spec: TableSpec<C>): { col: C; center: number }[] | null {
+  // 1. Per line, merge pieces that touch into whole words ('MODEL' '-' 'NO').
   const words: PdfTextItem[] = [];
-  for (const it of line) {
-    const prev = words[words.length - 1];
-    if (prev && it.x - (prev.x + prev.w) <= 1.5) {
-      prev.str += it.str;
-      prev.w = it.x + it.w - prev.x;
-    } else {
-      words.push({ ...it });
+  for (const line of groupByY(band)) {
+    let prev: PdfTextItem | null = null;
+    for (const it of line) {
+      if (prev && it.x - (prev.x + prev.w) <= 1.5) {
+        prev.str += it.str;
+        prev.w = it.x + it.w - prev.x;
+      } else {
+        prev = { ...it };
+        words.push(prev);
+      }
     }
   }
-  const cols: { col: C; center: number }[] = [];
+  // 2. Words stacked in the same column (horizontal spans overlap) are one
+  // heading, read top to bottom: "MODEL-" + "NO", "EXTRA" + "+".
+  const stacks: { x0: number; x1: number; parts: string[] }[] = [];
   for (const w of words) {
-    const col = headerKey(spec, w.str);
-    if (col && !cols.some((c) => c.col === col)) cols.push({ col, center: w.x + w.w / 2 });
+    const s = stacks.find((c) => w.x < c.x1 && w.x + w.w > c.x0);
+    if (s) {
+      s.parts.push(w.str);
+      s.x0 = Math.min(s.x0, w.x);
+      s.x1 = Math.max(s.x1, w.x + w.w);
+    } else {
+      stacks.push({ x0: w.x, x1: w.x + w.w, parts: [w.str] });
+    }
+  }
+  // 3. Map each heading to a column (whole stack first, else any one word).
+  const cols: { col: C; center: number }[] = [];
+  for (const s of stacks) {
+    const col = headerKey(spec, s.parts.join('')) ?? s.parts.map((p) => headerKey(spec, p)).find(Boolean);
+    if (col && !cols.some((c) => c.col === col)) cols.push({ col, center: (s.x0 + s.x1) / 2 });
   }
   return spec.headerRequired.every((c) => cols.some((x) => x.col === c)) ? cols : null;
 }
