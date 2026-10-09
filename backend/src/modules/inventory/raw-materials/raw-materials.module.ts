@@ -7,5 +7,6 @@ import { NotificationsModule } from '../../notifications/notifications.module';
   imports: [NotificationsModule],
   controllers: [RawMaterialsController],
   providers: [RawMaterialsService],
+  exports: [RawMaterialsService],
 })
 export class RawMaterialsModule {}

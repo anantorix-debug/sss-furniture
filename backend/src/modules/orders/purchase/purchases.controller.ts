@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { PurchasesService } from './purchases.service';
@@ -15,6 +16,8 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 // internal identifiers and user-visible copy changed to "Purchase".
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN)
+@ApiTags('Purchase Orders')
+@ApiBearerAuth()
 @Controller('purchase-orders')
 export class PurchasesController {
   constructor(private service: PurchasesService) {}

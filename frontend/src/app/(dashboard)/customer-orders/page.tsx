@@ -34,6 +34,7 @@ import { OrderWorkEntriesPanel, type StagedWorkEntry } from '@/components/OrderW
 import { HoverPreview } from '@/components/HoverPreview';
 import { SuccessTick } from '@/components/SuccessTick';
 import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
+import { ImportButton } from '@/components/ImportButton';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -409,6 +410,7 @@ function CustomerOrdersContent() {
           >
             Export Excel
           </button>
+          <ImportButton kind="customer-orders" />
           <button className="btn-primary" onClick={openCreate}>
             + New Order
           </button>

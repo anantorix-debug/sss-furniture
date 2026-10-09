@@ -20,6 +20,7 @@ import type { Purchase, PurchaseStatus, SupplierSummary } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
 import { PurchasingTabs } from '@/components/PurchasingTabs';
+import { ImportButton } from '@/components/ImportButton';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptyFilters: Record<string, string> = {};
@@ -187,6 +188,7 @@ function PurchaseOrdersContent() {
           <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
             {downloading ? 'Preparing...' : 'Download PDF'}
           </button>
+          <ImportButton kind="purchases" />
           <button className="btn-primary" onClick={openCreate}>
             + New Purchase
           </button>

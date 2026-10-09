@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { CarpenterService } from './carpenter.service';
@@ -20,6 +21,8 @@ import { Role } from '../../common/enums/role.enum';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Workers & Production')
+@ApiBearerAuth()
 @Controller()
 export class CarpenterController {
   constructor(private service: CarpenterService) {}
@@ -280,8 +283,8 @@ export class CarpenterController {
 
   @Roles(Role.ADMIN)
   @Patch('carpenter-work-items/:id')
-  updateWorkItem(@Param('id') id: string, @Body() dto: UpdateWorkItemDto) {
-    return this.service.updateWorkItem(id, dto);
+  updateWorkItem(@Param('id') id: string, @Body() dto: UpdateWorkItemDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateWorkItem(id, dto, user.userId);
   }
 
   // force=true (SUPERADMIN only, re-checked in the service) - see

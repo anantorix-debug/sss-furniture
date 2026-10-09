@@ -23,6 +23,7 @@ import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { FilterBar } from '@/components/FilterBar';
 import type { CarpenterSummary, GalleryImage, MaterialGroup, MaterialMeasurementKind, Product, ProductStockMovement, RawMaterial, StockMovement, WorkerType } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+import { ImportButton } from '@/components/ImportButton';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -402,6 +403,7 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
               >
                 + Add Multiple
               </button>
+              <ImportButton kind="products" label="Upload PDF / Excel" />
               <button className="btn-primary" onClick={openCreate}>
                 + Add Product
               </button>
@@ -964,6 +966,7 @@ function MaterialsTab({ canEdit }: { canEdit: boolean }) {
           >
             Export Excel
           </button>
+          {canEdit && <ImportButton kind="raw-materials" label="Upload / Add Multiple" />}
           {canEdit && (
             <button className="btn-primary" onClick={openAdd}>
               + Add Material

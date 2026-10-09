@@ -8,7 +8,7 @@ import { api, ApiError, getAccessToken } from '@/lib/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 import { useAuth } from '@/context/AuthContext';
-import { formatCurrency, formatDate } from '@/lib/format';
+import { formatCurrency, formatDate, toDateInputValue } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { Modal } from '@/components/Modal';
@@ -18,6 +18,7 @@ import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { useForceable } from '@/hooks/useForceable';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ImportButton } from '@/components/ImportButton';
 import { CARPENTER_PAYMENT_TYPE_LABEL, type CarpenterDetail, type CarpenterPaymentType, type ProductionStage, type StockMovement, type WorkStatus } from '@/types';
 
 const emptyWork = {
@@ -83,15 +84,19 @@ function CarpenterDetailContent() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const canEdit = hasRole('ADMIN');
+  // Work List is sorted by Model No. (numeric-aware, so 9 < 10 < 978);
+  // clicking the header flips the direction. Rows without a Model No. stay
+  // at the bottom either way.
+  const [modelNoSort, setModelNoSort] = useState<'asc' | 'desc'>('asc');
 
   const [statusTarget, setStatusTarget] = useState<{ id: string; current: WorkStatus } | null>(null);
   const [statusForm, setStatusForm] = useState<{ status: WorkStatus; qcNote: string }>({ status: 'ASSIGNED', qcNote: '' });
-  // Corrects a work item's rate after the fact - the only way to fix a
-  // past entry that was created with no price (e.g. via Stock Production
-  // before it had a Rate field), since there was previously no way to edit
-  // an existing item's price at all, only delete and re-add it.
-  const [priceTarget, setPriceTarget] = useState<{ id: string; productName: string } | null>(null);
-  const [priceForm, setPriceForm] = useState({ price: '', extra: '0' });
+  // Edits any Work List row in place (date, Model No., product, category,
+  // size, qty, price, extra) - previously only the price could be changed,
+  // and anything else meant deleting and re-adding the entry.
+  type WorkEditForm = { workDate: string; modelNo: string; productName: string; category: string; size: string; quantity: string; price: string; extra: string };
+  const [editTarget, setEditTarget] = useState<{ id: string; original: WorkEditForm } | null>(null);
+  const [editForm, setEditForm] = useState<WorkEditForm>({ workDate: '', modelNo: '', productName: '', category: '', size: '', quantity: '1', price: '', extra: '0' });
 
 
   const total = (parseFloat(workForm.price || '0') + parseFloat(workForm.extra || '0')) * parseInt(workForm.quantity || '1', 10);
@@ -182,24 +187,50 @@ function CarpenterDetailContent() {
     }
   }
 
-  function openPriceModal(workId: string, productName: string, currentPrice?: number, currentExtra?: number) {
-    setPriceTarget({ id: workId, productName });
-    setPriceForm({ price: currentPrice != null ? String(currentPrice) : '', extra: currentExtra != null ? String(currentExtra) : '0' });
+  function openEditModal(w: CarpenterDetail['workItems'][number]) {
+    const form = {
+      workDate: toDateInputValue(w.workDate),
+      modelNo: w.modelNo ?? '',
+      productName: w.productName,
+      category: w.category ?? '',
+      size: w.size ?? '',
+      quantity: String(w.quantity),
+      price: w.price != null ? String(w.price) : '',
+      extra: w.extra != null ? String(w.extra) : '0',
+    };
+    setEditTarget({ id: w.id, original: form });
+    setEditForm(form);
+    setError(null);
   }
 
-  async function submitPrice(e: React.FormEvent) {
+  // PATCH /carpenter-work-items/:id with only the fields that actually
+  // changed - the server recomputes Total from Price/Extra/Qty and writes
+  // an audit-log entry with the before/after values.
+  async function submitEdit(e: React.FormEvent) {
     e.preventDefault();
-    if (!priceTarget) return;
+    if (!editTarget) return;
     setError(null);
+    const o = editTarget.original;
+    const f = editForm;
+    const patch: Record<string, string | number> = {};
+    if (f.workDate !== o.workDate) patch.workDate = f.workDate;
+    if (f.modelNo.trim() !== o.modelNo) patch.modelNo = f.modelNo.trim();
+    if (f.productName.trim() !== o.productName) patch.productName = f.productName.trim();
+    if (f.category.trim() !== o.category) patch.category = f.category.trim();
+    if (f.size.trim() !== o.size) patch.size = f.size.trim();
+    if (f.quantity !== o.quantity) patch.quantity = parseInt(f.quantity, 10) || 1;
+    if (f.price !== o.price) patch.price = parseFloat(f.price) || 0;
+    if (f.extra !== o.extra) patch.extra = parseFloat(f.extra) || 0;
+    if (Object.keys(patch).length === 0) {
+      setEditTarget(null);
+      return;
+    }
     try {
-      await api.patch(`/carpenter-work-items/${priceTarget.id}`, {
-        price: parseFloat(priceForm.price) || 0,
-        extra: parseFloat(priceForm.extra) || 0,
-      });
-      setPriceTarget(null);
+      await api.patch(`/carpenter-work-items/${editTarget.id}`, patch);
+      setEditTarget(null);
       mutate();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to update price');
+      setError(err instanceof ApiError ? err.message : 'Failed to update work entry');
     }
   }
 
@@ -319,14 +350,37 @@ Please confirm receipt.`,
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
       <div className="space-y-6">
       <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3 pb-3 border-b border-brand-100">Work List</h2>
+        <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
+          <h2 className="font-semibold text-brand-900">Work List</h2>
+          {isSuperAdmin && (
+            <ImportButton
+              kind="worker-work"
+              scope={{ carpenterId: id }}
+              label="Add Multiple / Upload PDF·Excel"
+              className="btn-secondary text-xs px-3 py-1.5"
+              onSaved={(res) => {
+                setNotice(`${res.created} old entr${res.created === 1 ? 'y' : 'ies'} recorded (${formatCurrency(res.total)}).`);
+                mutate();
+              }}
+            />
+          )}
+        </div>
         <div className="max-h-80 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell">
             <thead>
               <tr>
                 <th>Stage</th>
                 <th>Date</th>
-                <th>Model No.</th>
+                <th>
+                  <button
+                    type="button"
+                    className="uppercase tracking-wide hover:text-brand-900"
+                    onClick={() => setModelNoSort((s) => (s === 'asc' ? 'desc' : 'asc'))}
+                    title="Sort by Model No."
+                  >
+                    Model No. {modelNoSort === 'asc' ? '▲' : '▼'}
+                  </button>
+                </th>
                 <th>Product</th>
                 <th>Size</th>
                 <th>Qty</th>
@@ -346,7 +400,15 @@ Please confirm receipt.`,
                   </td>
                 </tr>
               )}
-              {carpenter.workItems.map((w) => (
+              {[...carpenter.workItems]
+                .sort((a, b) => {
+                  if (!a.modelNo && !b.modelNo) return 0;
+                  if (!a.modelNo) return 1;
+                  if (!b.modelNo) return -1;
+                  const cmp = a.modelNo.localeCompare(b.modelNo, undefined, { numeric: true, sensitivity: 'base' });
+                  return modelNoSort === 'asc' ? cmp : -cmp;
+                })
+                .map((w) => (
                 <tr key={w.id}>
                   <td>
                     <Chip color={STAGE_CHIP[w.stage]} label={STAGE_LABEL[w.stage]} />
@@ -386,8 +448,8 @@ Please confirm receipt.`,
                     </button>
                     {canEdit && (
                       <>
-                        <button className="text-brand-600 hover:underline text-xs" onClick={() => openPriceModal(w.id, w.productName, w.price, w.extra)}>
-                          {w.price ? 'Edit Price' : 'Set Price'}
+                        <button className="text-brand-600 hover:underline text-xs" onClick={() => openEditModal(w)}>
+                          Edit
                         </button>
                         <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => removeWork(w.id)}>
                           Remove
@@ -475,7 +537,21 @@ Please confirm receipt.`,
       </div>
       <div className="space-y-6">
       <div className="card p-5">
-        <h2 className="font-semibold text-brand-900 mb-3 pb-3 border-b border-brand-100">Payments</h2>
+        <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
+          <h2 className="font-semibold text-brand-900">Payments</h2>
+          {canEdit && (
+            <ImportButton
+              kind="worker-payments"
+              scope={{ carpenterId: id }}
+              label="Add Multiple / Upload PDF·Excel"
+              className="btn-secondary text-xs px-3 py-1.5"
+              onSaved={(res) => {
+                setNotice(`${res.created} payment${res.created === 1 ? '' : 's'} recorded (${formatCurrency(res.total)}).`);
+                mutate();
+              }}
+            />
+          )}
+        </div>
         <div className="max-h-56 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell">
             <thead>
@@ -597,35 +673,49 @@ Please confirm receipt.`,
         </Modal>
       )}
 
-      {priceTarget && (
-        <Modal title={`Set Rate - ${priceTarget.productName}`} onClose={() => setPriceTarget(null)}>
-          <form onSubmit={submitPrice} className="space-y-3">
-            <div>
-              <label className="label">Rate (₹ per unit)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                className="input"
-                required
-                value={priceForm.price}
-                onChange={(e) => setPriceForm((f) => ({ ...f, price: e.target.value }))}
-              />
+      {editTarget && (
+        <Modal title={`Edit Work Entry - ${editTarget.original.productName}`} onClose={() => setEditTarget(null)}>
+          <form onSubmit={submitEdit} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Date</label>
+                <input type="date" className="input" required value={editForm.workDate} onChange={(e) => setEditForm((f) => ({ ...f, workDate: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Model No.</label>
+                <input className="input" value={editForm.modelNo} onChange={(e) => setEditForm((f) => ({ ...f, modelNo: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Product Name</label>
+                <input className="input" required value={editForm.productName} onChange={(e) => setEditForm((f) => ({ ...f, productName: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Category</label>
+                <input className="input" value={editForm.category} onChange={(e) => setEditForm((f) => ({ ...f, category: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Size</label>
+                <input className="input" value={editForm.size} onChange={(e) => setEditForm((f) => ({ ...f, size: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Qty</label>
+                <input type="number" min="1" className="input" required value={editForm.quantity} onChange={(e) => setEditForm((f) => ({ ...f, quantity: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Price (₹ per unit)</label>
+                <input type="number" step="0.01" min="0" className="input" required value={editForm.price} onChange={(e) => setEditForm((f) => ({ ...f, price: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Extra (₹)</label>
+                <input type="number" step="0.01" min="0" className="input" value={editForm.extra} onChange={(e) => setEditForm((f) => ({ ...f, extra: e.target.value }))} />
+              </div>
             </div>
-            <div>
-              <label className="label">Extra (₹, optional)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                className="input"
-                value={priceForm.extra}
-                onChange={(e) => setPriceForm((f) => ({ ...f, extra: e.target.value }))}
-              />
-            </div>
+            <p className="text-sm font-medium text-brand-900">
+              Total: {formatCurrency(((parseFloat(editForm.price) || 0) + (parseFloat(editForm.extra) || 0)) * (parseInt(editForm.quantity, 10) || 1))}
+            </p>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="btn-secondary" onClick={() => setPriceTarget(null)}>
+              <button type="button" className="btn-secondary" onClick={() => setEditTarget(null)}>
                 Cancel
               </button>
               <button type="submit" className="btn-primary">

@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { SuppliersService } from './suppliers.service';
@@ -15,6 +16,8 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 // (previously ungated).
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN)
+@ApiTags('Suppliers')
+@ApiBearerAuth()
 @Controller('suppliers')
 export class SuppliersController {
   constructor(private service: SuppliersService) {}

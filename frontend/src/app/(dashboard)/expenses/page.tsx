@@ -13,6 +13,7 @@ import { ExpenseFormModal } from '@/components/ExpenseFormModal';
 import { downloadCsv } from '@/lib/csv';
 import { formatDate } from '@/lib/format';
 import type { ExpenseSummary, ExpenseMonthly, ExpenseCategory, Expense } from '@/types';
+import { ImportButton } from '@/components/ImportButton';
 
 // Fixed tabs that always exist, plus one dynamically-generated tab per
 // active expense category (so a category created in Settings - "petty
@@ -47,9 +48,12 @@ function ExpensesContent() {
           <h1 className="text-2xl font-bold text-brand-900">Expenses</h1>
           <p className="text-sm text-brand-500 mt-1">Company financial control center - every rupee going out, where it went, and who paid it.</p>
         </div>
-        <button className="btn-primary text-sm" onClick={() => setAddOpen(true)}>
-          + Add Expense
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <ImportButton kind="expenses" className="btn-secondary text-sm" />
+          <button className="btn-primary text-sm" onClick={() => setAddOpen(true)}>
+            + Add Expense
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-1 border-b border-brand-200 overflow-x-auto">

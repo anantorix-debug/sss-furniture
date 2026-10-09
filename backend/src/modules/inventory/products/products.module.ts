@@ -6,6 +6,6 @@ import { StockAllocationService } from './stock-allocation.service';
 @Module({
   controllers: [ProductsController],
   providers: [ProductsService, StockAllocationService],
-  exports: [StockAllocationService],
+  exports: [StockAllocationService, ProductsService],
 })
 export class ProductsModule {}

@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   Body,
   Controller,
@@ -36,6 +37,8 @@ const MAX_WHATSAPP_MEDIA_BYTES = 64 * 1024 * 1024;
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.SUPERADMIN)
+@ApiTags('WhatsApp')
+@ApiBearerAuth()
 @Controller('whatsapp')
 export class WhatsappController {
   private readonly logger = new Logger(WhatsappController.name);

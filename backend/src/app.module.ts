@@ -28,6 +28,7 @@ import { ExpensesModule } from './modules/expenses/expenses.module';
 import { ShopsModule } from './modules/shops/shops.module';
 import { GalleryModule } from './modules/gallery/gallery.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ImportsModule } from './modules/imports/imports.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     ShopsModule,
     GalleryModule,
     NotificationsModule,
+    ImportsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

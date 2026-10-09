@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { DispatchService } from './dispatch.service';
 import { CreateDispatchDto } from './dto/create-dispatch.dto';
@@ -9,6 +10,8 @@ import { Role } from '../../common/enums/role.enum';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Dispatch')
+@ApiBearerAuth()
 @Controller('dispatch-records')
 export class DispatchController {
   constructor(private service: DispatchService) {}

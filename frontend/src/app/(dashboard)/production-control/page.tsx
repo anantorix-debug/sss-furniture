@@ -17,6 +17,7 @@ import { ModelNoPicker } from '@/components/ModelNoPicker';
 import { UnitSelect } from '@/components/UnitSelect';
 import { ViewField } from '@/components/ViewField';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+import { ImportButton } from '@/components/ImportButton';
 import type {
   ProductionDashboard,
   CarpenterWorkItem,
@@ -1740,14 +1741,19 @@ const TOP_TABS: { key: TopTab; label: string }[] = [
 
 function ProductionControlContent() {
   const [tab, setTab] = useState<TopTab>('overview');
+  const { hasRole } = useAuth();
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 className="text-2xl font-bold text-brand-900">Production Control</h1>
         <p className="text-sm text-brand-500 mt-1">
           Everything about production in one place - who&apos;s working on what, what&apos;s ready to verify, and what happens after a cot is finished.
         </p>
+      </div>
+        {/* Old (already finished) work for any workers - Super Admin only, same as Record Old Entry. */}
+        {hasRole('SUPERADMIN') && <ImportButton kind="production-work" label="Upload Old Work Entries" />}
       </div>
 
       <div className="flex gap-1 border-b border-brand-100">

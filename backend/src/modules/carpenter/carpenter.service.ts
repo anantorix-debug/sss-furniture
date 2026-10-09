@@ -1024,7 +1024,7 @@ export class CarpenterService {
     return pick(candidates);
   }
 
-  async updateWorkItem(id: string, dto: UpdateWorkItemDto) {
+  async updateWorkItem(id: string, dto: UpdateWorkItemDto, userId?: string) {
     const existing = await this.prisma.carpenterWorkItem.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Work item not found');
 
@@ -1100,6 +1100,21 @@ export class CarpenterService {
         });
       }
     }
+
+    // Price/Extra/Qty here are worker pay - log every edit with the old and
+    // new values, same as carpenter payment edits.
+    const changed = Object.keys(dto).filter((k) => (dto as Record<string, unknown>)[k] !== undefined);
+    await this.audit.log({
+      userId,
+      action: 'WORK_ITEM_UPDATED',
+      targetType: 'CarpenterWorkItem',
+      targetId: id,
+      metadata: {
+        fields: changed,
+        before: { workDate: existing.workDate, modelNo: existing.modelNo, productName: existing.productName, category: existing.category, size: existing.size, quantity: existing.quantity, price: Number(existing.price), extra: Number(existing.extra), total: Number(existing.total) },
+        after: { workDate: workItem.workDate, modelNo: workItem.modelNo, productName: workItem.productName, category: workItem.category, size: workItem.size, quantity: workItem.quantity, price: Number(workItem.price), extra: Number(workItem.extra), total: Number(workItem.total) },
+      },
+    });
 
     return { ...workItem, whatsapp };
   }

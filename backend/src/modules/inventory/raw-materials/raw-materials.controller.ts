@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { RawMaterialsService } from './raw-materials.service';
@@ -14,6 +15,8 @@ import { Role } from '../../../common/enums/role.enum';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Raw Materials')
+@ApiBearerAuth()
 @Controller()
 export class RawMaterialsController {
   constructor(private service: RawMaterialsService) {}

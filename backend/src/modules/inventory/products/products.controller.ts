@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, HttpStatus, Param, ParseFilePipeBuilder, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsService } from './products.service';
@@ -13,6 +14,8 @@ import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.d
 const MAX_IMAGE_BYTES = 1024 * 1024; // 1 MB
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Products')
+@ApiBearerAuth()
 @Controller('products')
 export class ProductsController {
   constructor(private service: ProductsService) {}

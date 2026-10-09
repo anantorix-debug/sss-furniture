@@ -11,6 +11,7 @@ import { RoleGate } from '@/components/RoleGate';
 import { PaymentDetailModal } from '@/components/PaymentDetailModal';
 import { Pagination } from '@/components/Pagination';
 import type { PaymentSource, UnifiedPaymentsResponse } from '@/types';
+import { ImportButton } from '@/components/ImportButton';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -97,9 +98,12 @@ function PaymentsContent() {
           <h1 className="text-2xl font-bold text-brand-900">Payments</h1>
           <p className="text-sm text-brand-500 mt-1">Money received from customers and parties, and money paid to suppliers, carpenters and for expenses.</p>
         </div>
-        <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
-          {downloading ? 'Preparing...' : 'Download PDF'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <ImportButton kind="payments" />
+          <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
+            {downloading ? 'Preparing...' : 'Download PDF'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

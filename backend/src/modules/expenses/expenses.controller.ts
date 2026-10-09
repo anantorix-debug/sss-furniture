@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ExpensesService } from './expenses.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
@@ -16,6 +17,8 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 // endpoint here, including list/summary reads - there is no partial access.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.SUPERADMIN)
+@ApiTags('Expenses')
+@ApiBearerAuth()
 @Controller('expenses')
 export class ExpensesController {
   constructor(private service: ExpensesService, private audit: AuditService) {}

@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Controller, Delete, Get, HttpStatus, Param, ParseFilePipeBuilder, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors, Body } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { GalleryService } from './gallery.service';
@@ -11,6 +12,8 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 const MAX_IMAGE_BYTES = 1024 * 1024; // 1 MB - matches ProductsService's image cap
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Gallery')
+@ApiBearerAuth()
 @Controller('gallery')
 export class GalleryController {
   constructor(private service: GalleryService) {}

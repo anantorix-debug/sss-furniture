@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger, ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { join } from 'path';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -72,6 +73,26 @@ async function bootstrap() {
   // detect a backend-only deploy too, not just a frontend rebuild.
   const startedAt = Date.now().toString();
   app.getHttpAdapter().get('/api/version', (_req: Request, res: Response) => res.json({ startedAt }));
+
+  // Swagger / OpenAPI docs at /api/docs (raw spec at /api/docs-json). On by
+  // default in development; in production only when SWAGGER_ENABLED=true,
+  // so the full API surface isn't published on the live domain by
+  // accident. The docs are only a map - every route still enforces its own
+  // JWT + role guards, so "Try it out" needs a real token (Authorize ->
+  // paste the accessToken from POST /api/auth/login).
+  const swaggerEnabled = process.env.SWAGGER_ENABLED === 'true' || (process.env.SWAGGER_ENABLED !== 'false' && process.env.NODE_ENV !== 'production');
+  if (swaggerEnabled) {
+    const config = new DocumentBuilder()
+      .setTitle('SSS Furniture API')
+      .setDescription('Orders, production, inventory, payments, expenses and reports for SSS Furniture.')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true, tagsSorter: 'alpha', operationsSorter: 'alpha' },
+    });
+  }
 
   const port = process.env.PORT ?? 4000;
   await app.listen(port);

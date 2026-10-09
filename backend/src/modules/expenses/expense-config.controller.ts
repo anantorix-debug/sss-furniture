@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ExpenseConfigService } from './expense-config.service';
 import { CreateExpenseCategoryDto } from './dto/create-expense-category.dto';
@@ -13,6 +14,8 @@ import { Role } from '../../common/enums/role.enum';
 // restricted configuration, not something any Admin can touch.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.SUPERADMIN)
+@ApiTags('Expense Config')
+@ApiBearerAuth()
 @Controller('expense-config')
 export class ExpenseConfigController {
   constructor(private service: ExpenseConfigService) {}

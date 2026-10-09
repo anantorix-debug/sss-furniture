@@ -13,6 +13,7 @@ import { RoleGate } from '@/components/RoleGate';
 import type { PartyOrder, Shop, ShopSummary } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
+import { ImportButton } from '@/components/ImportButton';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptyFilters: Record<string, string> = {};
@@ -188,6 +189,7 @@ function PartyOrdersContent() {
           <button className="btn-secondary" onClick={() => setShopManagerOpen(true)}>
             Manage Shops
           </button>
+          <ImportButton kind="party-orders" />
           <button className="btn-primary" onClick={openCreate}>
             + New Party Order
           </button>

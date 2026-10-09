@@ -1,5 +1,5 @@
 import { IsDateString, IsOptional } from 'class-validator';
-import { PartialType } from '@nestjs/mapped-types';
+import { PartialType } from '@nestjs/swagger';
 import { CreateWorkItemDto } from './create-work-item.dto';
 
 export class UpdateWorkItemDto extends PartialType(CreateWorkItemDto) {

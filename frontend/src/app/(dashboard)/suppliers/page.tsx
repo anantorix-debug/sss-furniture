@@ -17,6 +17,7 @@ import { useForceable } from '@/hooks/useForceable';
 import { FilterBar } from '@/components/FilterBar';
 import { PurchasingTabs } from '@/components/PurchasingTabs';
 import type { SupplierSummary } from '@/types';
+import { ImportButton } from '@/components/ImportButton';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptySupplierForm = { name: '', phone: '', address: '' };
@@ -158,6 +159,8 @@ function SuppliersContent() {
           >
             Export Excel
           </button>
+          {hasRole('ADMIN') && <ImportButton kind="suppliers" label="Upload Suppliers" />}
+          {hasRole('ADMIN') && <ImportButton kind="purchases" label="Upload Purchases" />}
           {hasRole('ADMIN') && (
             <button className="btn-primary" onClick={openCreate}>
               + New Supplier

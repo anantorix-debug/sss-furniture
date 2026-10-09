@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { OrderWorkEntriesService } from './order-work-entries.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -11,6 +12,8 @@ import { Role } from '../../../common/enums/role.enum';
 // purely for the Production Control screen's "Work Entries" tab.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN)
+@ApiTags('Order Work Entries')
+@ApiBearerAuth()
 @Controller('order-work-entries')
 export class OrderWorkEntriesController {
   constructor(private service: OrderWorkEntriesService) {}

@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { QualityCheckService } from './quality-check.service';
 import { CreateQualityCheckDto } from './dto/create-quality-check.dto';
@@ -12,6 +13,8 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 // recording/editing a check is Admin+; reads stay open to Carpenter/Polisher
 // so a worker can see why their cot was sent back for rework.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Quality Checks')
+@ApiBearerAuth()
 @Controller('quality-checks')
 export class QualityCheckController {
   constructor(private service: QualityCheckService) {}

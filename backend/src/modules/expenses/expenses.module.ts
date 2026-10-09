@@ -7,5 +7,6 @@ import { ExpenseConfigService } from './expense-config.service';
 @Module({
   controllers: [ExpensesController, ExpenseConfigController],
   providers: [ExpensesService, ExpenseConfigService],
+  exports: [ExpensesService],
 })
 export class ExpensesModule {}

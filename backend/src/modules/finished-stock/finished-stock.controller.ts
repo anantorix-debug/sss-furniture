@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { FinishedStockService } from './finished-stock.service';
 import { CreateFinishedStockDto } from './dto/create-finished-stock.dto';
@@ -9,6 +10,8 @@ import { Role } from '../../common/enums/role.enum';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Finished Stock')
+@ApiBearerAuth()
 @Controller('finished-stock')
 export class FinishedStockController {
   constructor(private service: FinishedStockService) {}

@@ -1,9 +1,11 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { CustomerOrdersService } from './customer-orders.service';
 import { CreateCustomerOrderDto } from './dto/create-customer-order.dto';
 import { UpdateCustomerOrderDto } from './dto/update-customer-order.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { AssignProductionDto } from './dto/assign-production.dto';
 import { AssignEmployeeDto } from './dto/assign-employee.dto';
 import { UpdateModelNoDto } from './dto/update-model-no.dto';
@@ -17,6 +19,8 @@ import { OrderWorkEntriesService } from '../work-entries/order-work-entries.serv
 import { CreateOrderWorkEntryDto } from '../work-entries/dto/create-order-work-entry.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Customer Orders')
+@ApiBearerAuth()
 @Controller('customer-orders')
 export class CustomerOrdersController {
   constructor(
@@ -74,6 +78,12 @@ export class CustomerOrdersController {
   @Post(':id/payments')
   addPayment(@Param('id') id: string, @Body() dto: CreatePaymentDto, @CurrentUser() user: AuthUser) {
     return this.service.addPayment(id, dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Patch(':id/payments/:paymentId')
+  updatePayment(@Param('id') id: string, @Param('paymentId') paymentId: string, @Body() dto: UpdatePaymentDto, @CurrentUser() user: AuthUser) {
+    return this.service.updatePayment(id, paymentId, dto, user.userId);
   }
 
   @Roles(Role.ADMIN)

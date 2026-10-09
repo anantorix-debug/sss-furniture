@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { PaymentsService, PaymentSource } from './payments.service';
@@ -11,6 +12,8 @@ import { Role } from '../../common/enums/role.enum';
 // authenticated role, including every carpenter's own wage payments).
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.SUPERADMIN)
+@ApiTags('Payments')
+@ApiBearerAuth()
 @Controller('payments')
 export class PaymentsController {
   constructor(private service: PaymentsService) {}

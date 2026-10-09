@@ -52,6 +52,25 @@ export async function uploadGalleryImage(file: File): Promise<unknown> {
   return data;
 }
 
+// Sends a PDF / Excel / CSV sheet to an `.../import-preview` endpoint and
+// returns the parsed rows for review - the server saves nothing here.
+export async function uploadSheetForPreview<T>(path: string, file: File): Promise<T> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    credentials: 'include',
+    body: formData,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = Array.isArray(data?.message) ? data.message.join(', ') : data?.message;
+    throw new ApiError(res.status, message || 'Failed to read the file', data);
+  }
+  return data as T;
+}
+
 export const WHATSAPP_MEDIA_MAX_BYTES = 64 * 1024 * 1024;
 
 export interface WhatsappSendResult {

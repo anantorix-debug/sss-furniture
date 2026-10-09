@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { AuditService } from './audit.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -6,6 +7,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Audit Log')
+@ApiBearerAuth()
 @Controller('audit-logs')
 export class AuditController {
   constructor(private service: AuditService) {}

@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ShopsService } from './shops.service';
 import { CreateShopDto } from './dto/create-shop.dto';
@@ -8,6 +9,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Shops')
+@ApiBearerAuth()
 @Controller('shops')
 export class ShopsController {
   constructor(private service: ShopsService) {}

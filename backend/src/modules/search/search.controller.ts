@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BadRequestException, Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { SearchService } from './search.service';
@@ -7,6 +8,8 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { Role } from '../../common/enums/role.enum';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Search')
+@ApiBearerAuth()
 @Controller('search')
 export class SearchController {
   constructor(private service: SearchService) {}

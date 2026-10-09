@@ -1,9 +1,11 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { PartyOrdersService } from './party-orders.service';
 import { CreatePartyOrderDto } from './dto/create-party-order.dto';
 import { UpdatePartyOrderDto } from './dto/update-party-order.dto';
 import { CreatePaymentDto } from '../customer/dto/create-payment.dto';
+import { UpdatePaymentDto } from '../customer/dto/update-payment.dto';
 import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
 import { AssignProductionDto } from '../customer/dto/assign-production.dto';
 import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
@@ -16,6 +18,8 @@ import { OrderWorkEntriesService } from '../work-entries/order-work-entries.serv
 import { CreateOrderWorkEntryDto } from '../work-entries/dto/create-order-work-entry.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Party Orders')
+@ApiBearerAuth()
 @Controller('party-orders')
 export class PartyOrdersController {
   constructor(
@@ -249,6 +253,12 @@ export class PartyOrdersController {
   @Post(':id/payments')
   addPayment(@Param('id') id: string, @Body() dto: CreatePaymentDto, @CurrentUser() user: AuthUser) {
     return this.service.addPayment(id, dto, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Patch(':id/payments/:paymentId')
+  updatePayment(@Param('id') id: string, @Param('paymentId') paymentId: string, @Body() dto: UpdatePaymentDto, @CurrentUser() user: AuthUser) {
+    return this.service.updatePayment(id, paymentId, dto, user.userId);
   }
 
   @Roles(Role.ADMIN)

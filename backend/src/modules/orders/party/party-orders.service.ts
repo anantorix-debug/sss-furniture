@@ -8,6 +8,7 @@ import { WhatsappService } from '../../whatsapp/whatsapp.service';
 import { CreatePartyOrderDto, PartyOrderItemDto } from './dto/create-party-order.dto';
 import { UpdatePartyOrderDto } from './dto/update-party-order.dto';
 import { CreatePaymentDto } from '../customer/dto/create-payment.dto';
+import { UpdatePaymentDto } from '../customer/dto/update-payment.dto';
 import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
 import { AssignProductionDto } from '../customer/dto/assign-production.dto';
 import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
@@ -765,6 +766,29 @@ export class PartyOrdersService {
     if (balanceAmount <= 0 && (order.deliveryStatus === 'PENDING' || order.deliveryStatus === 'OUT_FOR_DELIVERY')) {
       await this.prisma.partyOrder.update({ where: { id: orderId }, data: { deliveryStatus: 'DELIVERED' } });
     }
+  }
+
+  // Same as CustomerOrdersService.updatePayment.
+  async updatePayment(orderId: string, paymentId: string, dto: UpdatePaymentDto, userId: string) {
+    const payment = await this.prisma.partyOrderPayment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.orderId !== orderId) throw new NotFoundException('Payment not found');
+    const updated = await this.prisma.partyOrderPayment.update({
+      where: { id: paymentId },
+      data: { date: dto.date ? new Date(dto.date) : undefined, amount: dto.amount, type: dto.type, mode: dto.mode, note: dto.note },
+    });
+    await this.autoMarkDeliveredIfPaid(orderId);
+    await this.audit.log({
+      userId,
+      action: 'PARTY_ORDER_PAYMENT_UPDATED',
+      targetType: 'PartyOrderPayment',
+      targetId: paymentId,
+      metadata: {
+        orderId,
+        before: { date: payment.date, amount: Number(payment.amount), type: payment.type, mode: payment.mode, note: payment.note },
+        after: { date: updated.date, amount: Number(updated.amount), type: updated.type, mode: updated.mode, note: updated.note },
+      },
+    });
+    return this.findOne(orderId);
   }
 
   async removePayment(orderId: string, paymentId: string) {

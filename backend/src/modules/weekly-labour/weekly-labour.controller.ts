@@ -1,3 +1,4 @@
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { WeeklyLabourService } from './weekly-labour.service';
 import { CreateWeeklyLabourDto } from './dto/create-weekly-labour.dto';
@@ -14,6 +15,8 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 // "Admin Can Review Full History" + approval-gated payment record.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN)
+@ApiTags('Weekly Labour')
+@ApiBearerAuth()
 @Controller('weekly-labours')
 export class WeeklyLabourController {
   constructor(private service: WeeklyLabourService) {}
