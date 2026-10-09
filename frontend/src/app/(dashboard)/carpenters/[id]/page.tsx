@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
@@ -83,18 +83,31 @@ function CarpenterDetailContent() {
   const [workForm, setWorkForm] = useState(emptyWork);
   const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
   const [workLookup, setWorkLookup] = useState<ModelNoLookup | null>(null);
+  // What the last Model No lookup put into the form, so a new Model No can replace it.
+  const autoFilled = useRef({ productName: '', category: '', size: '' });
+  const latestWorkModelNo = useRef('');
   const [editLookup, setEditLookup] = useState<ModelNoLookup | null>(null);
   // Typing a Model No looks it up in inventory / production history and fills
   // the blank product details; anything already typed is kept. Nothing is saved.
   async function onWorkModelNo(raw: string) {
     const modelNo = sanitizeModelNo(raw);
+    latestWorkModelNo.current = modelNo;
     setWorkForm((f) => ({ ...f, modelNo }));
     setWorkLookup(null);
     const res = await lookupModelNo(modelNo);
-    if (!res || sanitizeModelNo(res.modelNo) !== modelNo) return;
+    if (latestWorkModelNo.current !== modelNo) return; // a newer Model No was typed meanwhile
     setWorkLookup(res);
-    const a = res.autofill;
-    if (a) setWorkForm((f) => (f.modelNo !== modelNo ? f : { ...f, productName: f.productName || a.productName || '', category: f.category || a.category || '', size: f.size || a.size || '' }));
+    const a = res?.autofill ?? null;
+    const next = { productName: a?.productName ?? '', category: a?.category ?? '', size: a?.size ?? '' };
+    // A box is replaced when it's empty or still holds what the previous
+    // Model No filled in; anything typed by hand is kept.
+    const prev = autoFilled.current;
+    autoFilled.current = next;
+    setWorkForm((f) => {
+      if (f.modelNo !== modelNo) return f;
+      const pick = (key: keyof typeof next) => (!f[key] || f[key] === prev[key] ? next[key] : f[key]);
+      return { ...f, productName: pick('productName'), category: pick('category'), size: pick('size') };
+    });
   }
   async function onEditModelNo(raw: string) {
     const modelNo = sanitizeModelNo(raw);
@@ -176,6 +189,8 @@ function CarpenterDetailContent() {
         directRecord: true,
       });
       setWorkForm(emptyWork);
+      setWorkLookup(null);
+      autoFilled.current = { productName: '', category: '', size: '' };
       mutate();
       setNotice('Old entry recorded.');
     } catch (err) {
@@ -288,6 +303,36 @@ function CarpenterDetailContent() {
       mutate();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to add payment');
+    }
+  }
+
+  // Edit an existing payment (same fields as the Record form). The server
+  // refuses a change that would duplicate another payment.
+  type PayEdit = { id: string; date: string; amount: string; mode: string; note: string; paymentType: CarpenterPaymentType; reference: string };
+  const [payEdit, setPayEdit] = useState<PayEdit | null>(null);
+  const [payEditError, setPayEditError] = useState<string | null>(null);
+  const [payEditSaving, setPayEditSaving] = useState(false);
+  async function submitPayEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!payEdit) return;
+    setPayEditError(null);
+    setPayEditSaving(true);
+    try {
+      await api.patch(`/carpenters/${id}/payments/${payEdit.id}`, {
+        date: payEdit.date,
+        amount: parseFloat(payEdit.amount),
+        mode: payEdit.mode,
+        note: payEdit.note,
+        paymentType: payEdit.paymentType,
+        reference: payEdit.reference,
+      });
+      setPayEdit(null);
+      setNotice('Payment updated.');
+      mutate();
+    } catch (err) {
+      setPayEditError(err instanceof ApiError ? err.message : 'Failed to update payment');
+    } finally {
+      setPayEditSaving(false);
     }
   }
 
@@ -764,7 +809,24 @@ Please confirm receipt.`,
                   <td>{p.mode ?? '-'}</td>
                   <td>{p.note ?? '-'}</td>
                   {canEdit && (
-                    <td>
+                    <td className="whitespace-nowrap">
+                      <button
+                        className="text-brand-700 hover:text-brand-900 text-xs mr-3"
+                        onClick={() => {
+                          setPayEditError(null);
+                          setPayEdit({
+                            id: p.id,
+                            date: String(p.date).slice(0, 10),
+                            amount: String(p.amount),
+                            mode: p.mode ?? 'CASH',
+                            note: p.note ?? '',
+                            paymentType: (p.paymentType ?? 'SALARY') as CarpenterPaymentType,
+                            reference: p.reference ?? '',
+                          });
+                        }}
+                      >
+                        Edit
+                      </button>
                       <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => removePayment(p.id)}>
                         Remove
                       </button>
@@ -800,6 +862,58 @@ Please confirm receipt.`,
       </div>
       </div>
       </div>
+
+      {payEdit && (
+        <Modal title="Edit Payment" onClose={() => setPayEdit(null)}>
+          <form onSubmit={submitPayEdit} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Date</label>
+                <input type="date" className="input" required value={payEdit.date} onChange={(e) => setPayEdit((f) => f && { ...f, date: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Type</label>
+                <select className="input" value={payEdit.paymentType} onChange={(e) => setPayEdit((f) => f && { ...f, paymentType: e.target.value as CarpenterPaymentType })}>
+                  {(Object.keys(CARPENTER_PAYMENT_TYPE_LABEL) as CarpenterPaymentType[]).map((t) => (
+                    <option key={t} value={t}>
+                      {CARPENTER_PAYMENT_TYPE_LABEL[t]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Voucher No.</label>
+                <input className="input" value={payEdit.reference} onChange={(e) => setPayEdit((f) => f && { ...f, reference: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Amount</label>
+                <input type="number" step="0.01" min="0.01" className="input" required value={payEdit.amount} onChange={(e) => setPayEdit((f) => f && { ...f, amount: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Mode</label>
+                <select className="input" value={payEdit.mode} onChange={(e) => setPayEdit((f) => f && { ...f, mode: e.target.value })}>
+                  <option>CASH</option>
+                  <option>GPAY</option>
+                  <option>UPI</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Note</label>
+                <input className="input" value={payEdit.note} onChange={(e) => setPayEdit((f) => f && { ...f, note: e.target.value })} />
+              </div>
+            </div>
+            {payEditError && <p className="text-sm text-red-600">{payEditError}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setPayEdit(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary" disabled={payEditSaving}>
+                {payEditSaving ? 'Saving...' : 'Save Payment'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {forcePrompt && (
         <ConfirmDialog

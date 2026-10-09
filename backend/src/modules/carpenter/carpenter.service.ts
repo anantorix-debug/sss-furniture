@@ -2107,8 +2107,35 @@ export class CarpenterService {
 
   // --- Payments ------------------------------------------------------------
 
+  // One payment is never recorded twice for a worker: a Voucher No. can
+  // only be used once, and without a Voucher No. the same date + amount +
+  // type is the same payment. Same rule the payment upload uses.
+  private async assertPaymentNotDuplicate(
+    carpenterId: string,
+    p: { date: Date; amount: number; paymentType: string; reference?: string | null },
+    excludeId?: string,
+  ) {
+    const ref = (p.reference ?? '').trim();
+    const norm = (v: string | null | undefined) => (v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const others = await this.prisma.carpenterPayment.findMany({
+      where: { carpenterId, ...(excludeId ? { id: { not: excludeId } } : {}) },
+      select: { date: true, amount: true, paymentType: true, reference: true },
+    });
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    if (ref) {
+      const hit = others.find((o) => norm(o.reference) === norm(ref));
+      if (hit) throw new ConflictException(`Voucher No. ${ref} is already recorded for this worker (${day(hit.date)}, Rs.${Number(hit.amount)})`);
+      return;
+    }
+    const hit = others.find(
+      (o) => !norm(o.reference) && day(o.date) === day(p.date) && Number(o.amount) === Number(p.amount) && (o.paymentType ?? 'SALARY') === p.paymentType,
+    );
+    if (hit) throw new ConflictException(`This payment (${day(p.date)}, Rs.${Number(p.amount)}) is already recorded for this worker`);
+  }
+
   async addPayment(carpenterId: string, dto: CreateCarpenterPaymentDto, userId: string) {
     await this.findOneCarpenter(carpenterId);
+    await this.assertPaymentNotDuplicate(carpenterId, { date: new Date(dto.date), amount: dto.amount, paymentType: dto.paymentType ?? 'SALARY', reference: dto.reference });
     const payment = await this.prisma.carpenterPayment.create({
       data: {
         carpenterId,
@@ -2134,6 +2161,16 @@ export class CarpenterService {
   async updatePayment(carpenterId: string, paymentId: string, dto: UpdateCarpenterPaymentDto, userId: string) {
     const existing = await this.prisma.carpenterPayment.findUnique({ where: { id: paymentId } });
     if (!existing || existing.carpenterId !== carpenterId) throw new NotFoundException('Payment not found');
+    await this.assertPaymentNotDuplicate(
+      carpenterId,
+      {
+        date: dto.date ? new Date(dto.date) : existing.date,
+        amount: dto.amount ?? Number(existing.amount),
+        paymentType: dto.paymentType ?? existing.paymentType ?? 'SALARY',
+        reference: dto.reference !== undefined ? dto.reference : existing.reference,
+      },
+      paymentId,
+    );
     const updated = await this.prisma.carpenterPayment.update({
       where: { id: paymentId },
       data: {

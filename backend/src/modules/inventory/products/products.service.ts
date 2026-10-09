@@ -54,15 +54,17 @@ export class ProductsService {
           ]
         : undefined,
     };
-    const [products, total] = await Promise.all([
-      this.prisma.product.findMany({
-        where,
-        include: this.imagesInclude,
-        orderBy: { name: 'asc' },
-        ...(paginated ? toSkipTake(page, limit) : {}),
-      }),
-      paginated ? this.prisma.product.count({ where }) : Promise.resolve(0),
-    ]);
+    // Listed by Model No as a number (1, 2, ... 10, 11 - not 1, 10, 100, 2);
+    // products without a Model No come last, by name. Model No is text in
+    // the database, so the order is worked out on the id list first and only
+    // the requested page is then loaded in full.
+    const keys = await this.prisma.product.findMany({ where, select: { id: true, modelNo: true, name: true } });
+    keys.sort(compareByModelNo);
+    const total = keys.length;
+    const pageIds = (paginated ? keys.slice((page - 1) * limit, page * limit) : keys).map((k) => k.id);
+    const rows = await this.prisma.product.findMany({ where: { id: { in: pageIds } }, include: this.imagesInclude });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const products = pageIds.map((id) => byId.get(id)).filter((p): p is (typeof rows)[number] => !!p);
     const mapped = products.map((p) => withNumericPrices(p, params.viewerRole));
     return paginated ? paginate(mapped, total, page, limit) : mapped;
   }
@@ -408,4 +410,21 @@ export class ProductsService {
     ]);
     return { success: true };
   }
+}
+
+// Model No order: numbers ascending, then any non-number Model No (e.g. a Job
+// No) alphabetically, then products with no Model No, each tie broken by name.
+function compareByModelNo(a: { modelNo: string | null; name: string }, b: { modelNo: string | null; name: string }) {
+  const rank = (m: string | null) => (m == null || m.trim() === '' ? 2 : /^\d+$/.test(m.trim()) ? 0 : 1);
+  const ra = rank(a.modelNo);
+  const rb = rank(b.modelNo);
+  if (ra !== rb) return ra - rb;
+  if (ra === 0) {
+    const d = Number(a.modelNo) - Number(b.modelNo);
+    if (d !== 0) return d;
+  } else if (ra === 1) {
+    const d = a.modelNo!.localeCompare(b.modelNo!, undefined, { numeric: true });
+    if (d !== 0) return d;
+  }
+  return a.name.localeCompare(b.name);
 }
