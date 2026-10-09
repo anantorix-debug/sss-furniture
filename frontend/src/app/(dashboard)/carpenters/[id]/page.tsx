@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError, getAccessToken } from '@/lib/api';
+import { lookupModelNo, sanitizeModelNo, type ModelNoLookup } from '@/lib/modelNoLookup';
+import { ModelNoHint } from '@/components/ModelNoHint';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 import { useAuth } from '@/context/AuthContext';
@@ -80,6 +82,27 @@ function CarpenterDetailContent() {
 
   const [workForm, setWorkForm] = useState(emptyWork);
   const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
+  const [workLookup, setWorkLookup] = useState<ModelNoLookup | null>(null);
+  const [editLookup, setEditLookup] = useState<ModelNoLookup | null>(null);
+  // Typing a Model No looks it up in inventory / production history and fills
+  // the blank product details; anything already typed is kept. Nothing is saved.
+  async function onWorkModelNo(raw: string) {
+    const modelNo = sanitizeModelNo(raw);
+    setWorkForm((f) => ({ ...f, modelNo }));
+    setWorkLookup(null);
+    const res = await lookupModelNo(modelNo);
+    if (!res || sanitizeModelNo(res.modelNo) !== modelNo) return;
+    setWorkLookup(res);
+    const a = res.autofill;
+    if (a) setWorkForm((f) => (f.modelNo !== modelNo ? f : { ...f, productName: f.productName || a.productName || '', category: f.category || a.category || '', size: f.size || a.size || '' }));
+  }
+  async function onEditModelNo(raw: string) {
+    const modelNo = sanitizeModelNo(raw);
+    setEditForm((f) => ({ ...f, modelNo }));
+    setEditLookup(null);
+    const res = await lookupModelNo(modelNo);
+    if (res && sanitizeModelNo(res.modelNo) === modelNo) setEditLookup(res);
+  }
   const [paymentForm, setPaymentForm] = useState({ date: new Date().toISOString().slice(0, 10), amount: '', mode: 'CASH', note: '', paymentType: 'SALARY' as CarpenterPaymentType, reference: '' });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -107,11 +130,16 @@ function CarpenterDetailContent() {
 
   const total = (parseFloat(workForm.price || '0') + parseFloat(workForm.extra || '0')) * parseInt(workForm.quantity || '1', 10);
 
-  async function downloadWorkerPdf(kind: 'WORK' | 'SALARY' | 'VOUCHER' | 'COMBINED') {
+  // dateFrom/dateTo (optional) narrow the rows; the box buttons pass the
+  // date range currently set in that box's filter, so a filtered view
+  // prints the same period.
+  const [pdfBusy, setPdfBusy] = useState<'WORK' | 'VOUCHER' | null>(null);
+  async function downloadWorkerPdf(kind: 'WORK' | 'SALARY' | 'VOUCHER' | 'COMBINED', range: { from?: string; to?: string } = {}) {
     setError(null);
     try {
       const token = getAccessToken();
-      const res = await fetch(`${API_BASE_URL}/carpenters/${id}/pdf?kind=${kind}`, {
+      const query = new URLSearchParams({ kind, ...(range.from ? { dateFrom: range.from } : {}), ...(range.to ? { dateTo: range.to } : {}) });
+      const res = await fetch(`${API_BASE_URL}/carpenters/${id}/pdf?${query}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: 'include',
       });
@@ -120,7 +148,7 @@ function CarpenterDetailContent() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${(carpenter?.name ?? 'worker').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${kind.toLowerCase()}.pdf`;
+      a.download = `${(carpenter?.name ?? 'worker').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${kind === 'VOUCHER' ? 'payments' : kind === 'WORK' ? 'work-list' : kind.toLowerCase()}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -387,6 +415,21 @@ Please confirm receipt.`,
       <div className="card p-5">
         <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
           <h2 className="font-semibold text-brand-900">Work List</h2>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+          {canEdit && (
+            <button
+              type="button"
+              className="btn-secondary text-xs px-3 py-1.5"
+              disabled={pdfBusy !== null}
+              onClick={async () => {
+                setPdfBusy('WORK');
+                await downloadWorkerPdf('WORK', { from: workFilter.from, to: workFilter.to });
+                setPdfBusy(null);
+              }}
+            >
+              {pdfBusy === 'WORK' ? 'Preparing...' : 'Download Work List PDF'}
+            </button>
+          )}
           {isSuperAdmin && (
             <ImportButton
               kind="worker-work"
@@ -399,6 +442,7 @@ Please confirm receipt.`,
               }}
             />
           )}
+          </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
           <input className="input !py-1.5 text-sm" placeholder="Model No." value={workFilter.modelNo} onChange={(e) => setWorkFilter((f) => ({ ...f, modelNo: e.target.value }))} />
@@ -556,7 +600,10 @@ Please confirm receipt.`,
               <option value="POLISH">Polish</option>
             </select>
             <input type="date" className="input" required value={workForm.workDate} onChange={(e) => setWorkForm((f) => ({ ...f, workDate: e.target.value }))} />
-            <input className="input" placeholder="Model No." value={workForm.modelNo} onChange={(e) => setWorkForm((f) => ({ ...f, modelNo: e.target.value }))} />
+            <div>
+              <input className="input" placeholder="Model No." value={workForm.modelNo} onChange={(e) => onWorkModelNo(e.target.value)} />
+              <ModelNoHint result={workLookup} />
+            </div>
             <input className="input" placeholder="Product Name" required value={workForm.productName} onChange={(e) => setWorkForm((f) => ({ ...f, productName: e.target.value }))} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -623,6 +670,21 @@ Please confirm receipt.`,
       <div className="card p-5">
         <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
           <h2 className="font-semibold text-brand-900">Payments</h2>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+          {canEdit && (
+            <button
+              type="button"
+              className="btn-secondary text-xs px-3 py-1.5"
+              disabled={pdfBusy !== null}
+              onClick={async () => {
+                setPdfBusy('VOUCHER');
+                await downloadWorkerPdf('VOUCHER', { from: payFilter.from, to: payFilter.to });
+                setPdfBusy(null);
+              }}
+            >
+              {pdfBusy === 'VOUCHER' ? 'Preparing...' : 'Download Payments PDF'}
+            </button>
+          )}
           {canEdit && (
             <ImportButton
               kind="worker-payments"
@@ -635,6 +697,7 @@ Please confirm receipt.`,
               }}
             />
           )}
+          </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2 text-sm">
           <input className="input !py-1.5 text-sm" placeholder="Voucher No. / note" value={payFilter.q} onChange={(e) => setPayFilter((f) => ({ ...f, q: e.target.value }))} />
@@ -802,7 +865,8 @@ Please confirm receipt.`,
               </div>
               <div>
                 <label className="label">Model No.</label>
-                <input className="input" value={editForm.modelNo} onChange={(e) => setEditForm((f) => ({ ...f, modelNo: e.target.value }))} />
+                <input className="input" value={editForm.modelNo} onChange={(e) => onEditModelNo(e.target.value)} />
+                <ModelNoHint result={editLookup} />
               </div>
               <div>
                 <label className="label">Product Name</label>

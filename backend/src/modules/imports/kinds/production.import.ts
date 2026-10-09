@@ -77,6 +77,8 @@ export class WorkerWorkImport implements ImportHandler {
   readonly kind = 'worker-work';
   readonly minRole = Role.SUPERADMIN as const;
   readonly requiredScope = ['carpenterId'];
+  readonly modelNoField = 'modelNo';
+  readonly autofillFromProduct = true;
   readonly spec = WORK_SPEC as TableSpec<string>;
 
   constructor(
@@ -109,6 +111,8 @@ export class WorkerWorkImport implements ImportHandler {
 export class ProductionWorkImport implements ImportHandler {
   readonly kind = 'production-work';
   readonly minRole = Role.SUPERADMIN as const;
+  readonly modelNoField = 'modelNo';
+  readonly autofillFromProduct = true;
   readonly spec: TableSpec<string> = {
     ...(WORK_SPEC as TableSpec<string>),
     aliases: { ...WORK_SPEC.aliases, WORKER: 'worker', WORKERNAME: 'worker', CARPENTER: 'worker', EMPLOYEE: 'worker', EMPLOYEENAME: 'worker', STAGE: 'stage' },

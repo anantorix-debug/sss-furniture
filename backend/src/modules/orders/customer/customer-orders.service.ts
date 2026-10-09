@@ -9,6 +9,7 @@ import { CreateCustomerOrderDto, CustomerOrderItemDto } from './dto/create-custo
 import { UpdateCustomerOrderDto } from './dto/update-customer-order.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
+import { ModelNoService } from '../../model-no/model-no.service';
 import { AssignProductionDto } from './dto/assign-production.dto';
 import { AssignEmployeeDto } from './dto/assign-employee.dto';
 import { UpdateModelNoDto } from './dto/update-model-no.dto';
@@ -106,6 +107,7 @@ export class CustomerOrdersService {
     private stockAllocation: StockAllocationService,
     private pdf: PdfService,
     private whatsapp: WhatsappService,
+    private modelNos: ModelNoService,
   ) {}
 
   // The item-level Model No field (ModelNoPicker on the frontend) is a
@@ -126,27 +128,25 @@ export class CustomerOrdersService {
     const pending = items.filter((i) => !i.productId && i.modelNo?.trim());
     const resolved = new Map<string, string>();
     for (const i of pending) {
-      const modelNo = i.modelNo!.trim();
+      // A Model No is a number: "PO-NEW-2" is registered as 2, and an
+      // existing product with that number is reused - never duplicated.
+      const modelNo = this.modelNos.requireClean(i.modelNo);
       if (resolved.has(modelNo)) continue;
-      const product = await this.prisma.product.upsert({
-        where: { modelNo },
-        update: {},
-        create: {
-          modelNo,
-          name: i.productName,
-          category: i.category,
-          modelSize: i.size,
-          sizeUnit: i.sizeUnit,
-          materialFinish: i.color,
-          retailPrice: i.unitPrice,
-          unit: 'Nos',
-        },
+      const { product } = await this.modelNos.ensureCatalogProduct({
+        modelNo,
+        name: i.productName,
+        category: i.category,
+        modelSize: i.size,
+        sizeUnit: i.sizeUnit,
+        materialFinish: i.color,
+        retailPrice: i.unitPrice,
+        unit: 'Nos',
       });
       resolved.set(modelNo, product.id);
     }
 
     return items.map((i) => {
-      const modelNo = i.modelNo?.trim();
+      const modelNo = this.modelNos.lenient(i.modelNo);
       const productId = !i.productId && modelNo && resolved.has(modelNo) ? resolved.get(modelNo) : i.productId;
       // Stamp who/when this line's Model No was set whenever one is
       // present on this save - same "by X - date" the list shows next to
@@ -664,8 +664,7 @@ export class CustomerOrdersService {
       throw new ForbiddenException('This order is not assigned to you');
     }
 
-    const modelNo = dto.modelNo.trim();
-    if (!modelNo) throw new BadRequestException('Model No cannot be empty');
+    const modelNo = this.modelNos.requireCleanList(dto.modelNo);
 
     const previousModelNo = order.cotTrack;
     const updated = await this.prisma.customerOrder.update({

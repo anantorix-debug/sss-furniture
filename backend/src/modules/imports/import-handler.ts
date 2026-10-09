@@ -28,10 +28,21 @@ export interface ImportContext {
 
 // What a kind returns for one sheet row - duplicate flags are added by
 // ImportsService, the same way for every kind.
+// What the central Model No lookup said about a row's Model No (kinds that
+// have a Model No column): FOUND = already a product in inventory, NEW = a
+// number nobody has used yet. Purely informational - nothing is created.
+export interface RowLookup {
+  status: 'FOUND' | 'NEW';
+  productId?: string;
+  name?: string;
+  inStock?: boolean;
+}
+
 export interface HandlerPreviewRow {
   line: number;
   values: GridRow;
   warnings: string[];
+  lookup?: RowLookup;
 }
 
 // 'existing' = already recorded in the database; 'batch' = repeats another
@@ -54,6 +65,12 @@ export interface ImportHandler {
   readonly spec: TableSpec<string>;
   // Scope keys this kind needs (e.g. ['carpenterId']).
   readonly requiredScope?: string[];
+  // Name of the grid column that holds a Model No, when the kind has one -
+  // the upload then runs every row through the central Model No lookup.
+  readonly modelNoField?: string;
+  // Fill blank category/size/name from the matching inventory product. Off
+  // for kinds whose rows ARE the product list.
+  readonly autofillFromProduct?: boolean;
   preview(rows: { line: number; cells: Partial<Record<string, string>> }[], ctx: ImportContext): Promise<HandlerPreviewRow[]>;
   // One result per item, in the same order. Only ever called with rows that
   // passed the duplicate check (or that the user confirmed).

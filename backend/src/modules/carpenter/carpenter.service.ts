@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { WorkerType } from '@prisma/client';
+import { Prisma, WorkerType } from '@prisma/client';
+import { ModelNoService } from '../model-no/model-no.service';
+import { modelNoKey } from '../../common/utils/model-no.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { AuditService } from '../audit/audit.service';
@@ -62,6 +64,7 @@ export class CarpenterService {
     private audit: AuditService,
     private notifications: NotificationsService,
     private pdf: PdfService,
+    private modelNos: ModelNoService,
   ) {}
 
   // --- Carpenters ------------------------------------------------------
@@ -528,12 +531,19 @@ export class CarpenterService {
       throw new BadRequestException('Colour is required when assigning production at the Polish stage.');
     }
 
+    // The Model No is a number and belongs to ONE product in the central
+    // inventory: when that product exists this entry is linked to it (so
+    // Work List, orders and stock all point at the same product). A
+    // Model No nobody has used yet is just stored - typing one here never
+    // creates a product or touches stock.
+    const link = await this.modelNos.forWorkItem(dto.modelNo, dto.productId);
+
     const workItem = await this.prisma.carpenterWorkItem.create({
       data: {
         carpenterId: dto.carpenterId,
         stage: dto.stage,
         workDate: new Date(dto.workDate),
-        modelNo: dto.modelNo,
+        modelNo: link.modelNo,
         productName: dto.productName,
         category: dto.category,
         size: dto.size,
@@ -542,7 +552,7 @@ export class CarpenterService {
         extra,
         quantity,
         total,
-        productId: dto.productId,
+        productId: link.productId ?? undefined,
         notes: dto.notes,
         color: dto.color?.trim() || undefined,
         batchId: randomUUID(),
@@ -715,13 +725,15 @@ export class CarpenterService {
     const extra = dto.extra ?? 0;
     const quantity = dto.quantity ?? 1;
     const workDate = new Date(dto.workDate);
+    const link = await this.modelNos.forWorkItem(dto.modelNo, dto.productId);
 
     const item = await this.prisma.carpenterWorkItem.create({
       data: {
         carpenterId: dto.carpenterId,
         stage: (dto.stage ?? 'CARPENTER') as any,
         workDate,
-        modelNo: dto.modelNo,
+        modelNo: link.modelNo,
+        productId: link.productId ?? undefined,
         productName: dto.productName,
         category: dto.category,
         size: dto.size,
@@ -845,13 +857,16 @@ export class CarpenterService {
     // quantity: 1 - same reasoning as the no-placeholder branch above.
     const perUnitTotal = price + extra;
     const sharedBatchId = placeholder.batchId ?? randomUUID();
+    const assigned = dto.modelNo ? await this.modelNos.forWorkItem(dto.modelNo, placeholder.productId) : null;
+    const assignedModelNo = assigned?.modelNo ?? placeholder.modelNo;
     const workItem = await this.prisma.carpenterWorkItem.update({
       where: { id: placeholder.id },
       data: {
         carpenterId: dto.carpenterId,
         stage: dto.stage ?? placeholder.stage,
         workDate: new Date(dto.workDate),
-        modelNo: dto.modelNo ?? placeholder.modelNo,
+        modelNo: assignedModelNo,
+        ...(assigned?.productId && !placeholder.productId ? { productId: assigned.productId } : {}),
         category: dto.category,
         size: dto.size ?? placeholder.size,
         sizeUnit: dto.sizeUnit ?? placeholder.sizeUnit,
@@ -882,7 +897,7 @@ export class CarpenterService {
           carpenterId: dto.carpenterId,
           stage: dto.stage ?? placeholder.stage,
           workDate: new Date(dto.workDate),
-          modelNo: dto.modelNo ?? placeholder.modelNo,
+          modelNo: assignedModelNo,
           productName: placeholder.productName,
           category: dto.category,
           size: dto.size ?? placeholder.size,
@@ -1055,13 +1070,23 @@ export class CarpenterService {
       throw new BadRequestException('Work Finished date cannot be before Work Started date.');
     }
 
+    // A changed Model No is validated (number only) and re-linked to the
+    // product that owns it. The piece THIS run produced keeps its own link.
+    let modelNoData: { modelNo?: string; productId?: string } = {};
+    if (dto.modelNo !== undefined && dto.modelNo !== null && String(dto.modelNo).trim() !== '') {
+      const link = await this.modelNos.forWorkItem(dto.modelNo, undefined);
+      const linkedProduct = existing.productId ? await this.prisma.product.findUnique({ where: { id: existing.productId }, select: { sourceBatchId: true } }) : null;
+      const ownPiece = !!linkedProduct && !!existing.batchId && linkedProduct.sourceBatchId === existing.batchId;
+      modelNoData = { modelNo: link.modelNo, ...(link.productId && !ownPiece ? { productId: link.productId } : {}) };
+    }
+
     const workItem = await this.prisma.carpenterWorkItem.update({
       where: { id },
       data: {
         carpenterId: dto.carpenterId,
         stage: dto.stage,
         workDate: dto.workDate ? new Date(dto.workDate) : undefined,
-        modelNo: dto.modelNo,
+        ...modelNoData,
         productName: dto.productName,
         category: dto.category,
         size: dto.size,
@@ -1255,9 +1280,11 @@ export class CarpenterService {
     }
 
     const batchId = randomUUID();
+    const link = await this.modelNos.forWorkItem(dto.modelNo);
     const shared = {
       workDate: new Date(dto.workDate),
-      modelNo: dto.modelNo,
+      modelNo: link.modelNo,
+      productId: link.productId ?? undefined,
       productName: dto.productName,
       pattern: dto.pattern,
       size: dto.size,
@@ -1408,9 +1435,11 @@ export class CarpenterService {
     }
 
     const ids = existing.map((e) => e.id);
+    const link = await this.modelNos.forWorkItem(dto.modelNo);
     const shared = {
       workDate: new Date(dto.workDate),
-      modelNo: dto.modelNo,
+      modelNo: link.modelNo,
+      productId: link.productId ?? undefined,
       productName: dto.productName,
       pattern: dto.pattern,
       size: dto.size,
@@ -1715,46 +1744,111 @@ export class CarpenterService {
       const template = workItem.productId ? await this.prisma.product.findUnique({ where: { id: workItem.productId } }) : null;
       const singleModelNo = workItem.quantity === 1 ? workItem.modelNo : null;
 
+      // Every piece's Model No is decided and checked BEFORE anything is
+      // written. A Model No is a number owned by exactly one product, so
+      // accepting this batch into stock never creates a second product for
+      // a number that already has one:
+      //   - no product has it       -> a new product (stock 1) is created
+      //   - a catalogue-only master -> (stock 0, registered from an order)
+      //                                this piece makes THAT product real
+      //   - a real piece has it     -> refused with a clear message, unless
+      //                                it is the piece this very batch
+      //                                already added (a repeated request):
+      //                                then nothing is added a second time.
+      const plans = Array.from({ length: workItem.quantity }, (_, i) => {
+        const raw = pieceModelNos[i] || (i === 0 && singleModelNo ? singleModelNo : undefined);
+        return { index: i, modelNo: this.modelNos.lenient(raw) };
+      });
+      const wanted = plans.map((p) => p.modelNo).filter((v): v is string => !!v);
+      if (new Set(wanted).size !== wanted.length) {
+        throw new BadRequestException('Two pieces of this batch have the same Model No - fix it before verifying.');
+      }
+      const owners = new Map<string, Awaited<ReturnType<ModelNoService['findProduct']>>>();
+      for (const n of wanted) {
+        const owner = await this.modelNos.findProduct(n);
+        if (!owner) continue;
+        const mine = !!workItem.batchId && owner.sourceBatchId === workItem.batchId;
+        if (owner.quantity > 0 && !mine) {
+          throw new ConflictException(
+            `Model No ${n} already belongs to "${owner.name}" in inventory (${owner.availableQuantity > 0 ? 'in stock' : 'already sold'}). Change this piece's Model No instead of adding it again.`,
+          );
+        }
+        owners.set(n, owner);
+      }
+
       await this.prisma.$transaction(async (tx) => {
-        let firstCreatedId: string | null = null;
-        for (let i = 0; i < workItem.quantity; i++) {
-          const created = await tx.product.create({
-            data: {
-              modelNo: pieceModelNos[i] || (i === 0 && singleModelNo ? singleModelNo : undefined),
-              name: template?.name ?? workItem.productName,
-              category: template?.category ?? undefined,
-              modelSize: template?.modelSize ?? workItem.size ?? undefined,
-              materialFinish: template?.materialFinish ?? undefined,
-              sizeUnit: template?.sizeUnit ?? workItem.sizeUnit ?? undefined,
-              pattern: template?.pattern ?? undefined,
-              details: template?.details ?? undefined,
-              unit: template?.unit ?? undefined,
-              retailPrice: template?.retailPrice ?? 0,
-              wholesalePrice: template?.wholesalePrice ?? undefined,
-              costPrice: template?.costPrice ?? undefined,
-              quantity: 1,
-              availableQuantity: 1,
-              sourceBatchId: workItem.batchId,
-            },
-          });
-          if (i === 0) firstCreatedId = created.id;
-          await tx.productStockMovement.create({
-            data: {
-              productId: created.id,
-              type: 'IN',
-              quantity: 1,
-              previousAvailable: 0,
-              newAvailable: 1,
-              reason: `Production → Stock (work item ${workItem.id})`,
-              createdById: userId,
-            },
-          });
+        let firstId: string | null = null;
+        for (const plan of plans) {
+          const owner = plan.modelNo ? owners.get(plan.modelNo) : undefined;
+          let productId: string;
+          if (owner && owner.quantity > 0) {
+            // already added by this same batch - never a second stock movement
+            productId = owner.id;
+          } else if (owner) {
+            const claimed = await tx.product.updateMany({ where: { id: owner.id, quantity: 0 }, data: { quantity: 1, availableQuantity: 1, sourceBatchId: workItem.batchId } });
+            if (claimed.count === 0) {
+              throw new ConflictException(`Model No ${plan.modelNo} was just taken by another request - refresh and try again.`);
+            }
+            await tx.productStockMovement.create({
+              data: {
+                productId: owner.id,
+                type: 'IN',
+                quantity: 1,
+                previousAvailable: 0,
+                newAvailable: 1,
+                reason: `Production → Stock (work item ${workItem.id}, existing catalogue Model No)`,
+                createdById: userId,
+              },
+            });
+            productId = owner.id;
+          } else {
+            let created;
+            try {
+              created = await tx.product.create({
+                data: {
+                  modelNo: plan.modelNo,
+                  name: template?.name ?? workItem.productName,
+                  category: template?.category ?? undefined,
+                  modelSize: template?.modelSize ?? workItem.size ?? undefined,
+                  materialFinish: template?.materialFinish ?? undefined,
+                  sizeUnit: template?.sizeUnit ?? workItem.sizeUnit ?? undefined,
+                  pattern: template?.pattern ?? undefined,
+                  details: template?.details ?? undefined,
+                  unit: template?.unit ?? undefined,
+                  retailPrice: template?.retailPrice ?? 0,
+                  wholesalePrice: template?.wholesalePrice ?? undefined,
+                  costPrice: template?.costPrice ?? undefined,
+                  quantity: 1,
+                  availableQuantity: 1,
+                  sourceBatchId: workItem.batchId,
+                },
+              });
+            } catch (e) {
+              if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+                throw new ConflictException(`Model No ${plan.modelNo} was just added by another request - refresh and try again.`);
+              }
+              throw e;
+            }
+            await tx.productStockMovement.create({
+              data: {
+                productId: created.id,
+                type: 'IN',
+                quantity: 1,
+                previousAvailable: 0,
+                newAvailable: 1,
+                reason: `Production → Stock (work item ${workItem.id})`,
+                createdById: userId,
+              },
+            });
+            productId = created.id;
+          }
+          if (plan.index === 0) firstId = productId;
         }
         // Only when the work item is exactly one unit does "the product
         // this work item produced" resolve to a single row - link it so a
         // later Model No edit on the work item can still find it.
-        if (workItem.quantity === 1 && firstCreatedId) {
-          await tx.carpenterWorkItem.update({ where: { id: workItem.id }, data: { productId: firstCreatedId } });
+        if (workItem.quantity === 1 && firstId) {
+          await tx.carpenterWorkItem.update({ where: { id: workItem.id }, data: { productId: firstId } });
         }
       });
       return;
@@ -1802,8 +1896,8 @@ export class CarpenterService {
   // manufacturing"). Propagates to the linked order/stock record so it's
   // never just sitting on the work item disconnected from what it's for.
   async updateWorkItemModelNo(id: string, modelNo: string, userId: string) {
-    const trimmed = modelNo.trim();
-    if (!trimmed) throw new BadRequestException('Model No cannot be empty');
+    // A Model No is just a number ("PO-NEW-2" is saved as 2).
+    const trimmed = this.modelNos.requireClean(modelNo);
 
     const workItem = await this.prisma.carpenterWorkItem.findUnique({ where: { id } });
     if (!workItem) throw new NotFoundException('Work item not found');
@@ -1826,14 +1920,31 @@ export class CarpenterService {
       );
     }
 
-    await this.prisma.carpenterWorkItem.update({ where: { id }, data: { modelNo: trimmed } });
+    // Only the piece THIS run produced (its Product was created by this
+    // work item's batch) is renamed along with the work item. A linked
+    // reference design or an existing product that merely shares the Model
+    // No is never renamed - editing a work item must not change another
+    // product's identity.
+    const linked = workItem.productId ? await this.prisma.product.findUnique({ where: { id: workItem.productId } }) : null;
+    const ownPiece = !!linked && !!workItem.batchId && linked.sourceBatchId === workItem.batchId;
+    if (ownPiece) await this.modelNos.assertFree(trimmed, linked!.id);
+    const owner = await this.modelNos.findProduct(trimmed);
+    await this.prisma.carpenterWorkItem.update({
+      where: { id },
+      data: { modelNo: trimmed, ...(owner && !ownPiece ? { productId: owner.id } : {}) },
+    });
 
     if (workItem.source === 'STOCK') {
       // Already completed (a single row exists) - keep it in sync. Not yet
       // completed - nothing to sync yet; applyCompletionToStock applies
       // this modelNo to the one row it creates.
-      if (workItem.productId) {
-        await this.prisma.product.update({ where: { id: workItem.productId }, data: { modelNo: trimmed } });
+      if (ownPiece) {
+        try {
+          await this.prisma.product.update({ where: { id: linked!.id }, data: { modelNo: trimmed } });
+        } catch (e) {
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') await this.modelNos.assertFree(trimmed, linked!.id);
+          throw e;
+        }
       }
     } else if (workItem.source === 'CUSTOMER_ORDER' && workItem.sourceCustomerOrderId) {
       // A quantity>1 line now becomes several work items (see
@@ -1852,6 +1963,10 @@ export class CarpenterService {
         where: { id: workItem.sourcePartyOrderItemId },
         data: { modelNo, modelNoUpdatedById: userId, modelNoUpdatedAt: new Date() },
       });
+      // Link the order line to the product with this Model No (never
+      // overwrites a link it already has, never creates a product).
+      const single = modelNo.includes(',') ? null : await this.modelNos.findProductId(modelNo);
+      if (single) await this.prisma.partyOrderItem.updateMany({ where: { id: workItem.sourcePartyOrderItemId, productId: null }, data: { productId: single } });
     }
 
     await this.audit.log({
@@ -1873,8 +1988,7 @@ export class CarpenterService {
   // values over onto the real rows it creates once the batch is verified,
   // so nothing entered here is ever lost or has to be re-typed.
   async updateWorkItemPieceModelNo(id: string, index: number, modelNo: string, userId: string) {
-    const trimmed = modelNo.trim();
-    if (!trimmed) throw new BadRequestException('Model No cannot be empty');
+    const trimmed = this.modelNos.requireClean(modelNo);
 
     const workItem = await this.prisma.carpenterWorkItem.findUnique({ where: { id } });
     if (!workItem) throw new NotFoundException('Work item not found');
@@ -1893,6 +2007,16 @@ export class CarpenterService {
     const next = Array.from({ length: workItem.quantity }, (_, i) => existing[i] ?? null);
     next[index] = trimmed;
 
+    // One number per piece: no two pieces of this batch share a Model No,
+    // and a number that already belongs to another real piece in inventory
+    // is refused now - not later, when the batch is verified.
+    const keys = next.filter((v): v is string => !!v).map((v) => modelNoKey(v));
+    if (new Set(keys).size !== keys.length) throw new BadRequestException('Two pieces of this batch have the same Model No.');
+    const owner = await this.modelNos.findProduct(trimmed);
+    if (owner && owner.quantity > 0 && !(workItem.batchId && owner.sourceBatchId === workItem.batchId)) {
+      throw new ConflictException(`Model No ${trimmed} already belongs to "${owner.name}" in inventory - use a different Model No.`);
+    }
+
     await this.prisma.carpenterWorkItem.update({ where: { id }, data: { pieceModelNos: next } });
 
     // Already verified (real Product rows exist) - keep the corresponding
@@ -1907,6 +2031,7 @@ export class CarpenterService {
         select: { id: true },
       });
       if (pieces[index]) {
+        await this.modelNos.assertFree(trimmed, pieces[index].id);
         await this.prisma.product.update({ where: { id: pieces[index].id }, data: { modelNo: trimmed } });
       }
     }

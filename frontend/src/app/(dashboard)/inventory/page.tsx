@@ -24,6 +24,7 @@ import { FilterBar } from '@/components/FilterBar';
 import type { CarpenterSummary, GalleryImage, MaterialGroup, MaterialMeasurementKind, Product, ProductStockMovement, RawMaterial, StockMovement, WorkerType } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { ImportButton } from '@/components/ImportButton';
+import { sanitizeModelNo } from '@/lib/modelNoLookup';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -482,7 +483,7 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
               <input
                 className={`input ${duplicateModelNo ? 'border-red-500' : ''}`}
                 value={form.modelNo}
-                onChange={(e) => setForm((f) => ({ ...f, modelNo: e.target.value }))}
+                onChange={(e) => setForm((f) => ({ ...f, modelNo: sanitizeModelNo(e.target.value) }))}
                 placeholder="Leave blank to set later - Production Employee can assign it"
               />
               {duplicateModelNo && (
@@ -585,7 +586,7 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-[11px] text-brand-400">Model No</label>
-                      <input className="input" placeholder="Leave blank to set later" value={row.modelNo} onChange={(e) => updateBulkRow(idx, { modelNo: e.target.value })} />
+                      <input className="input" placeholder="Leave blank to set later" value={row.modelNo} onChange={(e) => updateBulkRow(idx, { modelNo: sanitizeModelNo(e.target.value) })} />
                     </div>
                     <div>
                       <label className="text-[11px] text-brand-400">Product Name</label>

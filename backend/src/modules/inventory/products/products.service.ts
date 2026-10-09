@@ -8,30 +8,9 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Role } from '../../../common/enums/role.enum';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
-
-const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.CARVER, Role.POLISHER];
-
-// Decimal fields serialize to strings by default (e.g. "9200"), which
-// silently turns numeric use on the client into string concatenation
-// (0 + "9200" + "24000" -> "0920024000"). Convert them to real numbers here
-// so every consumer of this API gets correctly-typed data. Also strips
-// pricing entirely for Carpenter/Polisher viewers - they need the catalogue
-// for product identification (name, image, size), never cost/margin.
-function withNumericPrices<T extends { retailPrice: any; wholesalePrice: any; costPrice: any }>(
-  product: T,
-  viewerRole?: Role,
-) {
-  if (viewerRole && HIDE_FINANCIALS_FOR.includes(viewerRole)) {
-    const { retailPrice, wholesalePrice, costPrice, ...rest } = product as any;
-    return rest;
-  }
-  return {
-    ...product,
-    retailPrice: Number(product.retailPrice),
-    wholesalePrice: product.wholesalePrice != null ? Number(product.wholesalePrice) : null,
-    costPrice: product.costPrice != null ? Number(product.costPrice) : null,
-  };
-}
+import { withNumericPrices } from '../../../common/utils/product-prices.util';
+import { ModelNoService } from '../../model-no/model-no.service';
+import { Prisma } from '@prisma/client';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'products');
 
@@ -40,6 +19,7 @@ export class ProductsService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private modelNos: ModelNoService,
   ) {}
 
   private readonly imagesInclude = { images: { orderBy: { isPrimary: 'desc' as const } } };
@@ -93,15 +73,18 @@ export class ProductsService {
     return withNumericPrices(product, viewerRole);
   }
 
+  // Model No lookup - one implementation (ModelNoService) behind every
+  // page, form, import and production path.
+  lookupModelNo(modelNo: string, viewerRole?: Role) {
+    return this.modelNos.lookup(modelNo, viewerRole);
+  }
+
   private async assertUnique(dto: { sku?: string; modelNo?: string }, excludeId?: string) {
     if (dto.sku) {
       const existing = await this.prisma.product.findUnique({ where: { sku: dto.sku } });
       if (existing && existing.id !== excludeId) throw new ConflictException('A product with this SKU already exists');
     }
-    if (dto.modelNo) {
-      const existing = await this.prisma.product.findUnique({ where: { modelNo: dto.modelNo } });
-      if (existing && existing.id !== excludeId) throw new ConflictException('A product with this Model No already exists');
-    }
+    if (dto.modelNo) await this.modelNos.assertFree(dto.modelNo, excludeId);
   }
 
   // Every Model No is exactly one physical piece - quantity is always 1,
@@ -109,12 +92,37 @@ export class ProductsService {
   // piece is sold it's sold, and a new physical piece is a new row (either
   // Add Product again, or via Production completing - see
   // CarpenterService.applyCompletionToStock).
+  //
+  // One product per Model No: when the Model No already exists as a
+  // catalogue-only master (quantity 0 - registered from a Customer/Party
+  // Order, never physically in stock) this adds the physical piece TO that
+  // same master instead of failing or duplicating it: blank fields are
+  // filled from the form (nothing already there is overwritten), and stock
+  // goes 0 -> 1 with the usual "Added to stock" movement. A Model No that
+  // already has a real piece (in stock or sold) is refused with the
+  // owner's name.
   async create(dto: CreateProductDto, userId?: string) {
-    await this.assertUnique(dto);
-    const product = await this.prisma.product.create({
-      data: { ...dto, quantity: 1, availableQuantity: 1 },
-      include: this.imagesInclude,
-    });
+    const modelNo = this.modelNos.optionalClean(dto.modelNo);
+    if (modelNo) {
+      const existing = await this.modelNos.findProduct(modelNo);
+      if (existing && existing.quantity === 0) return this.adoptCatalogueProduct(existing.id, { ...dto, modelNo }, userId);
+    }
+    await this.assertUnique({ ...dto, modelNo });
+    let product;
+    try {
+      product = await this.prisma.product.create({
+        data: { ...dto, modelNo, quantity: 1, availableQuantity: 1 },
+        include: this.imagesInclude,
+      });
+    } catch (e) {
+      // Two simultaneous Add Product calls for the same new Model No: the
+      // unique index lets one win; the other gets a clear conflict.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        await this.assertUnique({ ...dto, modelNo });
+        throw new ConflictException('A product with this Model No or SKU already exists');
+      }
+      throw e;
+    }
     if (userId) {
       await this.prisma.productStockMovement.create({
         data: {
@@ -131,10 +139,64 @@ export class ProductsService {
     return withNumericPrices(product);
   }
 
+  // See create(): turns a quantity-0 catalogue master into the one physical
+  // piece, in one transaction, and only if it is still quantity 0 when the
+  // update runs (so a double submit adds the piece once, not twice).
+  private async adoptCatalogueProduct(id: string, dto: CreateProductDto & { modelNo: string }, userId?: string) {
+    const fill = <T>(current: T | null | undefined, incoming: T | null | undefined) => (current == null || current === ('' as unknown as T) ? (incoming ?? undefined) : undefined);
+    const product = await this.prisma.$transaction(async (tx) => {
+      const master = await tx.product.findUniqueOrThrow({ where: { id } });
+      const claimed = await tx.product.updateMany({ where: { id, quantity: 0 }, data: { quantity: 1, availableQuantity: 1 } });
+      if (claimed.count === 0) throw new ConflictException(`Model No ${dto.modelNo} already belongs to "${master.name}" in inventory.`);
+      const updated = await tx.product.update({
+        where: { id },
+        data: {
+          category: fill(master.category, dto.category),
+          modelSize: fill(master.modelSize, dto.modelSize),
+          materialFinish: fill(master.materialFinish, dto.materialFinish),
+          sizeUnit: fill(master.sizeUnit, dto.sizeUnit),
+          pattern: fill(master.pattern, dto.pattern),
+          details: fill(master.details, dto.details),
+          unit: fill(master.unit, dto.unit),
+          sku: fill(master.sku, dto.sku),
+          wholesalePrice: master.wholesalePrice == null ? dto.wholesalePrice : undefined,
+          costPrice: master.costPrice == null ? dto.costPrice : undefined,
+          retailPrice: Number(master.retailPrice) === 0 ? dto.retailPrice : undefined,
+        },
+        include: this.imagesInclude,
+      });
+      if (userId) {
+        await tx.productStockMovement.create({
+          data: {
+            productId: id,
+            type: 'IN',
+            quantity: 1,
+            previousAvailable: 0,
+            newAvailable: 1,
+            reason: 'Added to stock (existing catalogue Model No)',
+            createdById: userId,
+          },
+        });
+      }
+      return updated;
+    });
+    return withNumericPrices(product);
+  }
+
   async update(id: string, dto: UpdateProductDto, userId?: string) {
     await this.findOne(id);
+    if (dto.modelNo !== undefined) dto = { ...dto, modelNo: this.modelNos.optionalClean(dto.modelNo) };
     await this.assertUnique(dto, id);
-    const product = await this.prisma.product.update({ where: { id }, data: dto, include: this.imagesInclude });
+    let product;
+    try {
+      product = await this.prisma.product.update({ where: { id }, data: dto, include: this.imagesInclude });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        await this.assertUnique(dto, id);
+        throw new ConflictException('A product with this Model No or SKU already exists');
+      }
+      throw e;
+    }
     await this.audit.log({ userId, action: 'PRODUCT_UPDATED', targetType: 'Product', targetId: id, metadata: { fields: Object.keys(dto) } });
     return withNumericPrices(product);
   }
@@ -231,8 +293,7 @@ export class ProductsService {
   // Model No is typically decided during Carpenter/Carving, before Polish
   // even starts.
   async updateModelNo(id: string, modelNo: string, userId: string, viewerRole?: Role) {
-    const trimmed = modelNo.trim();
-    if (!trimmed) throw new BadRequestException('Model No cannot be empty');
+    const trimmed = this.modelNos.requireClean(modelNo);
 
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) throw new NotFoundException('Product not found');
@@ -251,7 +312,14 @@ export class ProductsService {
     }
 
     await this.assertUnique({ modelNo: trimmed }, id);
-    await this.prisma.product.update({ where: { id }, data: { modelNo: trimmed } });
+    try {
+      await this.prisma.product.update({ where: { id }, data: { modelNo: trimmed } });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        await this.assertUnique({ modelNo: trimmed }, id);
+      }
+      throw e;
+    }
     // Whoever actually set this Model No - Admin via the order form, or a
     // Carpenter here via their own piece - is who every order line linking
     // to this product should credit, not whoever created the line

@@ -9,6 +9,7 @@ import { formatDate } from '@/lib/format';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { RoleGate } from '@/components/RoleGate';
 import type { CarpenterWorkItem, Product } from '@/types';
+import { sanitizeModelNo } from '@/lib/modelNoLookup';
 
 const STATUS_CHIP: Record<string, ChipColor> = {
   ASSIGNED: 'gray',
@@ -57,7 +58,7 @@ function BatchPieceRow({ index, product, canEdit, onChanged }: { index: number; 
     <div className="space-y-1">
       <div className="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
         <span className="text-xs text-brand-400 shrink-0">#{index}</span>
-        <input className="input text-sm" placeholder="Enter Model No" value={modelNo} onChange={(e) => setModelNo(e.target.value)} />
+        <input className="input text-sm" placeholder="Enter Model No" value={modelNo} onChange={(e) => setModelNo(sanitizeModelNo(e.target.value))} />
         <button className="btn-secondary text-xs shrink-0" disabled={saving || !modelNo.trim() || modelNo.trim() === product.modelNo} onClick={save}>
           {saving ? 'Saving...' : 'Save'}
         </button>
@@ -229,7 +230,7 @@ function WorkCard({ item, canEditModelNo, onChanged }: { item: CarpenterWorkItem
             className="input text-sm flex-1"
             placeholder="Enter Model No"
             value={modelNo}
-            onChange={(e) => setModelNo(e.target.value)}
+            onChange={(e) => setModelNo(sanitizeModelNo(e.target.value))}
           />
           <button
             className="btn-secondary text-xs shrink-0"

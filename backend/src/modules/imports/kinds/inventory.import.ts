@@ -6,6 +6,7 @@ import { RawMaterialsService } from '../../inventory/raw-materials/raw-materials
 import { CreateRawMaterialDto } from '../../inventory/raw-materials/dto/create-raw-material.dto';
 import { Role } from '../../../common/enums/role.enum';
 import { TableSpec } from '../../../common/import/sheet-reader';
+import { extractModelNumber } from '../../../common/utils/model-no.util';
 import { blankToUndef, commitEach, gridNum, GridRow, HandlerPreviewRow, ImportContext, ImportHandler, normName, num, text, validOrThrow } from '../import-handler';
 
 // Inventory > Products: one row = one physical stock piece (the app's rule -
@@ -63,6 +64,9 @@ export class ProductsImport implements ImportHandler {
   // A stock piece is identified by its Model No, else its SKU (both unique).
   // Without either, two identical rows are genuinely two pieces.
   duplicateKey(row: GridRow) {
+    // Model No is a number: "PO-12" and "12" are the same product.
+    const number = extractModelNumber(row.modelNo);
+    if (number) return `M:${number}`;
     if (normName(row.modelNo)) return `M:${normName(row.modelNo)}`;
     if (normName(row.sku)) return `S:${normName(row.sku)}`;
     return null;
@@ -72,7 +76,7 @@ export class ProductsImport implements ImportHandler {
     const existing = await this.prisma.product.findMany({ where: { OR: [{ modelNo: { not: null } }, { sku: { not: null } }] }, select: { modelNo: true, sku: true } });
     const keys = new Set<string>();
     for (const p of existing) {
-      if (p.modelNo) keys.add(`M:${normName(p.modelNo)}`);
+      if (p.modelNo) keys.add(`M:${extractModelNumber(p.modelNo) ?? normName(p.modelNo)}`);
       if (p.sku) keys.add(`S:${normName(p.sku)}`);
     }
     return keys;
@@ -92,7 +96,7 @@ export class ProductsImport implements ImportHandler {
         warnings,
         values: {
           name: text(cells, 'name'),
-          modelNo: text(cells, 'modelNo'),
+          modelNo: extractModelNumber(text(cells, 'modelNo')) ?? text(cells, 'modelNo'),
           sku: text(cells, 'sku'),
           category: text(cells, 'category'),
           modelSize: text(cells, 'modelSize'),

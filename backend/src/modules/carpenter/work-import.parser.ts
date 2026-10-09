@@ -1,4 +1,5 @@
 import { clean, parseAmount, parseSheetDate, TableSpec } from '../../common/import/sheet-reader';
+import { extractModelNumber } from '../../common/utils/model-no.util';
 
 // Worker sheets - the "Work List & Payment" sheet and a payments sheet - for
 // the worker page's import preview. The file reading itself is the shared
@@ -92,6 +93,10 @@ export function buildWorkRow(line: number, cells: Partial<Record<WorkColumn, str
     warnings.push(`"${modelNo}" was in the Model No column - moved into Product Name`);
     modelNo = '';
   }
+  // A Model No is only a number: "A-12" / "No. 12" become 12. A Job No
+  // (JOB-2026-00008) is not a Model No and is left alone.
+  const modelNumber = extractModelNumber(modelNo);
+  if (modelNumber) modelNo = modelNumber;
   if (!productName) warnings.push('Product Name is empty');
 
   const price = parseAmount(text('price'));

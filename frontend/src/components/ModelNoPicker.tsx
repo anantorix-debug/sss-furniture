@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import type { Product } from '@/types';
+import { sanitizeModelNo } from '@/lib/modelNoLookup';
 
 // Model No.-only search/autocomplete (separate from the Product Name
 // field). Typing "20" surfaces every stock Model No. containing "20"
@@ -74,7 +75,7 @@ export function ModelNoPicker({
         placeholder={placeholder ?? 'Model No.'}
         value={modelNo}
         onChange={(e) => {
-          onChangeModelNo(e.target.value);
+          onChangeModelNo(sanitizeModelNo(e.target.value));
           onSelect(null);
           openDropdown();
         }}

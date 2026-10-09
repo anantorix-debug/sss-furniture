@@ -3,7 +3,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { Role } from '../../common/enums/role.enum';
 import { readTable, UploadedSheet } from '../../common/import/sheet-reader';
-import { CommitResult, DuplicateKind, GridRow, ImportContext, ImportHandler } from './import-handler';
+import { CommitResult, DuplicateKind, GridRow, HandlerPreviewRow, ImportContext, ImportHandler } from './import-handler';
+import { ModelNoService } from '../model-no/model-no.service';
+import { modelNoKey, sameDesign } from '../../common/utils/model-no.util';
 import { CustomerOrdersImport } from './kinds/customer-orders.import';
 import { PartyOrdersImport } from './kinds/party-orders.import';
 import { ProductsImport, RawMaterialsImport } from './kinds/inventory.import';
@@ -24,6 +26,7 @@ export class ImportsService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private modelNos: ModelNoService,
     customerOrders: CustomerOrdersImport,
     partyOrders: PartyOrdersImport,
     products: ProductsImport,
@@ -111,6 +114,7 @@ export class ImportsService {
     if (table.rows.length > MAX_ROWS) throw new BadRequestException(`This file has more than ${MAX_ROWS} rows - split it into smaller files.`);
 
     const rows = await handler.preview(table.rows, ctx);
+    if (handler.modelNoField) await this.applyModelNoLookup(handler, rows);
     const flags = await this.findDuplicates(handler, rows.map((r) => r.values), ctx);
     const out = rows.map((r, i) => ({ ...r, duplicate: flags[i] }));
     return {
@@ -120,6 +124,42 @@ export class ImportsService {
       parsedTotal: out.reduce((s, r) => s + handler.rowTotal(r.values), 0),
       duplicateCount: out.filter((r) => r.duplicate).length,
     };
+  }
+
+  // The one Model No lookup, applied to a whole upload: every row's Model
+  // No is reduced to its number, looked up in inventory in a single query,
+  // tagged FOUND / NEW, and (for kinds that want it) blank category / size /
+  // name are filled from the existing product - values already on the row
+  // are never overwritten. Read-only: nothing is created here.
+  private async applyModelNoLookup(handler: ImportHandler, rows: HandlerPreviewRow[]) {
+    const field = handler.modelNoField!;
+    const found = await this.modelNos.findProducts(rows.map((r) => r.values[field]));
+    for (const row of rows) {
+      const typed = (row.values[field] ?? '').trim();
+      const number = this.modelNos.lenient(typed);
+      if (!typed || !number) continue; // empty, a Job No, or text with no number: nothing to look up
+      if (typed !== number) {
+        row.values[field] = number;
+        row.warnings.push(`Model No "${typed}" is a number only - using ${number}`);
+      }
+      const product = found.get(modelNoKey(number));
+      if (!product) {
+        row.lookup = { status: 'NEW' };
+        continue;
+      }
+      row.lookup = { status: 'FOUND', productId: product.id, name: product.name, inStock: product.availableQuantity > 0 };
+      if (handler.autofillFromProduct) {
+        const fill = (key: string, value: string | null | undefined) => {
+          if (key in row.values && !row.values[key]?.trim() && value) row.values[key] = value;
+        };
+        fill('category', product.category);
+        fill('size', product.modelSize);
+        fill('productName', product.name);
+        if (row.values.productName && !sameDesign(row.values.productName, product.name)) {
+          row.warnings.push(`Model No ${number} is "${product.name}" in inventory, but this row says "${row.values.productName}"`);
+        }
+      }
+    }
   }
 
   // Same duplicate check for rows typed by hand into the grid - run before

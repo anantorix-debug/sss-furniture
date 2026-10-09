@@ -9,6 +9,7 @@ import { CreatePartyOrderDto, PartyOrderItemDto } from './dto/create-party-order
 import { UpdatePartyOrderDto } from './dto/update-party-order.dto';
 import { CreatePaymentDto } from '../customer/dto/create-payment.dto';
 import { UpdatePaymentDto } from '../customer/dto/update-payment.dto';
+import { ModelNoService } from '../../model-no/model-no.service';
 import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
 import { AssignProductionDto } from '../customer/dto/assign-production.dto';
 import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
@@ -241,6 +242,7 @@ export class PartyOrdersService {
     private carpenter: CarpenterService,
     private pdf: PdfService,
     private whatsapp: WhatsappService,
+    private modelNos: ModelNoService,
   ) {}
 
   // The item-level Model No field (ModelNoPicker on the frontend) is a
@@ -262,29 +264,29 @@ export class PartyOrdersService {
 
     const resolved = new Map<string, string>();
     for (const i of pending) {
-      const modelNo = i.modelNo!.trim();
+      // A Model No is a number: "PO-NEW-2" is registered as 2, and an
+      // existing product with that number is reused - never duplicated.
+      const modelNo = this.modelNos.requireClean(i.modelNo);
       if (resolved.has(modelNo)) continue;
-      const product = await this.prisma.product.upsert({
-        where: { modelNo },
-        update: {},
-        create: {
-          modelNo,
-          name: i.productName,
-          modelSize: i.size,
-          sizeUnit: i.sizeUnit,
-          materialFinish: i.color,
-          pattern: i.pattern,
-          details: i.details,
-          retailPrice: i.unitPrice,
-          unit: 'Nos',
-        },
+      const { product } = await this.modelNos.ensureCatalogProduct({
+        modelNo,
+        name: i.productName,
+        modelSize: i.size,
+        sizeUnit: i.sizeUnit,
+        materialFinish: i.color,
+        pattern: i.pattern,
+        details: i.details,
+        retailPrice: i.unitPrice,
+        unit: 'Nos',
       });
       resolved.set(modelNo, product.id);
     }
 
     return items.map((i) => {
-      const modelNo = i.modelNo?.trim();
-      return !i.productId && modelNo && resolved.has(modelNo) ? { ...i, productId: resolved.get(modelNo) } : i;
+      const modelNo = this.modelNos.lenient(i.modelNo);
+      // the line keeps the clean number, not the prefixed text that was typed
+      const cleaned = i.modelNo?.trim() && modelNo ? { ...i, modelNo } : i;
+      return !i.productId && modelNo && resolved.has(modelNo) ? { ...cleaned, productId: resolved.get(modelNo) } : cleaned;
     });
   }
 
@@ -808,13 +810,16 @@ export class PartyOrdersService {
     const item = await this.prisma.partyOrderItem.findUnique({ where: { id: itemId } });
     if (!item || item.orderId !== orderId) throw new NotFoundException('Party order line not found');
 
-    const trimmed = modelNo.trim();
-    if (!trimmed) throw new BadRequestException('Model No cannot be empty');
+    const trimmed = this.modelNos.requireCleanList(modelNo);
 
     await this.prisma.partyOrderItem.update({
       where: { id: itemId },
       data: { modelNo: trimmed, modelNoUpdatedById: userId, modelNoUpdatedAt: new Date() },
     });
+    // Link the line to the product with this number (a single number only;
+    // never overwrites an existing link, never creates a product).
+    const productId = trimmed.includes(',') ? null : await this.modelNos.findProductId(trimmed);
+    if (productId) await this.prisma.partyOrderItem.updateMany({ where: { id: itemId, productId: null }, data: { productId } });
 
     await this.audit.log({
       userId,
@@ -901,8 +906,7 @@ export class PartyOrdersService {
     if (user.role !== Role.SUPERADMIN && (order as any).assignedEmployeeId !== user.userId) {
       throw new ForbiddenException('This order is not assigned to you');
     }
-    const modelNo = dto.modelNo.trim();
-    if (!modelNo) throw new BadRequestException('Model No cannot be empty');
+    const modelNo = this.modelNos.requireCleanList(dto.modelNo);
 
     const previousModelNo = (order as any).cotNo;
     const updated = await this.prisma.partyOrder.update({

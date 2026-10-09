@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Modal } from './Modal';
+import { sanitizeModelNo } from '@/lib/modelNoLookup';
 
 export function UpdateModelNoModal({
   title,
@@ -46,7 +47,7 @@ export function UpdateModelNoModal({
             required
             autoFocus
             value={modelNo}
-            onChange={(e) => setModelNo(e.target.value)}
+            onChange={(e) => setModelNo(sanitizeModelNo(e.target.value))}
             placeholder="e.g. 220 or Z-220-BC"
           />
         </div>

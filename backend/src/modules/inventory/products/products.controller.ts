@@ -10,6 +10,8 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { Role } from '../../../common/enums/role.enum';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
+import { ModelNoSyncService } from '../../model-no/model-no-sync.service';
+import { ApiQuery } from '@nestjs/swagger';
 
 const MAX_IMAGE_BYTES = 1024 * 1024; // 1 MB
 
@@ -18,7 +20,10 @@ const MAX_IMAGE_BYTES = 1024 * 1024; // 1 MB
 @ApiBearerAuth()
 @Controller('products')
 export class ProductsController {
-  constructor(private service: ProductsService) {}
+  constructor(
+    private service: ProductsService,
+    private sync: ModelNoSyncService,
+  ) {}
 
   @Get()
   findAll(
@@ -62,9 +67,40 @@ export class ProductsController {
     });
   }
 
+  // Model No lookup - the ONE endpoint every page uses to find out what a
+  // Model No is: FOUND (existing product + auto-fill + stock), HISTORY_ONLY
+  // (only seen in production records), NOT_FOUND or INVALID. Read-only: a
+  // lookup never creates a product or changes stock. A Model No is only a
+  // number - "PO-NEW-2" is looked up as 2. Open to every signed-in role
+  // (workers need it too); prices are left out for Carpenter/Carving/Polish.
+  @Get('lookup')
+  @ApiQuery({ name: 'modelNo', required: true })
+  lookupByModelNo(@Query('modelNo') modelNo: string, @CurrentUser() user?: AuthUser) {
+    return this.service.lookupModelNo(modelNo, user?.role as Role);
+  }
+
+  // Same lookup with the Model No in the path.
+  @Get('by-model/:modelNo')
+  findByModelNo(@Param('modelNo') modelNo: string, @CurrentUser() user?: AuthUser) {
+    return this.service.lookupModelNo(modelNo, user?.role as Role);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user?: AuthUser) {
     return this.service.findOne(id, user?.role as Role);
+  }
+
+  // One-time clean-up and synchronization of Model Nos: number-only,
+  // duplicate products merged (history moved, nothing lost), production
+  // records and party order lines linked to their product. DRY RUN by
+  // default - returns the full report and writes nothing; add apply=true to
+  // perform it. Never changes a stock quantity. Super Admin only.
+  @Roles(Role.SUPERADMIN)
+  @Post('model-no-sync')
+  @ApiQuery({ name: 'apply', required: false, description: 'true to perform the changes (default: report only)' })
+  @ApiQuery({ name: 'createMissing', required: false, description: 'true to also register catalogue products (stock 0) for Model Nos that only exist in production history' })
+  syncModelNos(@Query('apply') apply: string | undefined, @Query('createMissing') createMissing: string | undefined, @CurrentUser() user: AuthUser) {
+    return this.sync.run({ apply: apply === 'true', createMissing: createMissing === 'true' }, user.userId);
   }
 
   @Roles(Role.ADMIN)
