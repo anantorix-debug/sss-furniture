@@ -170,6 +170,29 @@ async function readPdf<C extends string>(buffer: Buffer, spec: TableSpec<C>): Pr
     }
     anchors.sort((a, b) => b - a); // top of page first
 
+    // Which row a text piece belongs to: the nearest row line at or below
+    // it. Within 24pt it's simply part of that row. Further up, it only
+    // counts when it's the top of a cell stacked over several lines
+    // ("BOTTOM" / "COT +" / "DRAW") - i.e. a chain of pieces in the same
+    // column, each within 24pt of the next, reaches down to the row. A
+    // free-standing section title above a row ("+LAMP BOX") has a gap and
+    // stays out.
+    const rowFor = (it: PdfTextItem): number | undefined => {
+      const a = anchors.find((y) => y <= it.y + 1);
+      if (a === undefined) return undefined;
+      if (it.y - a <= 24) return a;
+      if (it.y - a > 90) return undefined;
+      const col = colOf(it);
+      const below = [...new Set(items.filter((o) => o !== it && o.y < it.y - 1 && o.y >= a - 1 && colOf(o) === col).map((o) => o.y))].sort((x, y) => y - x);
+      let cur = it.y;
+      for (const y of below) {
+        if (cur - y > 24) return undefined;
+        cur = y;
+        if (cur - a <= 24) return a;
+      }
+      return undefined;
+    };
+
     const cellsByAnchor = new Map<number, Map<C, PdfTextItem[]>>();
     for (const a of anchors) cellsByAnchor.set(a, new Map());
 
@@ -178,7 +201,7 @@ async function readPdf<C extends string>(buffer: Buffer, spec: TableSpec<C>): Pr
       // Wrapped cells put their first line ~14pt above the row's own line
       // ('ROUTER' above 'CUSHION'), so a non-date line belongs to the
       // nearest row at or just below it.
-      const anchor = anchors.find((a) => a <= it.y + 1 && it.y - a <= 24);
+      const anchor = rowFor(it);
       if (anchor === undefined) {
         // Not part of any row - catch the sheet's grand-total line (its
         // right-most number).
@@ -255,12 +278,14 @@ function joinCell(items: PdfTextItem[]): string {
 }
 
 function detectHeader<C extends string>(band: PdfTextItem[], spec: TableSpec<C>): { col: C; center: number }[] | null {
-  // 1. Per line, merge pieces that touch into whole words ('MODEL' '-' 'NO').
+  // 1. Per line, merge pieces of one heading into a word - touching
+  // ('MODEL' '-' 'NO') or a space apart ('SSS' '-' 'V'). Separate column
+  // headings are always much further apart than 6pt.
   const words: PdfTextItem[] = [];
   for (const line of groupByY(band)) {
     let prev: PdfTextItem | null = null;
     for (const it of line) {
-      if (prev && it.x - (prev.x + prev.w) <= 1.5) {
+      if (prev && it.x - (prev.x + prev.w) <= 6) {
         prev.str += it.str;
         prev.w = it.x + it.w - prev.x;
       } else {

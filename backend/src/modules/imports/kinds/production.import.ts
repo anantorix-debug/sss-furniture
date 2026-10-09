@@ -194,7 +194,8 @@ export class WorkerPaymentsImport implements ImportHandler {
         values: {
           date: sheetDate(text(cells, 'date'), 'Date', warnings),
           paymentType: type,
-          reference: text(cells, 'reference'),
+          // a lone "-" on the sheet means no voucher number
+          reference: text(cells, 'reference').replace(/^-+$/, ''),
           amount: amount != null && amount > 0 ? String(amount) : '',
           mode: text(cells, 'mode').toUpperCase() || 'CASH',
           note: text(cells, 'note'),

@@ -129,7 +129,9 @@ export const WORKER_PAYMENT_SPEC: TableSpec<PaymentColumn> = {
     PAYMENTDATE: 'date',
     TYPE: 'type',
     PAYMENTTYPE: 'type',
+    REPORT: 'type', // the salary voucher sheet's SALARY / ADVANCE column
     VOUCHERNO: 'reference',
+    SSSV: 'reference', // "SSS - V" voucher number on the salary sheet
     VOUCHER: 'reference',
     VOUCHERNUMBER: 'reference',
     VNO: 'reference',
@@ -137,6 +139,7 @@ export const WORKER_PAYMENT_SPEC: TableSpec<PaymentColumn> = {
     REF: 'reference',
     REFNO: 'reference',
     AMOUNT: 'amount',
+    TOTAL: 'amount',
     PAID: 'amount',
     PAYMENT: 'amount',
     MODE: 'mode',
