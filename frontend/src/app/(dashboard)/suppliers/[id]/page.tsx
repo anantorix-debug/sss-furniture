@@ -286,15 +286,11 @@ function SupplierDetailContent() {
                 <option key={st} value={st}>{PURCHASE_STATUS_LABEL[st]}</option>
               ))}
             </select>
-            <div className="flex gap-2">
-              <input type="date" className="input !py-1.5 text-sm w-full" title="From date" value={purchaseFilter.from} onChange={(e) => setPurchaseFilter((f) => ({ ...f, from: e.target.value }))} />
-              <input type="date" className="input !py-1.5 text-sm w-full" title="To date" value={purchaseFilter.to} onChange={(e) => setPurchaseFilter((f) => ({ ...f, to: e.target.value }))} />
-            </div>
-            <div className="col-span-2 sm:col-span-4 flex justify-end">
-              <button type="button" className="btn-secondary text-xs" disabled={!purchaseFilterOn} onClick={() => setPurchaseFilter(emptyPurchaseFilter)}>
-                Clear filters
-              </button>
-            </div>
+            <input type="date" className="input !py-1.5 text-sm" title="From date" value={purchaseFilter.from} onChange={(e) => setPurchaseFilter((f) => ({ ...f, from: e.target.value }))} />
+            <input type="date" className="input !py-1.5 text-sm" title="To date" value={purchaseFilter.to} onChange={(e) => setPurchaseFilter((f) => ({ ...f, to: e.target.value }))} />
+            <button type="button" className="btn-secondary text-xs" disabled={!purchaseFilterOn} onClick={() => setPurchaseFilter(emptyPurchaseFilter)}>
+              Clear filters
+            </button>
           </div>
           <p className="text-xs text-ink-muted mb-2">
             {purchaseFilterOn ? `Showing ${filteredPurchases.length} of ${sortedPurchases.length}` : `${sortedPurchases.length} purchases`}
@@ -397,15 +393,11 @@ function SupplierDetailContent() {
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
-            <div className="flex gap-2">
-              <input type="date" className="input !py-1.5 text-sm w-full" title="From date" value={ledgerFilter.from} onChange={(e) => setLedgerFilter((f) => ({ ...f, from: e.target.value }))} />
-              <input type="date" className="input !py-1.5 text-sm w-full" title="To date" value={ledgerFilter.to} onChange={(e) => setLedgerFilter((f) => ({ ...f, to: e.target.value }))} />
-            </div>
-            <div className="col-span-2 sm:col-span-4 flex justify-end">
-              <button type="button" className="btn-secondary text-xs" disabled={!ledgerFilterOn} onClick={() => setLedgerFilter(emptyLedgerFilter)}>
-                Clear filters
-              </button>
-            </div>
+            <input type="date" className="input !py-1.5 text-sm" title="From date" value={ledgerFilter.from} onChange={(e) => setLedgerFilter((f) => ({ ...f, from: e.target.value }))} />
+            <input type="date" className="input !py-1.5 text-sm" title="To date" value={ledgerFilter.to} onChange={(e) => setLedgerFilter((f) => ({ ...f, to: e.target.value }))} />
+            <button type="button" className="btn-secondary text-xs" disabled={!ledgerFilterOn} onClick={() => setLedgerFilter(emptyLedgerFilter)}>
+              Clear filters
+            </button>
           </div>
           <p className="text-xs text-ink-muted mb-2">
             {ledgerFilterOn ? `Showing ${filteredStatement.length} of ${statement.length}` : `${statement.length} entries`}
