@@ -58,6 +58,7 @@ function SupplierDetailContent() {
   const [editPaymentForm, setEditPaymentForm] = useState(emptyPaymentForm);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingLedger, setDownloadingLedger] = useState(false);
   const canEdit = hasRole('ADMIN');
   const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
 
@@ -94,6 +95,30 @@ function SupplierDetailContent() {
       URL.revokeObjectURL(url);
     } finally {
       setDownloading(false);
+    }
+  }
+
+  // Payment Ledger only (party statement) - separate from the full PDF.
+  async function downloadLedgerPdf() {
+    setDownloadingLedger(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE_URL}/suppliers/${id}/ledger-pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Could not create the ledger PDF');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${supplier?.name ?? 'supplier'}-ledger.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create the ledger PDF');
+    } finally {
+      setDownloadingLedger(false);
     }
   }
 
@@ -149,6 +174,29 @@ function SupplierDetailContent() {
   }
 
   if (isLoading || !supplier) return <p className="text-brand-400 text-sm">Loading supplier ledger...</p>;
+
+  // Oldest purchase first.
+  const sortedPurchases = [...(purchases ?? [])].sort((a, b) => a.purchaseDate.localeCompare(b.purchaseDate) || a.purchaseNumber.localeCompare(b.purchaseNumber));
+
+  // Party statement: every booked purchase (adds to what we owe) and every
+  // payment (reduces it), oldest first, with a running payable balance - a
+  // purchase sorts before a payment on the same day. Built from the same
+  // ledger entries as the cards above, so the last balance always equals
+  // "Balance Payable".
+  type StatementRow =
+    | { kind: 'purchase'; key: string; date: string; ref: string; amount: number; particulars: string; balance: number }
+    | { kind: 'payment'; key: string; date: string; ref: string; amount: number; payment: SupplierPayment; balance: number };
+  const statement: StatementRow[] = [
+    ...supplier.purchases.map((p) => ({ kind: 'purchase' as const, key: `pu-${p.id}`, date: p.date, ref: p.purchase?.purchaseNumber ?? '-', amount: Number(p.value), particulars: p.particulars, balance: 0 })),
+    ...supplier.payments.map((p) => ({ kind: 'payment' as const, key: `pa-${p.id}`, date: p.date, ref: p.voucherNo ?? '-', amount: Number(p.amount), payment: p, balance: 0 })),
+  ].sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)) || (a.kind === b.kind ? 0 : a.kind === 'purchase' ? -1 : 1));
+  let runningBalance = 0;
+  for (const row of statement) {
+    runningBalance += row.kind === 'purchase' ? row.amount : -row.amount;
+    row.balance = runningBalance;
+  }
+  const statementPurchased = statement.filter((r) => r.kind === 'purchase').reduce((s, r) => s + r.amount, 0);
+  const statementPaid = statement.filter((r) => r.kind === 'payment').reduce((s, r) => s + r.amount, 0);
 
   return (
     <div className="space-y-6">
@@ -206,7 +254,7 @@ function SupplierDetailContent() {
                       </td>
                     </tr>
                   )}
-                  {purchases?.map((p) => (
+                  {sortedPurchases.map((p) => (
                     <tr key={p.id}>
                       <td>
                         {p.referenceImage ? (
@@ -255,35 +303,59 @@ function SupplierDetailContent() {
         </div>
 
         <div className="card p-5">
-          <h2 className="font-semibold text-brand-900 mb-3">Payment Ledger</h2>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="font-semibold text-brand-900">Payment Ledger</h2>
+            <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={downloadLedgerPdf} disabled={downloadingLedger}>
+              {downloadingLedger ? 'Preparing...' : 'Download Ledger PDF'}
+            </button>
+          </div>
           <div className="max-h-[700px] overflow-y-auto pr-1">
           <div className="overflow-x-auto rounded-lg border border-brand-100 mb-4">
-            <table className="table-shell">
+            <table className="table-shell text-sm [&_th]:!px-2 [&_td]:!px-2">
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>V.No</th>
-                  <th>Amount</th>
-                  <th>Balance</th>
-                  <th>Mode</th>
+                  <th>Txn Type</th>
+                  <th>Ref No.</th>
+                  <th className="!text-right">Total</th>
+                  <th className="!text-right">Paid</th>
+                  <th className="!text-right" title="Amount still owed on this purchase">Txn Bal.</th>
+                  <th className="!text-right" title="Total still payable to this supplier after this entry">Balance</th>
                   {canEdit && <th></th>}
                 </tr>
               </thead>
               <tbody>
-                {supplier.payments.length === 0 && (
+                {statement.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="text-center text-brand-400 py-4">
-                      No payments recorded
+                    <td colSpan={canEdit ? 8 : 7} className="text-center text-brand-400 py-4">
+                      No purchases or payments yet
                     </td>
                   </tr>
                 )}
-                {supplier.payments.map((p) =>
-                  editingPaymentId === p.id ? (
-                    <tr key={p.id} className="bg-blue-50">
+                {statement.map((row) => {
+                  if (row.kind === 'purchase') {
+                    return (
+                      <tr key={row.key}>
+                        <td className="whitespace-nowrap">{formatDate(row.date)}</td>
+                        <td className="font-medium">
+                          Purchase
+                          <div className="text-[11px] font-normal text-ink-muted max-w-[120px] truncate" title={row.particulars}>
+                            {row.particulars}
+                          </div>
+                        </td>
+                        <td>{row.ref}</td>
+                        <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
+                        <td className="text-right whitespace-nowrap">{formatCurrency(0)}</td>
+                        <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
+                        <td className="text-right whitespace-nowrap font-medium">{formatCurrency(row.balance)}</td>
+                        {canEdit && <td></td>}
+                      </tr>
+                    );
+                  }
+                  const p = row.payment;
+                  return editingPaymentId === p.id ? (
+                    <tr key={row.key} className="bg-blue-50">
                       <td><input type="date" className="input py-1 text-xs" value={editPaymentForm.date} onChange={(e) => setEditPaymentForm((f) => ({ ...f, date: e.target.value }))} /></td>
-                      <td><input className="input py-1 text-xs w-20" value={editPaymentForm.voucherNo} onChange={(e) => setEditPaymentForm((f) => ({ ...f, voucherNo: e.target.value }))} /></td>
-                      <td><input type="number" step="0.01" className="input py-1 text-xs w-24" value={editPaymentForm.amount} onChange={(e) => setEditPaymentForm((f) => ({ ...f, amount: e.target.value }))} /></td>
-                      <td>-</td>
                       <td>
                         <select className="input py-1 text-xs" value={editPaymentForm.mode} onChange={(e) => setEditPaymentForm((f) => ({ ...f, mode: e.target.value }))}>
                           <option>CASH</option>
@@ -291,18 +363,27 @@ function SupplierDetailContent() {
                           <option>UPI</option>
                         </select>
                       </td>
+                      <td><input className="input py-1 text-xs w-20" placeholder="V.No" value={editPaymentForm.voucherNo} onChange={(e) => setEditPaymentForm((f) => ({ ...f, voucherNo: e.target.value }))} /></td>
+                      <td colSpan={2}><input type="number" step="0.01" className="input py-1 text-xs w-28 ml-auto" value={editPaymentForm.amount} onChange={(e) => setEditPaymentForm((f) => ({ ...f, amount: e.target.value }))} /></td>
+                      <td></td>
+                      <td></td>
                       <td className="whitespace-nowrap">
                         <button className="text-emerald-600 hover:text-emerald-800 text-xs mr-2" onClick={() => saveEditPayment(p.id)}>Save</button>
                         <button className="text-brand-400 hover:text-brand-600 text-xs" onClick={() => setEditingPaymentId(null)}>Cancel</button>
                       </td>
                     </tr>
                   ) : (
-                    <tr key={p.id}>
-                      <td>{formatDate(p.date)}</td>
-                      <td>{p.voucherNo ?? '-'}</td>
-                      <td className="font-medium">{formatCurrency(p.amount)}</td>
-                      <td>{p.balanceAfter != null ? formatCurrency(p.balanceAfter) : '-'}</td>
-                      <td>{p.mode ?? '-'}</td>
+                    <tr key={row.key} className="bg-emerald-50/40">
+                      <td className="whitespace-nowrap">{formatDate(row.date)}</td>
+                      <td className="font-medium">
+                        Payment
+                        <div className="text-[11px] font-normal text-ink-muted">Payment Type: {p.mode ?? '-'}</div>
+                      </td>
+                      <td>{row.ref}</td>
+                      <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
+                      <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(row.amount)}</td>
+                      <td></td>
+                      <td className="text-right whitespace-nowrap font-medium">{formatCurrency(row.balance)}</td>
                       {canEdit && (
                         <td className="whitespace-nowrap">
                           <button className="text-brand-600 hover:underline text-xs mr-2" onClick={() => startEditPayment(p)}>
@@ -314,7 +395,19 @@ function SupplierDetailContent() {
                         </td>
                       )}
                     </tr>
-                  ),
+                  );
+                })}
+                {statement.length > 0 && (
+                  <tr className="bg-brand-50 font-semibold">
+                    <td></td>
+                    <td>Total</td>
+                    <td></td>
+                    <td className="text-right whitespace-nowrap">{formatCurrency(statementPurchased)}</td>
+                    <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(statementPaid)}</td>
+                    <td></td>
+                    <td className="text-right whitespace-nowrap">{formatCurrency(runningBalance)}</td>
+                    {canEdit && <td></td>}
+                  </tr>
                 )}
               </tbody>
             </table>

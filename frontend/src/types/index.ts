@@ -266,6 +266,7 @@ export interface SupplierPurchase {
   value: number;
   rawMaterialId?: string | null;
   rawMaterial?: { id: string; name: string; unit: string; measurementKind: MaterialMeasurementKind } | null;
+  purchase?: { id: string; purchaseNumber: string } | null;
   thicknessIn?: number | null;
   widthIn?: number | null;
   lengthFt?: number | null;

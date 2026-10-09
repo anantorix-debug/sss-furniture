@@ -63,7 +63,11 @@ export class SuppliersService {
       include: {
         purchases: {
           orderBy: { date: 'asc' },
-          include: { rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } } },
+          include: {
+            rawMaterial: { select: { id: true, name: true, unit: true, measurementKind: true } },
+            // PUR number shown as the Ref No. on the page's party statement.
+            purchase: { select: { id: true, purchaseNumber: true } },
+          },
         },
         payments: { orderBy: { date: 'asc' } },
       },
@@ -224,6 +228,34 @@ export class SuppliersService {
     return this.pdf.renderHtmlToPdf(html);
   }
 
+  // Two-column letterhead shared by the supplier PDFs: supplier identity on
+  // the left, SSS Furniture on the right.
+  private letterhead(supplier: { name: string; phone: string | null }) {
+    // Solid-fill phone icon (Heroicons "phone", 24x24 viewBox) - an inline
+    // SVG path, not a Unicode glyph, so it renders correctly regardless of
+    // what fonts are installed on the PDF-rendering server (see the ₹ glyph
+    // issue this app hit with text-based symbols).
+    const phoneIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:5px"><path d="M2.25 6.75c0 8.284 6.716 15 15 15h1.5a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>`;
+
+    // Two-column letterhead: supplier identity (with a "Supplier Name"
+    // eyebrow label, since "SSS Furniture" now occupies the corner where a
+    // reader would otherwise expect the issuing company's own name) on the
+    // left, "SSS Furniture" right-aligned on the right - same maroon
+    // .header band as every other report, just restructured for this one
+    // statement rather than via the shared renderReportHeader().
+    return `<div class="header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px">
+      <div>
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#f5c2c9;margin-bottom:4px">Supplier Name</div>
+        <h1 style="margin:0 0 8px">${escapeHtml(supplier.name)}</h1>
+        ${supplier.phone ? `<div style="font-size:12px;color:#f5c2c9">${phoneIcon}${escapeHtml(supplier.phone)}</div>` : ''}
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <div style="font-size:17px;font-weight:bold">SSS Furniture</div>
+        <div style="font-size:10.5px;color:#f5c2c9;margin-top:2px">Retail &middot; Wholesale</div>
+      </div>
+    </div>`;
+  }
+
   // Supplier detail PDF - the complete supplier purchasing statement: this
   // one supplier's info, every Purchase Item line (never just a one-row-
   // per-purchase aggregate), and the full Payment Ledger, all read fresh
@@ -281,29 +313,7 @@ export class SuppliersService {
       )
       .join('');
 
-    // Solid-fill phone icon (Heroicons "phone", 24x24 viewBox) - an inline
-    // SVG path, not a Unicode glyph, so it renders correctly regardless of
-    // what fonts are installed on the PDF-rendering server (see the ₹ glyph
-    // issue this app hit with text-based symbols).
-    const phoneIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:5px"><path d="M2.25 6.75c0 8.284 6.716 15 15 15h1.5a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>`;
-
-    // Two-column letterhead: supplier identity (with a "Supplier Name"
-    // eyebrow label, since "SSS Furniture" now occupies the corner where a
-    // reader would otherwise expect the issuing company's own name) on the
-    // left, "SSS Furniture" right-aligned on the right - same maroon
-    // .header band as every other report, just restructured for this one
-    // statement rather than via the shared renderReportHeader().
-    const header = `<div class="header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px">
-      <div>
-        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#f5c2c9;margin-bottom:4px">Supplier Name</div>
-        <h1 style="margin:0 0 8px">${escapeHtml(supplier.name)}</h1>
-        ${supplier.phone ? `<div style="font-size:12px;color:#f5c2c9">${phoneIcon}${escapeHtml(supplier.phone)}</div>` : ''}
-      </div>
-      <div style="text-align:right;white-space:nowrap">
-        <div style="font-size:17px;font-weight:bold">SSS Furniture</div>
-        <div style="font-size:10.5px;color:#f5c2c9;margin-top:2px">Retail &middot; Wholesale</div>
-      </div>
-    </div>`;
+    const header = this.letterhead(supplier);
 
     const summaryBlock = `<div class="summary">
       <div><div class="label">Total Purchases</div><div class="value">${rupees(supplier.totalPurchaseValue)}</div></div>
@@ -343,6 +353,65 @@ export class SuppliersService {
     ${summaryBlock}
     <p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #e3e1d9;font-size:11.5px;color:#6b7280;font-style:italic">Thank you for your continued partnership with SSS Furniture.</p>
     ${renderGeneratedFooter(itemCount, 'purchase item')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html, { pageNumbers: true });
+  }
+
+  // Payment Ledger only, as a party statement: every booked purchase and
+  // every payment, oldest first, with a running payable balance - same rows
+  // and order as the Payment Ledger on the supplier page (a purchase sorts
+  // before a payment on the same day), ending at Balance Payable.
+  async generateLedgerPdf(id: string): Promise<Buffer> {
+    const supplier = await this.findOne(id);
+    const rupees = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    const fmt = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    type Row = { kind: 'purchase' | 'payment'; date: Date; ref: string; amount: number; detail: string };
+    const rows: Row[] = [
+      ...supplier.purchases.map((p) => ({ kind: 'purchase' as const, date: p.date, ref: p.purchase?.purchaseNumber ?? '-', amount: Number(p.value), detail: p.particulars })),
+      ...supplier.payments.map((p) => ({ kind: 'payment' as const, date: p.date, ref: p.voucherNo ?? '-', amount: Number(p.amount), detail: p.mode ?? '-' })),
+    ].sort((a, b) => day(a.date).localeCompare(day(b.date)) || (a.kind === b.kind ? 0 : a.kind === 'purchase' ? -1 : 1));
+
+    let balance = 0;
+    const body = rows
+      .map((r) => {
+        balance += r.kind === 'purchase' ? r.amount : -r.amount;
+        const main = `<tr style="${r.kind === 'payment' ? 'background:#f0fdf4' : ''}">
+          <td>${fmt(r.date)}</td>
+          <td style="font-weight:600">${r.kind === 'purchase' ? 'Purchase' : 'Payment'}</td>
+          <td>${escapeHtml(r.ref)}</td>
+          <td style="text-align:right">${rupees(r.amount)}</td>
+          <td style="text-align:right">${rupees(r.kind === 'payment' ? r.amount : 0)}</td>
+          <td style="text-align:right">${r.kind === 'purchase' ? rupees(r.amount) : ''}</td>
+          <td style="text-align:right;font-weight:600">${rupees(balance)}</td>
+        </tr>`;
+        const sub = `<tr style="${r.kind === 'payment' ? 'background:#f0fdf4' : ''}"><td></td><td colspan="6" style="font-size:10.5px;color:#6b7280;padding-top:0">${
+          r.kind === 'payment' ? `<b>Payment Type:</b> ${escapeHtml(r.detail)}` : escapeHtml(r.detail)
+        }</td></tr>`;
+        return main + sub;
+      })
+      .join('');
+
+    const purchased = rows.filter((r) => r.kind === 'purchase').reduce((t, r) => t + r.amount, 0);
+    const paid = rows.filter((r) => r.kind === 'payment').reduce((t, r) => t + r.amount, 0);
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${this.letterhead(supplier)}
+  <div class="body">
+    <h2 style="text-align:center;font-size:18px;margin:4px 0 14px;text-decoration:underline">Party Statement - Payment Ledger</h2>
+    <table>
+      <thead><tr><th>Date</th><th>Txn Type</th><th>Ref No.</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Txn Balance</th><th style="text-align:right">Payable Balance</th></tr></thead>
+      <tbody>
+        ${body || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">No purchases or payments</td></tr>'}
+        ${rows.length ? `<tr style="font-weight:bold;background:#e5e7eb"><td></td><td>Total</td><td></td><td style="text-align:right">${rupees(purchased)}</td><td style="text-align:right">${rupees(paid)}</td><td></td><td style="text-align:right">${rupees(balance)}</td></tr>` : ''}
+      </tbody>
+    </table>
+    ${renderGeneratedFooter(rows.length, 'transaction')}
   </div>
 </body></html>`;
     return this.pdf.renderHtmlToPdf(html, { pageNumbers: true });
