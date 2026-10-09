@@ -60,6 +60,16 @@ export class SuppliersController {
     res.send(buffer);
   }
 
+  // Purchases box only - one row per purchase, as listed on the page.
+  @Get(':id/purchases-pdf')
+  async purchasesPdf(@Param('id') id: string, @Res() res: Response) {
+    const supplier = await this.service.findOne(id);
+    const buffer = await this.service.generatePurchasesPdf(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${(supplier as any).name}-purchases.pdf"`);
+    res.send(buffer);
+  }
+
   // Payment Ledger only (party statement) - separate from the full detail PDF.
   @Get(':id/ledger-pdf')
   async ledgerPdf(@Param('id') id: string, @Res() res: Response) {

@@ -416,4 +416,63 @@ export class SuppliersService {
 </body></html>`;
     return this.pdf.renderHtmlToPdf(html, { pageNumbers: true });
   }
+
+  // Purchases box only: one row per purchase, exactly as the supplier page
+  // lists it (first material + quantity, "+N more"), oldest first. The
+  // total counts received purchases only, so it equals Total Purchases.
+  async generatePurchasesPdf(id: string): Promise<Buffer> {
+    const supplier = await this.prisma.supplier.findUnique({ where: { id }, select: { name: true, phone: true } });
+    if (!supplier) throw new NotFoundException('Supplier not found');
+    const purchases = await this.prisma.purchase.findMany({
+      where: { supplierId: id },
+      include: { items: { include: { rawMaterial: { select: { name: true, unit: true } } } } },
+      orderBy: [{ purchaseDate: 'asc' }, { purchaseNumber: 'asc' }],
+    });
+    const rupees = (n: number) => `${n < 0 ? '-' : ''}₹${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const fmt = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const STATUS: Record<string, string> = { PENDING_APPROVAL: 'Pending Approval', APPROVED: 'Approved - Awaiting Receipt', RECORDED: 'Received', CANCELLED: 'Cancelled' };
+    const summary = (p: (typeof purchases)[number]) => {
+      if (!p.items.length) return '-';
+      const first = p.items[0];
+      const pieces = first.pieces != null ? `, ${first.pieces} pcs` : '';
+      const text = `${first.rawMaterial?.name ?? 'Material'} (${Number(first.quantity)} ${first.rawMaterial?.unit ?? ''}${pieces})`;
+      return p.items.length === 1 ? text : `${text} +${p.items.length - 1} more`;
+    };
+    const rows = purchases.map((p) => ({ p, total: p.items.reduce((t, i) => t + Number(i.quantity) * Number(i.unitPrice), 0) }));
+    const received = rows.filter((r) => r.p.status === 'RECORDED');
+    const receivedTotal = received.reduce((t, r) => t + r.total, 0);
+    const notReceived = rows.filter((r) => r.p.status !== 'RECORDED');
+
+    const body = rows
+      .map(
+        ({ p, total }) => `<tr${p.status === 'CANCELLED' ? ' style="color:#9ca3af;text-decoration:line-through"' : ''}>
+          <td style="white-space:nowrap;font-weight:600">${escapeHtml(p.purchaseNumber)}</td>
+          <td style="white-space:nowrap">${fmt(p.purchaseDate)}</td>
+          <td>${escapeHtml(summary(p))}</td>
+          <td style="text-align:right;white-space:nowrap">${rupees(total)}</td>
+          <td style="white-space:nowrap">${escapeHtml(STATUS[p.status] ?? p.status)}</td>
+        </tr>`,
+      )
+      .join('');
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  ${this.letterhead(supplier)}
+  <div class="body">
+    <h2 style="text-align:center;font-size:18px;margin:4px 0 14px;text-decoration:underline">Purchases</h2>
+    <table>
+      <thead><tr><th>Purchase No</th><th>Date</th><th>Items</th><th style="text-align:right">Total</th><th>Status</th></tr></thead>
+      <tbody>
+        ${body || '<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">No purchases</td></tr>'}
+        ${rows.length ? `<tr style="font-weight:bold;background:#e5e7eb"><td colspan="3">Total (${received.length} received)</td><td style="text-align:right;white-space:nowrap">${rupees(receivedTotal)}</td><td></td></tr>` : ''}
+      </tbody>
+    </table>
+    ${notReceived.length ? `<p style="font-size:10.5px;color:#6b7280;margin:8px 0 0">Not counted in the total: ${notReceived.map((r) => `${escapeHtml(r.p.purchaseNumber)} (${escapeHtml(STATUS[r.p.status] ?? r.p.status)})`).join(', ')}.</p>` : ''}
+    ${renderGeneratedFooter(rows.length, 'purchase')}
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html, { pageNumbers: true });
+  }
 }

@@ -58,7 +58,8 @@ function SupplierDetailContent() {
   const [editPaymentForm, setEditPaymentForm] = useState(emptyPaymentForm);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const [downloadingLedger, setDownloadingLedger] = useState(false);
+  // Which section PDF (Purchases box / Payment Ledger) is being prepared.
+  const [downloadingSection, setDownloadingSection] = useState<'purchases' | 'ledger' | null>(null);
   const canEdit = hasRole('ADMIN');
   const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
 
@@ -98,27 +99,29 @@ function SupplierDetailContent() {
     }
   }
 
-  // Payment Ledger only (party statement) - separate from the full PDF.
-  async function downloadLedgerPdf() {
-    setDownloadingLedger(true);
+  // Section PDFs - just the Purchases box or just the Payment Ledger
+  // (party statement), separate from the full Download PDF above.
+  async function downloadSectionPdf(section: 'purchases' | 'ledger') {
+    setDownloadingSection(section);
+    setError(null);
     try {
       const token = getAccessToken();
-      const res = await fetch(`${API_BASE_URL}/suppliers/${id}/ledger-pdf`, {
+      const res = await fetch(`${API_BASE_URL}/suppliers/${id}/${section === 'ledger' ? 'ledger-pdf' : 'purchases-pdf'}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: 'include',
       });
-      if (!res.ok) throw new Error('Could not create the ledger PDF');
+      if (!res.ok) throw new Error(`Could not create the ${section === 'ledger' ? 'ledger' : 'purchases'} PDF`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${supplier?.name ?? 'supplier'}-ledger.pdf`;
+      a.download = `${supplier?.name ?? 'supplier'}-${section}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create the ledger PDF');
+      setError(err instanceof Error ? err.message : 'Could not create the PDF');
     } finally {
-      setDownloadingLedger(false);
+      setDownloadingSection(null);
     }
   }
 
@@ -231,7 +234,12 @@ function SupplierDetailContent() {
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="card p-5">
-          <h2 className="font-semibold text-brand-900 mb-3">Purchases</h2>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="font-semibold text-brand-900">Purchases</h2>
+            <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={() => downloadSectionPdf('purchases')} disabled={downloadingSection !== null}>
+              {downloadingSection === 'purchases' ? 'Preparing...' : 'Download Purchases PDF'}
+            </button>
+          </div>
           <div className="max-h-[700px] overflow-y-auto pr-1">
             <div className="overflow-x-auto rounded-lg border border-brand-100">
               <table className="table-shell">
@@ -305,8 +313,8 @@ function SupplierDetailContent() {
         <div className="card p-5">
           <div className="flex items-center justify-between gap-2 mb-3">
             <h2 className="font-semibold text-brand-900">Payment Ledger</h2>
-            <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={downloadLedgerPdf} disabled={downloadingLedger}>
-              {downloadingLedger ? 'Preparing...' : 'Download Ledger PDF'}
+            <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={() => downloadSectionPdf('ledger')} disabled={downloadingSection !== null}>
+              {downloadingSection === 'ledger' ? 'Preparing...' : 'Download Ledger PDF'}
             </button>
           </div>
           <div className="max-h-[700px] overflow-y-auto pr-1">
