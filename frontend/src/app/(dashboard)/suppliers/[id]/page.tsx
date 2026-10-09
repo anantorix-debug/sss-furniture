@@ -60,6 +60,12 @@ function SupplierDetailContent() {
   const [downloading, setDownloading] = useState(false);
   // Which section PDF (Purchases box / Payment Ledger) is being prepared.
   const [downloadingSection, setDownloadingSection] = useState<'purchases' | 'ledger' | null>(null);
+
+  const emptyPurchaseFilter = { purchaseNo: '', q: '', status: '', from: '', to: '' };
+  const [purchaseFilter, setPurchaseFilter] = useState(emptyPurchaseFilter);
+  const emptyLedgerFilter = { q: '', kind: '', mode: '', from: '', to: '' };
+  const [ledgerFilter, setLedgerFilter] = useState(emptyLedgerFilter);
+
   const canEdit = hasRole('ADMIN');
   const { showModal, whatsappOptions, openWhatsApp, closeWhatsApp } = useWhatsApp();
 
@@ -201,6 +207,37 @@ function SupplierDetailContent() {
   const statementPurchased = statement.filter((r) => r.kind === 'purchase').reduce((s, r) => s + r.amount, 0);
   const statementPaid = statement.filter((r) => r.kind === 'payment').reduce((s, r) => s + r.amount, 0);
 
+  const norm = (v: string | null | undefined) => (v ?? '').trim().toUpperCase();
+  const inDateRange = (d: string, from: string, to: string) => (!from || d.slice(0, 10) >= from) && (!to || d.slice(0, 10) <= to);
+
+  const filteredPurchases = sortedPurchases.filter(p => {
+    const f = purchaseFilter;
+    if (f.purchaseNo.trim() && !norm(p.purchaseNumber).includes(norm(f.purchaseNo))) return false;
+    if (f.q.trim()) {
+      const q = norm(f.q);
+      const itemsStr = p.items.map(i => `${i.rawMaterial?.name} ${i.quantity}`).join(' ');
+      if (!itemsStr.toUpperCase().includes(q)) return false;
+    }
+    if (f.status && p.status !== f.status) return false;
+    return inDateRange(p.purchaseDate, f.from, f.to);
+  });
+  const purchaseFilterOn = Object.values(purchaseFilter).some(Boolean);
+  const filteredPurchasesTotal = filteredPurchases.reduce((t, p) => t + Number(p.totalValue ?? 0), 0);
+
+  const payModes = [...new Set(supplier.payments.map((p) => norm(p.mode)).filter(Boolean))].sort();
+
+  const filteredStatement = statement.filter(r => {
+    const f = ledgerFilter;
+    if (f.q.trim() && !norm(r.ref).includes(norm(f.q)) && !norm(r.kind === 'purchase' ? r.particulars : (r.payment?.particulars || '')).includes(norm(f.q))) return false;
+    if (f.kind && r.kind !== f.kind) return false;
+    if (f.mode && r.kind === 'payment' && norm(r.payment.mode) !== f.mode) return false;
+    if (f.mode && r.kind === 'purchase') return false;
+    return inDateRange(r.date, f.from, f.to);
+  });
+  const ledgerFilterOn = Object.values(ledgerFilter).some(Boolean);
+  const filteredStatementPurchased = filteredStatement.filter((r) => r.kind === 'purchase').reduce((s, r) => s + r.amount, 0);
+  const filteredStatementPaid = filteredStatement.filter((r) => r.kind === 'payment').reduce((s, r) => s + r.amount, 0);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -234,12 +271,35 @@ function SupplierDetailContent() {
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="card p-5">
-          <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
             <h2 className="font-semibold text-brand-900">Purchases</h2>
             <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={() => downloadSectionPdf('purchases')} disabled={downloadingSection !== null}>
               {downloadingSection === 'purchases' ? 'Preparing...' : 'Download Purchases PDF'}
             </button>
           </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
+            <input className="input !py-1.5 text-sm" placeholder="Purchase No." value={purchaseFilter.purchaseNo} onChange={(e) => setPurchaseFilter((f) => ({ ...f, purchaseNo: e.target.value }))} />
+            <input className="input !py-1.5 text-sm" placeholder="Items..." value={purchaseFilter.q} onChange={(e) => setPurchaseFilter((f) => ({ ...f, q: e.target.value }))} />
+            <select className="input !py-1.5 text-sm" value={purchaseFilter.status} onChange={(e) => setPurchaseFilter((f) => ({ ...f, status: e.target.value }))}>
+              <option value="">All statuses</option>
+              {(Object.keys(PURCHASE_STATUS_LABEL) as PurchaseStatus[]).map((st) => (
+                <option key={st} value={st}>{PURCHASE_STATUS_LABEL[st]}</option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <input type="date" className="input !py-1.5 text-sm w-full" title="From date" value={purchaseFilter.from} onChange={(e) => setPurchaseFilter((f) => ({ ...f, from: e.target.value }))} />
+              <input type="date" className="input !py-1.5 text-sm w-full" title="To date" value={purchaseFilter.to} onChange={(e) => setPurchaseFilter((f) => ({ ...f, to: e.target.value }))} />
+            </div>
+            <div className="col-span-2 sm:col-span-4 flex justify-end">
+              <button type="button" className="btn-secondary text-xs" disabled={!purchaseFilterOn} onClick={() => setPurchaseFilter(emptyPurchaseFilter)}>
+                Clear filters
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-ink-muted mb-2">
+            {purchaseFilterOn ? `Showing ${filteredPurchases.length} of ${sortedPurchases.length}` : `${sortedPurchases.length} purchases`}
+            {' '}· Total <span className="font-semibold text-brand-900">{formatCurrency(filteredPurchasesTotal)}</span>
+          </p>
           <div className="max-h-[700px] overflow-y-auto pr-1">
             <div className="overflow-x-auto rounded-lg border border-brand-100">
               <table className="table-shell">
@@ -262,7 +322,14 @@ function SupplierDetailContent() {
                       </td>
                     </tr>
                   )}
-                  {sortedPurchases.map((p) => (
+                  {purchaseFilterOn && filteredPurchases.length === 0 && purchases && purchases.length > 0 && (
+                    <tr>
+                      <td colSpan={7} className="text-center text-brand-400 py-4">
+                        No purchases match these filters
+                      </td>
+                    </tr>
+                  )}
+                  {filteredPurchases.map((p) => (
                     <tr key={p.id}>
                       <td>
                         {p.referenceImage ? (
@@ -311,12 +378,38 @@ function SupplierDetailContent() {
         </div>
 
         <div className="card p-5">
-          <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
             <h2 className="font-semibold text-brand-900">Payment Ledger</h2>
             <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={() => downloadSectionPdf('ledger')} disabled={downloadingSection !== null}>
               {downloadingSection === 'ledger' ? 'Preparing...' : 'Download Ledger PDF'}
             </button>
           </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
+            <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={ledgerFilter.q} onChange={(e) => setLedgerFilter((f) => ({ ...f, q: e.target.value }))} />
+            <select className="input !py-1.5 text-sm" value={ledgerFilter.kind} onChange={(e) => setLedgerFilter((f) => ({ ...f, kind: e.target.value }))}>
+              <option value="">All types</option>
+              <option value="purchase">Purchase</option>
+              <option value="payment">Payment</option>
+            </select>
+            <select className="input !py-1.5 text-sm" value={ledgerFilter.mode} onChange={(e) => setLedgerFilter((f) => ({ ...f, mode: e.target.value }))}>
+              <option value="">All modes</option>
+              {payModes.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <input type="date" className="input !py-1.5 text-sm w-full" title="From date" value={ledgerFilter.from} onChange={(e) => setLedgerFilter((f) => ({ ...f, from: e.target.value }))} />
+              <input type="date" className="input !py-1.5 text-sm w-full" title="To date" value={ledgerFilter.to} onChange={(e) => setLedgerFilter((f) => ({ ...f, to: e.target.value }))} />
+            </div>
+            <div className="col-span-2 sm:col-span-4 flex justify-end">
+              <button type="button" className="btn-secondary text-xs" disabled={!ledgerFilterOn} onClick={() => setLedgerFilter(emptyLedgerFilter)}>
+                Clear filters
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-ink-muted mb-2">
+            {ledgerFilterOn ? `Showing ${filteredStatement.length} of ${statement.length}` : `${statement.length} entries`}
+          </p>
           <div className="max-h-[700px] overflow-y-auto pr-1">
           <div className="overflow-x-auto rounded-lg border border-brand-100 mb-4">
             <table className="table-shell text-sm [&_th]:!px-2 [&_td]:!px-2">
@@ -340,7 +433,14 @@ function SupplierDetailContent() {
                     </td>
                   </tr>
                 )}
-                {statement.map((row) => {
+                {ledgerFilterOn && filteredStatement.length === 0 && statement.length > 0 && (
+                  <tr>
+                    <td colSpan={canEdit ? 8 : 7} className="text-center text-brand-400 py-4">
+                      No entries match these filters
+                    </td>
+                  </tr>
+                )}
+                {filteredStatement.map((row) => {
                   if (row.kind === 'purchase') {
                     return (
                       <tr key={row.key}>
@@ -405,15 +505,17 @@ function SupplierDetailContent() {
                     </tr>
                   );
                 })}
-                {statement.length > 0 && (
+                {filteredStatement.length > 0 && (
                   <tr className="bg-brand-50 font-semibold">
                     <td></td>
                     <td>Total</td>
                     <td></td>
-                    <td className="text-right whitespace-nowrap">{formatCurrency(statementPurchased)}</td>
-                    <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(statementPaid)}</td>
+                    <td className="text-right whitespace-nowrap">{formatCurrency(filteredStatementPurchased)}</td>
+                    <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(filteredStatementPaid)}</td>
                     <td></td>
-                    <td className="text-right whitespace-nowrap">{formatCurrency(runningBalance)}</td>
+                    <td className="text-right whitespace-nowrap">
+                      {!ledgerFilterOn && formatCurrency(runningBalance)}
+                    </td>
                     {canEdit && <td></td>}
                   </tr>
                 )}

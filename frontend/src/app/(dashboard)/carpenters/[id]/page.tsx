@@ -88,6 +88,12 @@ function CarpenterDetailContent() {
   // clicking the header flips the direction. Rows without a Model No. stay
   // at the bottom either way.
   const [modelNoSort, setModelNoSort] = useState<'asc' | 'desc'>('asc');
+  // On-screen filters for the two lists (nothing is re-fetched - the page
+  // already has every row; these only narrow what is shown and summed).
+  const emptyWorkFilter = { modelNo: '', q: '', stage: '', status: '', category: '', from: '', to: '' };
+  const [workFilter, setWorkFilter] = useState(emptyWorkFilter);
+  const emptyPayFilter = { q: '', type: '', mode: '', from: '', to: '' };
+  const [payFilter, setPayFilter] = useState(emptyPayFilter);
 
   const [statusTarget, setStatusTarget] = useState<{ id: string; current: WorkStatus } | null>(null);
   const [statusForm, setStatusForm] = useState<{ status: WorkStatus; qcNote: string }>({ status: 'ASSIGNED', qcNote: '' });
@@ -277,6 +283,35 @@ Please confirm receipt.`,
 
   if (isLoading || !carpenter) return <p className="text-brand-400 text-sm">Loading carpenter ledger...</p>;
 
+  const norm = (v: string | null | undefined) => (v ?? '').trim().toUpperCase();
+  const inDateRange = (d: string, from: string, to: string) => (!from || d.slice(0, 10) >= from) && (!to || d.slice(0, 10) <= to);
+  const workCategories = [...new Set(carpenter.workItems.map((w) => norm(w.category)).filter(Boolean))].sort();
+  const filteredWork = carpenter.workItems.filter((w) => {
+    const f = workFilter;
+    // Model No is an exact match: "1" finds Model 1, not 10 / 100 / 1000.
+    if (f.modelNo.trim() && norm(w.modelNo) !== norm(f.modelNo)) return false;
+    if (f.q.trim()) {
+      const q = norm(f.q);
+      if (![w.productName, w.category, w.size].some((v) => norm(v).includes(q))) return false;
+    }
+    if (f.stage && w.stage !== f.stage) return false;
+    if (f.status && w.status !== f.status) return false;
+    if (f.category && norm(w.category) !== f.category) return false;
+    return inDateRange(w.workDate, f.from, f.to);
+  });
+  const workFilterOn = Object.values(workFilter).some(Boolean);
+  const filteredWorkTotal = filteredWork.reduce((t, w) => t + Number(w.total ?? 0), 0);
+  const payModes = [...new Set((carpenter.payments ?? []).map((p) => norm(p.mode)).filter(Boolean))].sort();
+  const filteredPayments = (carpenter.payments ?? []).filter((p) => {
+    const f = payFilter;
+    if (f.q.trim() && !norm(p.reference).includes(norm(f.q)) && !norm(p.note).includes(norm(f.q))) return false;
+    if (f.type && (p.paymentType ?? 'SALARY') !== f.type) return false;
+    if (f.mode && norm(p.mode) !== f.mode) return false;
+    return inDateRange(p.date, f.from, f.to);
+  });
+  const payFilterOn = Object.values(payFilter).some(Boolean);
+  const filteredPaidTotal = filteredPayments.reduce((t, p) => t + Number(p.amount), 0);
+
   return (
     <div className="space-y-6">
       <div>
@@ -365,6 +400,48 @@ Please confirm receipt.`,
             />
           )}
         </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
+          <input className="input !py-1.5 text-sm" placeholder="Model No." value={workFilter.modelNo} onChange={(e) => setWorkFilter((f) => ({ ...f, modelNo: e.target.value }))} />
+          <input className="input !py-1.5 text-sm" placeholder="Product / category / size" value={workFilter.q} onChange={(e) => setWorkFilter((f) => ({ ...f, q: e.target.value }))} />
+          <select className="input !py-1.5 text-sm" value={workFilter.stage} onChange={(e) => setWorkFilter((f) => ({ ...f, stage: e.target.value }))} aria-label="Stage">
+            <option value="">All stages</option>
+            {(Object.keys(STAGE_LABEL) as ProductionStage[]).map((st) => (
+              <option key={st} value={st}>
+                {STAGE_LABEL[st]}
+              </option>
+            ))}
+          </select>
+          <select className="input !py-1.5 text-sm" value={workFilter.status} onChange={(e) => setWorkFilter((f) => ({ ...f, status: e.target.value }))} aria-label="Status">
+            <option value="">All statuses</option>
+            {(Object.keys(STATUS_LABEL) as WorkStatus[]).map((st) => (
+              <option key={st} value={st}>
+                {STATUS_LABEL[st]}
+              </option>
+            ))}
+          </select>
+          <select className="input !py-1.5 text-sm" value={workFilter.category} onChange={(e) => setWorkFilter((f) => ({ ...f, category: e.target.value }))} aria-label="Category">
+            <option value="">All categories</option>
+            {workCategories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          <input type="date" className="input !py-1.5 text-sm" title="From date" value={workFilter.from} onChange={(e) => setWorkFilter((f) => ({ ...f, from: e.target.value }))} />
+          <input type="date" className="input !py-1.5 text-sm" title="To date" value={workFilter.to} onChange={(e) => setWorkFilter((f) => ({ ...f, to: e.target.value }))} />
+          <button type="button" className="btn-secondary text-xs" disabled={!workFilterOn} onClick={() => setWorkFilter(emptyWorkFilter)}>
+            Clear filters
+          </button>
+        </div>
+        <p className="text-xs text-ink-muted mb-2">
+          {workFilterOn ? `Showing ${filteredWork.length} of ${carpenter.workItems.length}` : `${carpenter.workItems.length} entries`}
+          {canEdit && (
+            <>
+              {' '}
+              · Total <span className="font-semibold text-brand-900">{formatCurrency(filteredWorkTotal)}</span>
+            </>
+          )}
+        </p>
         <div className="max-h-80 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell">
             <thead>
@@ -400,7 +477,14 @@ Please confirm receipt.`,
                   </td>
                 </tr>
               )}
-              {[...carpenter.workItems]
+              {workFilterOn && filteredWork.length === 0 && carpenter.workItems.length > 0 && (
+                <tr>
+                  <td colSpan={canEdit ? 12 : 9} className="text-center text-brand-400 py-4">
+                    No work matches these filters
+                  </td>
+                </tr>
+              )}
+              {[...filteredWork]
                 .sort((a, b) => {
                   if (!a.modelNo && !b.modelNo) return 0;
                   if (!a.modelNo) return 1;
@@ -552,6 +636,34 @@ Please confirm receipt.`,
             />
           )}
         </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2 text-sm">
+          <input className="input !py-1.5 text-sm" placeholder="Voucher No. / note" value={payFilter.q} onChange={(e) => setPayFilter((f) => ({ ...f, q: e.target.value }))} />
+          <select className="input !py-1.5 text-sm" value={payFilter.type} onChange={(e) => setPayFilter((f) => ({ ...f, type: e.target.value }))} aria-label="Payment type">
+            <option value="">All types</option>
+            {(Object.keys(CARPENTER_PAYMENT_TYPE_LABEL) as CarpenterPaymentType[]).map((t) => (
+              <option key={t} value={t}>
+                {CARPENTER_PAYMENT_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+          <select className="input !py-1.5 text-sm" value={payFilter.mode} onChange={(e) => setPayFilter((f) => ({ ...f, mode: e.target.value }))} aria-label="Mode">
+            <option value="">All modes</option>
+            {payModes.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <input type="date" className="input !py-1.5 text-sm" title="From date" value={payFilter.from} onChange={(e) => setPayFilter((f) => ({ ...f, from: e.target.value }))} />
+          <input type="date" className="input !py-1.5 text-sm" title="To date" value={payFilter.to} onChange={(e) => setPayFilter((f) => ({ ...f, to: e.target.value }))} />
+          <button type="button" className="btn-secondary text-xs" disabled={!payFilterOn} onClick={() => setPayFilter(emptyPayFilter)}>
+            Clear filters
+          </button>
+        </div>
+        <p className="text-xs text-ink-muted mb-2">
+          {payFilterOn ? `Showing ${filteredPayments.length} of ${(carpenter.payments ?? []).length}` : `${(carpenter.payments ?? []).length} payments`} · Total{' '}
+          <span className="font-semibold text-brand-900">{formatCurrency(filteredPaidTotal)}</span>
+        </p>
         <div className="max-h-56 overflow-y-auto overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell">
             <thead>
@@ -573,7 +685,14 @@ Please confirm receipt.`,
                   </td>
                 </tr>
               )}
-              {(carpenter.payments ?? []).map((p) => (
+              {payFilterOn && filteredPayments.length === 0 && (carpenter.payments ?? []).length > 0 && (
+                <tr>
+                  <td colSpan={7} className="text-center text-brand-400 py-4">
+                    No payments match these filters
+                  </td>
+                </tr>
+              )}
+              {filteredPayments.map((p) => (
                 <tr key={p.id}>
                   <td>{formatDate(p.date)}</td>
                   <td>{CARPENTER_PAYMENT_TYPE_LABEL[(p.paymentType ?? 'SALARY') as CarpenterPaymentType] ?? '-'}</td>
