@@ -338,12 +338,12 @@ function SupplierDetailContent() {
                       <tr key={row.key}>
                         <td className="whitespace-nowrap">{formatDate(row.date)}</td>
                         <td className="font-medium">
-                          Purchase
+                          {row.amount < 0 ? 'Cancelled' : 'Purchase'}
                           <div className="text-[11px] font-normal text-ink-muted max-w-[120px] truncate" title={row.particulars}>
                             {row.particulars}
                           </div>
                         </td>
-                        <td>{row.ref}</td>
+                        <td className="whitespace-nowrap">{row.ref}</td>
                         <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
                         <td className="text-right whitespace-nowrap">{formatCurrency(0)}</td>
                         <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
@@ -379,7 +379,7 @@ function SupplierDetailContent() {
                         Payment
                         <div className="text-[11px] font-normal text-ink-muted">Payment Type: {p.mode ?? '-'}</div>
                       </td>
-                      <td>{row.ref}</td>
+                      <td className="whitespace-nowrap">{row.ref}</td>
                       <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
                       <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(row.amount)}</td>
                       <td></td>

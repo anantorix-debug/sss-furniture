@@ -364,7 +364,7 @@ export class SuppliersService {
   // before a payment on the same day), ending at Balance Payable.
   async generateLedgerPdf(id: string): Promise<Buffer> {
     const supplier = await this.findOne(id);
-    const rupees = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const rupees = (n: number) => `${n < 0 ? '-' : ''}₹${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const day = (d: Date) => d.toISOString().slice(0, 10);
     const fmt = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
@@ -380,8 +380,8 @@ export class SuppliersService {
         balance += r.kind === 'purchase' ? r.amount : -r.amount;
         const main = `<tr style="${r.kind === 'payment' ? 'background:#f0fdf4' : ''}">
           <td>${fmt(r.date)}</td>
-          <td style="font-weight:600">${r.kind === 'purchase' ? 'Purchase' : 'Payment'}</td>
-          <td>${escapeHtml(r.ref)}</td>
+          <td style="font-weight:600">${r.kind === 'payment' ? 'Payment' : r.amount < 0 ? 'Cancelled' : 'Purchase'}</td>
+          <td style="white-space:nowrap">${escapeHtml(r.ref)}</td>
           <td style="text-align:right">${rupees(r.amount)}</td>
           <td style="text-align:right">${rupees(r.kind === 'payment' ? r.amount : 0)}</td>
           <td style="text-align:right">${r.kind === 'purchase' ? rupees(r.amount) : ''}</td>
