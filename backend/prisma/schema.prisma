@@ -1387,7 +1387,7 @@ model ExpensePaymentMode {
 model Expense {
   id              String                @id @default(cuid())
   date            DateTime
-  voucherNumber   Int                   @unique // sequential, auto-assigned; see ExpensesService.nextVoucherNumber
+  voucherNumber   Int? // optional, typed by the user (never auto-assigned); 0 allowed. Non-zero numbers are kept unique by ExpensesService
   referenceTypeId String?
   referenceType   ExpenseReferenceType? @relation(fields: [referenceTypeId], references: [id], onDelete: SetNull)
   categoryId      String
@@ -1420,6 +1420,7 @@ model Expense {
   @@index([categoryId])
   @@index([scope])
   @@index([status])
+  @@index([voucherNumber])
   @@map("expenses")
 }
 

@@ -106,7 +106,7 @@ export function ExpenseListTab({
             downloadCsv(
               exportName,
               (result?.data ?? []).map((e) => ({
-                'S.No': e.voucherNumber,
+                'V': e.voucherNumber ?? '',
                 Date: formatDate(e.date),
                 Ref: e.referenceType?.code ?? '',
                 Category: e.category.name,
@@ -206,7 +206,7 @@ export function ExpenseListTab({
                 <td>{(result.page - 1) * result.limit + i + 1}</td>
                 <td>{formatDate(e.date)}</td>
                 <td>{e.referenceType?.code ?? '-'}</td>
-                <td className="font-mono text-xs">{e.voucherNumber}</td>
+                <td className="font-mono text-xs">{e.voucherNumber ?? '-'}</td>
                 {!categoryId && <td>{e.category.name}</td>}
                 <td className="max-w-[220px] truncate" title={e.particulars}>{e.particulars}</td>
                 <td>{e.paymentMode.name}</td>
@@ -257,7 +257,7 @@ export function ExpenseListTab({
       {archiveTarget && (
         <ConfirmDialog
           title="Archive Expense"
-          message={`Archive voucher #${archiveTarget.voucherNumber} (${archiveTarget.particulars})? It will be hidden from the default view but kept for the record.`}
+          message={`Archive ${archiveTarget.voucherNumber != null ? `voucher #${archiveTarget.voucherNumber}` : 'this expense'} (${archiveTarget.particulars})? It will be hidden from the default view but kept for the record.`}
           confirmLabel="Archive"
           onConfirm={handleArchive}
           onCancel={() => setArchiveTarget(null)}
@@ -267,7 +267,7 @@ export function ExpenseListTab({
       {deleteTarget && (
         <ConfirmDialog
           title="Delete Expense"
-          message={`Permanently delete voucher #${deleteTarget.voucherNumber} (${deleteTarget.particulars})? This cannot be undone - consider Archive instead if you might need it later.`}
+          message={`Permanently delete ${deleteTarget.voucherNumber != null ? `voucher #${deleteTarget.voucherNumber}` : 'this expense'} (${deleteTarget.particulars})? This cannot be undone - consider Archive instead if you might need it later.`}
           confirmLabel="Delete"
           danger
           onConfirm={handleDelete}

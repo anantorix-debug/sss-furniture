@@ -17,6 +17,11 @@ export class ExpensesImport implements ImportHandler {
   readonly spec: TableSpec<string> = {
     aliases: {
       DATE: 'date',
+      V: 'voucherNumber',
+      VNO: 'voucherNumber',
+      VOUCHER: 'voucherNumber',
+      VOUCHERNO: 'voucherNumber',
+      VOUCHERNUMBER: 'voucherNumber',
       CATEGORY: 'category',
       HEAD: 'category',
       EXPENSETYPE: 'category',
@@ -92,6 +97,7 @@ export class ExpensesImport implements ImportHandler {
         warnings,
         values: {
           date: sheetDate(text(cells, 'date'), 'Date', warnings),
+          voucherNumber: voucherOf(text(cells, 'voucherNumber'), warnings),
           categoryId,
           particulars,
           amount: amount != null && amount > 0 ? String(amount) : '',
@@ -109,6 +115,7 @@ export class ExpensesImport implements ImportHandler {
     return commitEach(items, async (r) => {
       const dto = await validOrThrow(CreateExpenseDto, {
         date: r.date,
+        voucherNumber: r.voucherNumber?.trim() ? Number(r.voucherNumber) : undefined,
         categoryId: r.categoryId,
         particulars: r.particulars?.trim(),
         amount: gridNum(r.amount),
@@ -121,4 +128,16 @@ export class ExpensesImport implements ImportHandler {
       await this.expenses.create(dto, ctx.userId);
     });
   }
+}
+
+// V / Voucher column: blank or "-" = no voucher number (never auto-filled);
+// otherwise a whole number, 0 allowed.
+function voucherOf(raw: string, warnings: string[]): string {
+  const t = (raw ?? '').trim();
+  if (!t || t === '-') return '';
+  if (!/^\d+$/.test(t)) {
+    warnings.push(`Voucher No. "${t}" is not a number - left blank`);
+    return '';
+  }
+  return String(Number(t));
 }

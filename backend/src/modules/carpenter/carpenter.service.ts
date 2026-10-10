@@ -2115,8 +2115,9 @@ export class CarpenterService {
     p: { date: Date; amount: number; paymentType: string; reference?: string | null },
     excludeId?: string,
   ) {
-    const ref = (p.reference ?? '').trim();
     const norm = (v: string | null | undefined) => (v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    // Voucher No. 0 (or blank / "-") means "no number" and may repeat.
+    const ref = /^0+$/.test(norm(p.reference)) ? '' : (p.reference ?? '').trim();
     const others = await this.prisma.carpenterPayment.findMany({
       where: { carpenterId, ...(excludeId ? { id: { not: excludeId } } : {}) },
       select: { date: true, amount: true, paymentType: true, reference: true },
@@ -2128,7 +2129,7 @@ export class CarpenterService {
       return;
     }
     const hit = others.find(
-      (o) => !norm(o.reference) && day(o.date) === day(p.date) && Number(o.amount) === Number(p.amount) && (o.paymentType ?? 'SALARY') === p.paymentType,
+      (o) => /^0*$/.test(norm(o.reference)) && day(o.date) === day(p.date) && Number(o.amount) === Number(p.amount) && (o.paymentType ?? 'SALARY') === p.paymentType,
     );
     if (hit) throw new ConflictException(`This payment (${day(p.date)}, Rs.${Number(p.amount)}) is already recorded for this worker`);
   }

@@ -13,13 +13,12 @@ export class CreateExpenseDto {
   @IsOptional()
   referenceTypeId?: string;
 
-  // Manual override - normally the server auto-assigns the next sequential
-  // number (see ExpensesService.nextVoucherNumber). Only honored for
-  // Super Admin, who is the only user of this module anyway.
+  // Optional - left blank when the slip has no number; never auto-filled.
+  // 0 is accepted (and may repeat); any other number can be used only once.
   @IsInt()
-  @Min(1)
+  @Min(0)
   @IsOptional()
-  voucherNumber?: number;
+  voucherNumber?: number | null;
 
   @IsString()
   @MinLength(1)

@@ -51,7 +51,7 @@ export function ExpenseFormModal({
       setForm({
         date: editing.date.slice(0, 10),
         referenceTypeId: editing.referenceTypeId ?? '',
-        voucherNumber: String(editing.voucherNumber),
+        voucherNumber: editing.voucherNumber == null ? '' : String(editing.voucherNumber),
         categoryId: editing.categoryId,
         particulars: editing.particulars,
         amount: String(editing.amount),
@@ -90,7 +90,8 @@ export function ExpenseFormModal({
       const payload = {
         date: form.date,
         referenceTypeId: form.referenceTypeId || undefined,
-        voucherNumber: form.voucherNumber ? parseInt(form.voucherNumber, 10) : undefined,
+        // Blank = no voucher number (clears it when editing); 0 is a valid number.
+        voucherNumber: form.voucherNumber.trim() !== '' ? parseInt(form.voucherNumber, 10) : editing ? null : undefined,
         categoryId: form.categoryId,
         particulars: form.particulars,
         amount: parseFloat(form.amount),
@@ -120,7 +121,7 @@ export function ExpenseFormModal({
   const scopeLocked = selectedCategory?.scope != null;
 
   return (
-    <Modal title={editing ? `Edit Expense - Voucher #${editing.voucherNumber}` : '+ Add Expense'} onClose={onClose} wide>
+    <Modal title={editing ? `Edit Expense${editing.voucherNumber != null ? ` - Voucher #${editing.voucherNumber}` : ''}` : '+ Add Expense'} onClose={onClose} wide>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
@@ -128,12 +129,12 @@ export function ExpenseFormModal({
             <input type="date" className="input" required value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
           </div>
           <div>
-            <label className="label">Voucher No. {!editing && '(auto if blank)'}</label>
+            <label className="label">Voucher No. (optional)</label>
             <input
               type="number"
-              min="1"
+              min="0"
               className="input"
-              placeholder="Auto"
+              placeholder="Optional"
               value={form.voucherNumber}
               onChange={(e) => setForm((f) => ({ ...f, voucherNumber: e.target.value }))}
             />

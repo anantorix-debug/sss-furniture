@@ -190,7 +190,7 @@ function ReportsTab() {
     downloadCsv(
       `expenses-report-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`,
       result.data.map((e) => ({
-        'S.No': e.voucherNumber,
+        'V': e.voucherNumber ?? '',
         Date: formatDate(e.date),
         Ref: e.referenceType?.code ?? '',
         Category: e.category.name,

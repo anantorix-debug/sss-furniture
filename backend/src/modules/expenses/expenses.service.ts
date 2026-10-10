@@ -98,19 +98,17 @@ export class ExpensesService {
     return expense;
   }
 
-  private async nextVoucherNumber(): Promise<number> {
-    const result = await this.prisma.expense.aggregate({ _max: { voucherNumber: true } });
-    return (result._max.voucherNumber ?? 0) + 1;
+  // Voucher No. is optional and never auto-filled. Blank and 0 may repeat;
+  // any other number can belong to only one expense.
+  private async assertVoucherFree(voucherNumber: number | null | undefined, excludeId?: string) {
+    if (voucherNumber == null || voucherNumber === 0) return;
+    const clash = await this.prisma.expense.findFirst({ where: { voucherNumber, ...(excludeId ? { id: { not: excludeId } } : {}) }, select: { id: true } });
+    if (clash) throw new ConflictException(`Voucher number ${voucherNumber} is already in use`);
   }
 
   async create(dto: CreateExpenseDto, userId: string) {
-    let voucherNumber = dto.voucherNumber;
-    if (voucherNumber != null) {
-      const clash = await this.prisma.expense.findUnique({ where: { voucherNumber } });
-      if (clash) throw new ConflictException(`Voucher number ${voucherNumber} is already in use`);
-    } else {
-      voucherNumber = await this.nextVoucherNumber();
-    }
+    const voucherNumber = dto.voucherNumber ?? null;
+    await this.assertVoucherFree(voucherNumber);
 
     const expense = await this.prisma.expense.create({
       data: {
@@ -144,9 +142,8 @@ export class ExpensesService {
   async update(id: string, dto: UpdateExpenseDto, userId: string) {
     const existing = await this.findOne(id);
 
-    if (dto.voucherNumber != null && dto.voucherNumber !== existing.voucherNumber) {
-      const clash = await this.prisma.expense.findUnique({ where: { voucherNumber: dto.voucherNumber } });
-      if (clash) throw new ConflictException(`Voucher number ${dto.voucherNumber} is already in use`);
+    if (dto.voucherNumber !== undefined && dto.voucherNumber !== existing.voucherNumber) {
+      await this.assertVoucherFree(dto.voucherNumber, id);
     }
 
     // Diff only the fields actually present in the request, so the audit
@@ -230,11 +227,10 @@ export class ExpensesService {
 
   async duplicate(id: string, userId: string) {
     const source = await this.findOne(id);
-    const voucherNumber = await this.nextVoucherNumber();
     const expense = await this.prisma.expense.create({
       data: {
         date: new Date(),
-        voucherNumber,
+        voucherNumber: null,
         referenceTypeId: source.referenceTypeId,
         categoryId: source.categoryId,
         particulars: source.particulars,

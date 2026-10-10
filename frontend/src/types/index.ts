@@ -990,7 +990,7 @@ export interface ExpensePaymentMode {
 export interface Expense {
   id: string;
   date: string;
-  voucherNumber: number;
+  voucherNumber: number | null;
   referenceTypeId?: string | null;
   referenceType?: ExpenseReferenceType | null;
   categoryId: string;
