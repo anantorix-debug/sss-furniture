@@ -455,11 +455,11 @@ Please confirm receipt.`,
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">{notice}</p>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-6 items-start">
       <div className="space-y-6">
       <div className="card p-5">
         <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
-          <h2 className="font-semibold text-brand-900">Work List</h2>
+          <h2 className="font-semibold text-brand-900 whitespace-nowrap">Work List</h2>
           <div className="flex flex-wrap items-center justify-end gap-2">
           {canEdit && (
             <button
@@ -489,7 +489,7 @@ Please confirm receipt.`,
           )}
           </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-2 text-sm">
           <input className="input !py-1.5 text-sm" placeholder="Model No." value={workFilter.modelNo} onChange={(e) => setWorkFilter((f) => ({ ...f, modelNo: e.target.value }))} />
           <input className="input !py-1.5 text-sm" placeholder="Product / category / size" value={workFilter.q} onChange={(e) => setWorkFilter((f) => ({ ...f, q: e.target.value }))} />
           <select className="input !py-1.5 text-sm" value={workFilter.stage} onChange={(e) => setWorkFilter((f) => ({ ...f, stage: e.target.value }))} aria-label="Stage">
@@ -638,7 +638,7 @@ Please confirm receipt.`,
 
         {isSuperAdmin && (
         <form onSubmit={addWork} className="space-y-2">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             <select className="input" value={workForm.stage} onChange={(e) => setWorkForm((f) => ({ ...f, stage: e.target.value as ProductionStage }))}>
               <option value="CARPENTER">Carpenter</option>
               <option value="CARVING">Carving</option>
@@ -714,7 +714,7 @@ Please confirm receipt.`,
       <div className="space-y-6">
       <div className="card p-5">
         <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
-          <h2 className="font-semibold text-brand-900">Payments</h2>
+          <h2 className="font-semibold text-brand-900 whitespace-nowrap">Payments</h2>
           <div className="flex flex-wrap items-center justify-end gap-2">
           {canEdit && (
             <button
