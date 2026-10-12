@@ -5,6 +5,7 @@ import { PartyOrdersService } from './party-orders.service';
 import { CreatePartyOrderDto } from './dto/create-party-order.dto';
 import { UpdatePartyOrderDto } from './dto/update-party-order.dto';
 import { CreatePaymentDto } from '../customer/dto/create-payment.dto';
+import { ShopPaymentIdsDto, UpdateShopPaymentDto } from './dto/shop-payment.dto';
 import { UpdatePaymentDto } from '../customer/dto/update-payment.dto';
 import { AssignEmployeeDto } from '../customer/dto/assign-employee.dto';
 import { AssignProductionDto } from '../customer/dto/assign-production.dto';
@@ -164,6 +165,21 @@ export class PartyOrdersController {
   @Post('shops-summary/:shopId/payments')
   addShopPayment(@Param('shopId') shopId: string, @Body() dto: CreatePaymentDto, @CurrentUser() user: AuthUser) {
     return this.service.addShopPayment(shopId, dto, user.userId);
+  }
+
+  // Edit one shop payment on the Payment Ledger (re-split across the orders).
+  @Roles(Role.ADMIN)
+  @Patch('shops-summary/:shopId/payments')
+  updateShopPayment(@Param('shopId') shopId: string, @Body() dto: UpdateShopPaymentDto, @CurrentUser() user: AuthUser) {
+    const { paymentIds, ...payment } = dto;
+    return this.service.updateShopPayment(shopId, paymentIds, payment, user.userId);
+  }
+
+  // Remove one shop payment on the Payment Ledger.
+  @Roles(Role.ADMIN)
+  @Post('shops-summary/:shopId/payments/remove')
+  removeShopPayment(@Param('shopId') shopId: string, @Body() dto: ShopPaymentIdsDto, @CurrentUser() user: AuthUser) {
+    return this.service.removeShopPayment(shopId, dto.paymentIds, user.userId);
   }
 
   // Static route - must come before the dynamic :id route below. The Shop

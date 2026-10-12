@@ -26,11 +26,13 @@ export function ProductSelector({
   onChangeName,
   onSelect,
   placeholder,
+  required,
 }: {
   value: string;
   onChangeName: (name: string) => void;
   onSelect: (entry: CompanyProductEntry) => void;
   placeholder?: string;
+  required?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -102,6 +104,7 @@ export function ProductSelector({
       <input
         className="input"
         placeholder={placeholder ?? 'Search or type Product Name'}
+        required={required}
         value={value}
         onChange={(e) => {
           onChangeName(e.target.value);

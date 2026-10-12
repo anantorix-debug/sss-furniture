@@ -212,6 +212,7 @@ function buildPaymentLedger(orders: any[], totalOrderValue: number, hide: boolea
       voucherNo: (p.note as string | null) ?? null,
       amount: Number(p.amount ?? 0),
       mode: (p.mode as string | null) ?? null,
+      paymentIds: [p.id as string],
     })),
   );
   // One shop-level payment is stored as several per-order rows (see
@@ -221,8 +222,10 @@ function buildPaymentLedger(orders: any[], totalOrderValue: number, hide: boolea
   for (const r of raw) {
     const key = `${r.createdAt.getTime()}|${r.date.getTime()}|${r.voucherNo ?? ''}|${r.mode ?? ''}`;
     const existing = merged.get(key);
-    if (existing) existing.amount += r.amount;
-    else merged.set(key, { ...r });
+    if (existing) {
+      existing.amount += r.amount;
+      existing.paymentIds.push(...r.paymentIds);
+    } else merged.set(key, { ...r, paymentIds: [...r.paymentIds] });
   }
   const rows = [...merged.values()];
   rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
@@ -230,6 +233,25 @@ function buildPaymentLedger(orders: any[], totalOrderValue: number, hide: boolea
   return rows.map(({ createdAt: _createdAt, ...row }) => {
     runningPaid += row.amount;
     return { ...row, orderValue: totalOrderValue, balance: Math.round((totalOrderValue - runningPaid) * 100) / 100 };
+  });
+}
+
+// Debit side of the shop statement - one row per order in the filtered set
+// (the same orders the summary cards add up), with what is still owed on
+// it. Hidden with the rest of the money for roles that can't see it.
+function buildOrderLedger(orders: any[], hide: boolean) {
+  if (hide) return [];
+  return orders.map((o) => {
+    const names: string[] = o.items?.length ? o.items.map((it: any) => it.productName).filter(Boolean) : [o.model ?? o.shopName].filter(Boolean);
+    return {
+      orderId: o.id as string,
+      date: o.orderDate as Date,
+      ref: (o.jobNumber as string | null) ?? null,
+      particulars: names.length > 1 ? `${names[0]} +${names.length - 1} more` : (names[0] ?? ''),
+      total: Number(o.totalAmount ?? 0),
+      balance: Math.round(Number(o.balanceAmount ?? 0) * 100) / 100,
+      status: o.deliveryStatus as string,
+    };
   });
 }
 
@@ -444,6 +466,7 @@ export class PartyOrdersService {
     // with filteredSummary's totals no matter which order page is showing.
     const items = buildSupplyRows(filteredOrders, hide);
     const paymentLedger = buildPaymentLedger(filteredOrders, filteredSummary.totalValue ?? 0, hide);
+    const orderLedger = buildOrderLedger(filteredOrders, hide);
 
     const mapped = filteredOrders.map((o) => stripOrderMoney(o, hide));
     const page = params.page ?? 1;
@@ -451,7 +474,7 @@ export class PartyOrdersService {
     const { skip, take } = toSkipTake(page, limit);
     const orders = paginate(mapped.slice(skip, skip + take), mapped.length, page, limit);
 
-    return { shop, overallSummary, filteredSummary, orders, items, paymentLedger };
+    return { shop, overallSummary, filteredSummary, orders, items, paymentLedger, orderLedger };
   }
 
   async findOne(id: string, viewerRole?: Role) {
@@ -708,7 +731,12 @@ export class PartyOrdersService {
   // to the shop's orders oldest-first, each up to what it still owes, with
   // any excess landing on the newest order. Every row created here shares
   // one createdAt so the ledger can show it as the single payment it was.
-  async addShopPayment(shopId: string, dto: { date: string; amount: number; mode?: string; note?: string }, userId: string) {
+  async addShopPayment(
+    shopId: string,
+    dto: { date: string; amount: number; mode?: string; note?: string },
+    userId: string,
+    replace: { id: string; orderId: string; amount: number }[] = [],
+  ) {
     const shop = await this.prisma.shop.findUnique({ where: { id: shopId } });
     if (!shop) throw new NotFoundException('Shop not found');
 
@@ -717,11 +745,16 @@ export class PartyOrdersService {
       .sort((a, b) => a.orderDate.getTime() - b.orderDate.getTime());
     if (orders.length === 0) throw new BadRequestException('This shop has no orders to record a payment against');
 
+    // When editing, the payment being replaced no longer counts towards
+    // what each order still owes.
+    const freed = new Map<string, number>();
+    for (const r of replace) freed.set(r.orderId, (freed.get(r.orderId) ?? 0) + r.amount);
+
     const allocations: { orderId: string; amount: number; order: (typeof orders)[number] }[] = [];
     let remaining = Math.round(dto.amount * 100) / 100;
     for (const o of orders) {
       if (remaining <= 0) break;
-      const due = Math.round(Number(o.balanceAmount) * 100) / 100;
+      const due = Math.round((Number(o.balanceAmount) + (freed.get(o.id) ?? 0)) * 100) / 100;
       if (due <= 0) continue;
       const part = Math.min(due, remaining);
       allocations.push({ orderId: o.id, amount: part, order: o });
@@ -735,8 +768,9 @@ export class PartyOrdersService {
     }
 
     const createdAt = new Date();
-    await this.prisma.$transaction(
-      allocations.map((a) =>
+    await this.prisma.$transaction([
+      ...(replace.length ? [this.prisma.partyOrderPayment.deleteMany({ where: { id: { in: replace.map((r) => r.id) } } })] : []),
+      ...allocations.map((a) =>
         this.prisma.partyOrderPayment.create({
           data: {
             orderId: a.orderId,
@@ -750,9 +784,59 @@ export class PartyOrdersService {
           },
         }),
       ),
-    );
+    ]);
     for (const a of allocations) await this.autoMarkDeliveredIfPaid(a.orderId);
     return { success: true, allocatedTo: allocations.length };
+  }
+
+  // The per-order rows one shop payment was split into (the ids the Payment
+  // Ledger row carries) - all must belong to this shop's orders.
+  private async shopPaymentRows(shopId: string, paymentIds: string[]) {
+    const ids = [...new Set(paymentIds)];
+    if (ids.length === 0) throw new BadRequestException('No payment selected');
+    const rows = await this.prisma.partyOrderPayment.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, orderId: true, amount: true, date: true, mode: true, note: true, order: { select: { shopId: true } } },
+    });
+    if (rows.length !== ids.length || rows.some((r) => r.order.shopId !== shopId)) throw new NotFoundException('Payment not found for this shop');
+    return rows;
+  }
+
+  // Edit one shop payment from the Payment Ledger: the old split rows are
+  // replaced by a fresh split of the new amount, in one transaction.
+  async updateShopPayment(shopId: string, paymentIds: string[], dto: { date: string; amount: number; mode?: string; note?: string }, userId: string) {
+    const rows = await this.shopPaymentRows(shopId, paymentIds);
+    const result = await this.addShopPayment(
+      shopId,
+      dto,
+      userId,
+      rows.map((r) => ({ id: r.id, orderId: r.orderId, amount: Number(r.amount) })),
+    );
+    await this.audit.log({
+      userId,
+      action: 'PARTY_SHOP_PAYMENT_UPDATED',
+      targetType: 'Shop',
+      targetId: shopId,
+      metadata: {
+        before: { date: rows[0].date, amount: rows.reduce((t, r) => t + Number(r.amount), 0), mode: rows[0].mode, voucherNo: rows[0].note },
+        after: { date: dto.date, amount: dto.amount, mode: dto.mode ?? null, voucherNo: dto.note ?? null },
+      },
+    });
+    return result;
+  }
+
+  // Remove one shop payment (all the per-order rows it was split into).
+  async removeShopPayment(shopId: string, paymentIds: string[], userId: string) {
+    const rows = await this.shopPaymentRows(shopId, paymentIds);
+    await this.prisma.partyOrderPayment.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+    await this.audit.log({
+      userId,
+      action: 'PARTY_SHOP_PAYMENT_REMOVED',
+      targetType: 'Shop',
+      targetId: shopId,
+      metadata: { date: rows[0].date, amount: rows.reduce((t, r) => t + Number(r.amount), 0), mode: rows[0].mode, voucherNo: rows[0].note },
+    });
+    return { success: true };
   }
 
   // Same auto-advance as CustomerOrdersService.autoMarkDeliveredIfPaid -

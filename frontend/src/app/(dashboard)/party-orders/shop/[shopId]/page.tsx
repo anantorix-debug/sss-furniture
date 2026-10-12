@@ -18,7 +18,7 @@ import { RoleGate } from '@/components/RoleGate';
 import { WhatsAppModal } from '@/components/WhatsAppModal';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { useForceable } from '@/hooks/useForceable';
-import type { PartyOrder, ShopDashboardResult, ShopSummary } from '@/types';
+import type { PartyOrder, ShopDashboardResult, ShopLedgerRow, ShopOrderLedgerRow, ShopSummary } from '@/types';
 import { Pagination } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
 
@@ -47,8 +47,10 @@ function ProductSupplyTable({ rows }: { rows: ShopDashboardResult['items'] }) {
       <div className="px-4 py-3 border-b border-brand-100">
         <h2 className="text-sm font-semibold text-brand-900">Product Supply Details</h2>
       </div>
-      <div className="overflow-x-auto">
-        <table className="table-shell w-full">
+      {/* Long lists scroll inside the box (header stays visible) instead of
+          stretching the page. */}
+      <div className="max-h-[700px] overflow-auto">
+        <table className="table-shell w-full [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10">
           <thead>
             <tr>
               <th>S.No</th>
@@ -104,21 +106,32 @@ function PaymentSummaryCards({ summary }: { summary: ShopSummary }) {
   );
 }
 
-// RIGHT side of the two-column report - the running-balance payment
-// ledger, same column set as the Purchasing/Supplier detail page's own
-// Payment Ledger (Date/Voucher No/Amount/Balance/Mode), plus the same
-// "Record Payment" inline form that page has. The payment is against the
-// shop's overall balance - the backend splits it across the shop's orders.
+// RIGHT side of the two-column report - the shop statement, in the same
+// format as the Purchasing > Supplier page's Payment Ledger: every order
+// (adds to what the shop owes) and every payment (reduces it), oldest
+// first, with a running balance, filters, a total row, and Edit / Remove
+// on payments. A payment is against the shop's overall balance - the
+// backend splits it across the shop's orders (and re-splits on edit).
+type ShopPaymentPayload = { date: string; amount: number; mode?: string; note?: string };
+const PAY_MODES = ['CASH', 'UPI', 'GPAY', 'BANK TRANSFER'];
+const emptyLedgerFilter = { q: '', kind: '', mode: '', from: '', to: '' };
+
 function PaymentLedgerPanel({
   summary,
   ledger,
-  canAdd,
+  orderLedger,
+  canEdit,
   onAddPayment,
+  onUpdatePayment,
+  onRemovePayment,
 }: {
   summary: ShopSummary;
   ledger: ShopDashboardResult['paymentLedger'];
-  canAdd: boolean;
-  onAddPayment: (payload: { date: string; amount: number; mode?: string; note?: string }) => Promise<void>;
+  orderLedger: ShopDashboardResult['orderLedger'];
+  canEdit: boolean;
+  onAddPayment: (payload: ShopPaymentPayload) => Promise<void>;
+  onUpdatePayment: (paymentIds: string[], payload: ShopPaymentPayload) => Promise<void>;
+  onRemovePayment: (paymentIds: string[]) => Promise<void>;
 }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [voucherNo, setVoucherNo] = useState('');
@@ -126,6 +139,10 @@ function PaymentLedgerPanel({
   const [mode, setMode] = useState('CASH');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState(emptyLedgerFilter);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ date: '', voucherNo: '', amount: '', mode: 'CASH' });
+  const [removeTarget, setRemoveTarget] = useState<ShopLedgerRow | null>(null);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -147,6 +164,21 @@ function PaymentLedgerPanel({
     }
   }
 
+  async function saveEdit(p: ShopLedgerRow) {
+    setError(null);
+    const numAmount = parseFloat(editForm.amount);
+    if (!numAmount || numAmount <= 0) {
+      setError('Enter a valid amount');
+      return;
+    }
+    try {
+      await onUpdatePayment(p.paymentIds, { date: editForm.date, amount: numAmount, mode: editForm.mode, note: editForm.voucherNo || undefined });
+      setEditingKey(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update payment');
+    }
+  }
+
   const hasFinancials = summary.totalValue !== undefined;
   if (!hasFinancials) {
     return (
@@ -156,71 +188,238 @@ function PaymentLedgerPanel({
       </div>
     );
   }
+
+  // Statement: orders add to the balance, payments reduce it - oldest
+  // first, an order before a payment on the same day. The last balance
+  // equals the Balance card above.
+  type Row =
+    | { kind: 'order'; key: string; date: string; ref: string; amount: number; order: ShopOrderLedgerRow; balance: number }
+    | { kind: 'payment'; key: string; date: string; ref: string; amount: number; payment: ShopLedgerRow; balance: number };
+  const statement: Row[] = [
+    ...orderLedger.map((o) => ({ kind: 'order' as const, key: `o-${o.orderId}`, date: o.date, ref: o.ref ?? '-', amount: o.total, order: o, balance: 0 })),
+    ...ledger.map((p) => ({ kind: 'payment' as const, key: `p-${p.paymentIds.join('.')}`, date: p.date, ref: p.voucherNo ?? '-', amount: p.amount, payment: p, balance: 0 })),
+  ].sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)) || (a.kind === b.kind ? 0 : a.kind === 'order' ? -1 : 1));
+  let running = 0;
+  for (const row of statement) {
+    running += row.kind === 'order' ? row.amount : -row.amount;
+    row.balance = Math.round(running * 100) / 100;
+  }
+
+  const norm = (v: string | null | undefined) => (v ?? '').trim().toUpperCase();
+  const modes = [...new Set(ledger.map((p) => norm(p.mode)).filter(Boolean))].sort();
+  const filterOn = Object.values(filter).some(Boolean);
+  const filtered = statement.filter((r) => {
+    if (filter.q.trim()) {
+      const q = norm(filter.q);
+      const text = r.kind === 'order' ? `${r.ref} ${r.order.particulars}` : `${r.ref} ${r.payment.mode ?? ''}`;
+      if (!norm(text).includes(q)) return false;
+    }
+    if (filter.kind && r.kind !== filter.kind) return false;
+    if (filter.mode && (r.kind !== 'payment' || norm(r.payment.mode) !== filter.mode)) return false;
+    const d = r.date.slice(0, 10);
+    return (!filter.from || d >= filter.from) && (!filter.to || d <= filter.to);
+  });
+  const totalOrders = filtered.filter((r) => r.kind === 'order').reduce((t, r) => t + r.amount, 0);
+  const totalPaid = filtered.filter((r) => r.kind === 'payment').reduce((t, r) => t + r.amount, 0);
+  const cols = canEdit ? 8 : 7;
+
   return (
-    <div className="card p-0 overflow-hidden">
-      <div className="px-4 py-3 border-b border-brand-100">
-        <h2 className="text-sm font-semibold text-brand-900">Payment Ledger</h2>
+    <div className="card p-5">
+      <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
+        <h2 className="font-semibold text-brand-900 whitespace-nowrap">Payment Ledger</h2>
       </div>
-      <div className="max-h-96 overflow-y-auto overflow-x-auto">
-        <table className="table-shell w-full">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>V.No</th>
-              <th className="text-right">Amount</th>
-              <th className="text-right">Balance</th>
-              <th>Mode</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ledger.length === 0 && (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-2 text-sm">
+        <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
+        <select className="input !py-1.5 text-sm" value={filter.kind} onChange={(e) => setFilter((f) => ({ ...f, kind: e.target.value }))}>
+          <option value="">All types</option>
+          <option value="order">Order</option>
+          <option value="payment">Payment</option>
+        </select>
+        <select className="input !py-1.5 text-sm" value={filter.mode} onChange={(e) => setFilter((f) => ({ ...f, mode: e.target.value }))}>
+          <option value="">All modes</option>
+          {modes.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <input type="date" className="input !py-1.5 text-sm" title="From date" value={filter.from} onChange={(e) => setFilter((f) => ({ ...f, from: e.target.value }))} />
+        <input type="date" className="input !py-1.5 text-sm" title="To date" value={filter.to} onChange={(e) => setFilter((f) => ({ ...f, to: e.target.value }))} />
+        <button type="button" className="btn-secondary text-xs" disabled={!filterOn} onClick={() => setFilter(emptyLedgerFilter)}>
+          Clear filters
+        </button>
+      </div>
+      <p className="text-xs text-ink-muted mb-2">{filterOn ? `Showing ${filtered.length} of ${statement.length}` : `${statement.length} entries`}</p>
+      {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
+      <div className="max-h-[700px] overflow-y-auto pr-1">
+        <div className="overflow-x-auto rounded-lg border border-brand-100 mb-4">
+          <table className="table-shell text-sm [&_th]:!px-2 [&_td]:!px-2">
+            <thead>
               <tr>
-                <td colSpan={5} className="text-center text-brand-400 py-6">
-                  No payments recorded yet.
-                </td>
+                <th>Date</th>
+                <th>Txn Type</th>
+                <th>Ref No.</th>
+                <th className="!text-right">Total</th>
+                <th className="!text-right">Paid</th>
+                <th className="!text-right" title="Amount still owed on this order">Txn Bal.</th>
+                <th className="!text-right" title="Total still owed by this shop after this entry">Balance</th>
+                {canEdit && <th></th>}
               </tr>
-            )}
-            {ledger.map((p, idx) => (
-              <tr key={idx}>
-                <td className="whitespace-nowrap">{formatDate(p.date)}</td>
-                <td>{p.voucherNo ?? '-'}</td>
-                <td className="text-right font-medium">{formatCurrency(p.amount)}</td>
-                <td className="text-right">{formatCurrency(p.balance)}</td>
-                <td>{p.mode ?? '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {statement.length === 0 && (
+                <tr>
+                  <td colSpan={cols} className="text-center text-brand-400 py-4">
+                    No orders or payments yet
+                  </td>
+                </tr>
+              )}
+              {filterOn && filtered.length === 0 && statement.length > 0 && (
+                <tr>
+                  <td colSpan={cols} className="text-center text-brand-400 py-4">
+                    No entries match these filters
+                  </td>
+                </tr>
+              )}
+              {filtered.map((row) => {
+                if (row.kind === 'order') {
+                  return (
+                    <tr key={row.key}>
+                      <td className="whitespace-nowrap">{formatDate(row.date)}</td>
+                      <td className="font-medium">
+                        {row.order.status === 'CANCELLED' ? 'Order (Cancelled)' : 'Order'}
+                        <div className="text-[11px] font-normal text-ink-muted max-w-[140px] truncate" title={row.order.particulars}>
+                          {row.order.particulars}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap">
+                        <Link href={`/party-orders/${row.order.orderId}`} className="text-brand-700 hover:underline">
+                          {row.ref}
+                        </Link>
+                      </td>
+                      <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
+                      <td className="text-right whitespace-nowrap">{formatCurrency(0)}</td>
+                      <td className="text-right whitespace-nowrap">{formatCurrency(row.order.balance)}</td>
+                      <td className="text-right whitespace-nowrap font-medium">{formatCurrency(row.balance)}</td>
+                      {canEdit && <td></td>}
+                    </tr>
+                  );
+                }
+                const p = row.payment;
+                return editingKey === row.key ? (
+                  <tr key={row.key} className="bg-blue-50">
+                    <td>
+                      <input type="date" className="input py-1 text-xs" value={editForm.date} onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))} />
+                    </td>
+                    <td>
+                      <select className="input py-1 text-xs" value={editForm.mode} onChange={(e) => setEditForm((f) => ({ ...f, mode: e.target.value }))}>
+                        {[...new Set([...PAY_MODES, editForm.mode])].map((m) => (
+                          <option key={m}>{m}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input className="input py-1 text-xs w-20" placeholder="V.No" value={editForm.voucherNo} onChange={(e) => setEditForm((f) => ({ ...f, voucherNo: e.target.value }))} />
+                    </td>
+                    <td colSpan={2}>
+                      <input type="number" step="0.01" min="0.01" className="input py-1 text-xs w-28 ml-auto" value={editForm.amount} onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))} />
+                    </td>
+                    <td></td>
+                    <td></td>
+                    <td className="whitespace-nowrap">
+                      <button className="text-emerald-600 hover:text-emerald-800 text-xs mr-2" onClick={() => saveEdit(p)}>
+                        Save
+                      </button>
+                      <button className="text-brand-400 hover:text-brand-600 text-xs" onClick={() => setEditingKey(null)}>
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={row.key} className="bg-emerald-50/40">
+                    <td className="whitespace-nowrap">{formatDate(row.date)}</td>
+                    <td className="font-medium">
+                      Payment
+                      <div className="text-[11px] font-normal text-ink-muted">Payment Type: {p.mode ?? '-'}</div>
+                    </td>
+                    <td className="whitespace-nowrap">{row.ref}</td>
+                    <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
+                    <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(row.amount)}</td>
+                    <td></td>
+                    <td className="text-right whitespace-nowrap font-medium">{formatCurrency(row.balance)}</td>
+                    {canEdit && (
+                      <td className="whitespace-nowrap">
+                        <button
+                          className="text-brand-600 hover:underline text-xs mr-2"
+                          onClick={() => {
+                            setError(null);
+                            setEditingKey(row.key);
+                            setEditForm({ date: p.date.slice(0, 10), voucherNo: p.voucherNo ?? '', amount: String(p.amount), mode: p.mode ?? 'CASH' });
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button className="text-red-500 hover:text-red-700 text-xs" onClick={() => setRemoveTarget(p)}>
+                          Remove
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+              {filtered.length > 0 && (
+                <tr className="bg-brand-50 font-semibold">
+                  <td></td>
+                  <td>Total</td>
+                  <td></td>
+                  <td className="text-right whitespace-nowrap">{formatCurrency(totalOrders)}</td>
+                  <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(totalPaid)}</td>
+                  <td></td>
+                  <td className="text-right whitespace-nowrap">{!filterOn && formatCurrency(running)}</td>
+                  {canEdit && <td></td>}
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {canEdit && (
+          <form onSubmit={handleAdd} className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input type="date" className="input" required value={date} onChange={(e) => setDate(e.target.value)} />
+              <input className="input" placeholder="Voucher No." value={voucherNo} onChange={(e) => setVoucherNo(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input type="number" step="0.01" min="0.01" className="input" placeholder="Amount" required value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <select className="input" value={mode} onChange={(e) => setMode(e.target.value)}>
+                {PAY_MODES.map((m) => (
+                  <option key={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <button type="submit" disabled={submitting} className="btn-primary w-full">
+              {submitting ? 'Recording...' : 'Record Payment'}
+            </button>
+          </form>
+        )}
       </div>
-      {canAdd && (
-        <form onSubmit={handleAdd} className="p-4 border-t border-brand-100 space-y-2">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <input type="date" className="input" required value={date} onChange={(e) => setDate(e.target.value)} />
-            <input className="input" placeholder="Voucher No." value={voucherNo} onChange={(e) => setVoucherNo(e.target.value)} />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <input
-              type="number"
-              step="0.01"
-              min="0.01"
-              className="input"
-              placeholder="Amount"
-              required
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-            <select className="input" value={mode} onChange={(e) => setMode(e.target.value)}>
-              <option>CASH</option>
-              <option>UPI</option>
-              <option>GPAY</option>
-              <option>BANK TRANSFER</option>
-            </select>
-          </div>
-          {error && <p className="text-xs text-red-600">{error}</p>}
-          <button type="submit" disabled={submitting} className="btn-primary w-full">
-            {submitting ? 'Recording...' : 'Record Payment'}
-          </button>
-        </form>
+
+      {removeTarget && (
+        <ConfirmDialog
+          title="Remove Payment"
+          message={`Remove the payment of ${formatCurrency(removeTarget.amount)} on ${formatDate(removeTarget.date)}${removeTarget.voucherNo ? ` (V.No ${removeTarget.voucherNo})` : ''}? The shop's balance goes back up by this amount.`}
+          confirmLabel="Remove"
+          danger
+          onConfirm={async () => {
+            const target = removeTarget;
+            setRemoveTarget(null);
+            try {
+              await onRemovePayment(target.paymentIds);
+            } catch (err) {
+              setError(err instanceof ApiError ? err.message : 'Failed to remove payment');
+            }
+          }}
+          onCancel={() => setRemoveTarget(null)}
+        />
       )}
     </div>
   );
@@ -316,10 +515,21 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
     }, hasRole('SUPERADMIN'));
   }
 
-  async function handleAddPayment(payload: { date: string; amount: number; mode?: string; note?: string }) {
+  async function handleAddPayment(payload: ShopPaymentPayload) {
     await api.post(`/party-orders/shops-summary/${shopId}/payments`, payload);
     mutate();
     setSuccessMessage('Payment Recorded');
+  }
+
+  async function handleUpdatePayment(paymentIds: string[], payload: ShopPaymentPayload) {
+    await api.patch(`/party-orders/shops-summary/${shopId}/payments`, { ...payload, paymentIds });
+    mutate();
+    setSuccessMessage('Payment Updated');
+  }
+
+  async function handleRemovePayment(paymentIds: string[]) {
+    await api.post(`/party-orders/shops-summary/${shopId}/payments/remove`, { paymentIds });
+    mutate();
   }
 
   if (isLoading && !dashboard) {
@@ -330,7 +540,7 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
     return <p className="text-brand-400 text-sm">Shop not found.</p>;
   }
 
-  const { shop, overallSummary, filteredSummary, orders, items, paymentLedger } = dashboard;
+  const { shop, overallSummary, filteredSummary, orders, items, paymentLedger, orderLedger } = dashboard;
   const hasFilters = Object.keys(applied).length > 0;
 
   return (
@@ -386,8 +596,11 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
         <PaymentLedgerPanel
           summary={filteredSummary}
           ledger={paymentLedger}
-          canAdd={hasRole('ADMIN')}
+          orderLedger={orderLedger ?? []}
+          canEdit={hasRole('ADMIN')}
           onAddPayment={handleAddPayment}
+          onUpdatePayment={handleUpdatePayment}
+          onRemovePayment={handleRemovePayment}
         />
       </div>
 

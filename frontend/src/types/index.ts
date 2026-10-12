@@ -234,6 +234,20 @@ export interface ShopLedgerRow {
   amount: number;
   mode: string | null;
   balance: number;
+  // The per-order rows this one shop payment was split into - sent back to
+  // edit or remove it.
+  paymentIds: string[];
+}
+
+// One order on the shop statement (debit side of the Payment Ledger).
+export interface ShopOrderLedgerRow {
+  orderId: string;
+  date: string;
+  ref: string | null;
+  particulars: string;
+  total: number;
+  balance: number;
+  status: string;
 }
 
 export interface ShopDashboardResult {
@@ -243,6 +257,7 @@ export interface ShopDashboardResult {
   orders: PaginatedResult<PartyOrder>;
   items: ShopSupplyRow[];
   paymentLedger: ShopLedgerRow[];
+  orderLedger: ShopOrderLedgerRow[];
 }
 
 export interface SupplierSummary {

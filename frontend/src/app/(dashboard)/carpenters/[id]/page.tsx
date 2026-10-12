@@ -7,6 +7,8 @@ import { fetcher } from '@/lib/swr';
 import { api, ApiError, getAccessToken } from '@/lib/api';
 import { lookupModelNo, sanitizeModelNo, type ModelNoLookup } from '@/lib/modelNoLookup';
 import { ModelNoHint } from '@/components/ModelNoHint';
+import { ProductSelector } from '@/components/ProductSelector';
+import type { CompanyProductEntry } from '@/lib/companyProducts';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 import { useAuth } from '@/context/AuthContext';
@@ -109,6 +111,28 @@ function CarpenterDetailContent() {
       return { ...f, productName: pick('productName'), category: pick('category'), size: pick('size') };
     });
   }
+  // Picking from the company product list (same dropdown as the Customer /
+  // Party Order forms) - always available, Model No typed or not. Fills
+  // the name, and category / size / price only where they're still empty.
+  function pickWorkProduct(entry: CompanyProductEntry) {
+    setWorkForm((f) => ({
+      ...f,
+      productName: entry.name,
+      category: f.category || entry.category,
+      size: f.size || entry.size || '',
+      price: f.price || String(entry.price),
+    }));
+  }
+  function pickEditProduct(entry: CompanyProductEntry) {
+    setEditForm((f) => ({
+      ...f,
+      productName: entry.name,
+      category: f.category || entry.category,
+      size: f.size || entry.size || '',
+      price: f.price || String(entry.price),
+    }));
+  }
+
   async function onEditModelNo(raw: string) {
     const modelNo = sanitizeModelNo(raw);
     setEditForm((f) => ({ ...f, modelNo }));
@@ -649,7 +673,13 @@ Please confirm receipt.`,
               <input className="input" placeholder="Model No." value={workForm.modelNo} onChange={(e) => onWorkModelNo(e.target.value)} />
               <ModelNoHint result={workLookup} />
             </div>
-            <input className="input" placeholder="Product Name" required value={workForm.productName} onChange={(e) => setWorkForm((f) => ({ ...f, productName: e.target.value }))} />
+            <ProductSelector
+              value={workForm.productName}
+              onChangeName={(v) => setWorkForm((f) => ({ ...f, productName: v }))}
+              onSelect={pickWorkProduct}
+              placeholder="Product Name"
+              required
+            />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <input className="input" placeholder="Category (BOTTOM COT / FULL BOX)" value={workForm.category} onChange={(e) => setWorkForm((f) => ({ ...f, category: e.target.value }))} />
@@ -984,7 +1014,13 @@ Please confirm receipt.`,
               </div>
               <div>
                 <label className="label">Product Name</label>
-                <input className="input" required value={editForm.productName} onChange={(e) => setEditForm((f) => ({ ...f, productName: e.target.value }))} />
+                <ProductSelector
+                  value={editForm.productName}
+                  onChangeName={(v) => setEditForm((f) => ({ ...f, productName: v }))}
+                  onSelect={pickEditProduct}
+                  placeholder="Product Name"
+                  required
+                />
               </div>
               <div>
                 <label className="label">Category</label>
