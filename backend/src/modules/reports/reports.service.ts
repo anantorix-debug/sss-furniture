@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildOverview } from './reports-overview';
 
 function dateRange(from?: string, to?: string) {
   if (!from && !to) return undefined;
@@ -9,6 +10,10 @@ function dateRange(from?: string, to?: string) {
 @Injectable()
 export class ReportsService {
   constructor(private prisma: PrismaService) {}
+
+  overview(params: { from?: string; to?: string }) {
+    return buildOverview(this.prisma, params);
+  }
 
   async salesReport(params: { from?: string; to?: string; channel?: 'CUSTOMER' | 'PARTY' | 'ALL' }) {
     const range = dateRange(params.from, params.to);

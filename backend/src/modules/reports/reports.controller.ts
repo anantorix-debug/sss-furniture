@@ -15,6 +15,13 @@ import { Role } from '../../common/enums/role.enum';
 export class ReportsController {
   constructor(private service: ReportsService) {}
 
+  // The Reports dashboard (plain-language KPIs, trend, who owes / who we
+  // owe, best sellers, production) - see reports-overview.ts.
+  @Get('overview')
+  overview(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.service.overview({ from, to });
+  }
+
   @Get('sales')
   sales(@Query('from') from?: string, @Query('to') to?: string, @Query('channel') channel?: 'CUSTOMER' | 'PARTY' | 'ALL') {
     return this.service.salesReport({ from, to, channel });
