@@ -699,8 +699,57 @@ model Carpenter {
   payments      CarpenterPayment[]
   weeklyLabours WeeklyLabour[]
   expenses      Expense[]
+  kyc           WorkerKyc?
+  documents     WorkerDocument[]
 
   @@map("carpenters")
+}
+
+// Worker identity + bank details (Aadhaar, PAN, bank account). Kept in its
+// own table - never on Carpenter - so the worker list/detail endpoints
+// (which worker logins can read) can't return them by accident. Read and
+// written only through WorkerKycService, Admin and above.
+model WorkerKyc {
+  carpenterId       String    @id
+  carpenter         Carpenter @relation(fields: [carpenterId], references: [id], onDelete: Cascade)
+  aadhaarNumber     String?   @unique // 12 digits, no spaces
+  panNumber         String?   @unique // e.g. ABCDE1234F
+  bankAccountHolder String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankName          String?
+  bankBranch        String?
+  updatedById       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("worker_kyc")
+}
+
+enum WorkerDocumentKind {
+  AADHAAR
+  PAN
+  BANK
+}
+
+// An uploaded ID / bank proof file (PDF or image, max 5 MB). The file
+// lives in backend/private-uploads/worker-docs - never under the public
+// /uploads folder - and is only served through the Admin-only download
+// endpoint.
+model WorkerDocument {
+  id           String             @id @default(cuid())
+  carpenterId  String
+  carpenter    Carpenter          @relation(fields: [carpenterId], references: [id], onDelete: Cascade)
+  kind         WorkerDocumentKind
+  fileName     String // original name, for display
+  storedName   String             @unique // random name on disk
+  mimeType     String
+  size         Int
+  uploadedById String?
+  createdAt    DateTime           @default(now())
+
+  @@index([carpenterId])
+  @@map("worker_documents")
 }
 
 // Named grouping of workers within one category (Carpenter/Carving/Polish) -

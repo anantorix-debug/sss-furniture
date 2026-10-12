@@ -8,6 +8,7 @@ import { api, ApiError, getAccessToken } from '@/lib/api';
 import { lookupModelNo, sanitizeModelNo, type ModelNoLookup } from '@/lib/modelNoLookup';
 import { ModelNoHint } from '@/components/ModelNoHint';
 import { ProductSelector } from '@/components/ProductSelector';
+import { WorkerKycPanel } from '@/components/WorkerKyc';
 import type { CompanyProductEntry } from '@/lib/companyProducts';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
@@ -892,6 +893,9 @@ Please confirm receipt.`,
       </div>
       </div>
       </div>
+
+      {/* Aadhaar / PAN / bank details + ID documents - Admin and above only. */}
+      {canEdit && <WorkerKycPanel carpenterId={id} />}
 
       {payEdit && (
         <Modal title="Edit Payment" onClose={() => setPayEdit(null)}>

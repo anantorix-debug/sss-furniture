@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { fetcher } from '@/lib/swr';
@@ -13,6 +13,21 @@ import { UpdateModelNoModal } from '@/components/UpdateModelNoModal';
 import { BalanceBadge, Chip, StatusBadge, type ChipColor } from '@/components/StatusBadge';
 import type { CarpenterSummary, WorkerType, CustomerOrder, PartyOrder, User, ProductionTeam } from '@/types';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
+import { KycFields, WorkerDocuments } from '@/components/WorkerKyc';
+import {
+  DOC_KIND_LABEL,
+  emptyKycForm,
+  kycFormFrom,
+  kycFormHasData,
+  kycPayload,
+  uploadWorkerDocument,
+  validateKycForm,
+  validateWorkerDocFile,
+  WORKER_DOC_ACCEPT,
+  type KycForm,
+  type WorkerDocumentKind,
+  type WorkerKyc,
+} from '@/lib/workerKyc';
 
 const emptyWorkerForm = { name: '', phone: '', workerType: 'CARPENTER' as WorkerType, userId: '', teamId: '' };
 
@@ -82,10 +97,35 @@ export default function CarpentersPage() {
   const [teamForm, setTeamForm] = useState({ name: '', headUserId: '' });
   const [teamError, setTeamError] = useState<string | null>(null);
   const [teamSubmitting, setTeamSubmitting] = useState(false);
+  // ID & bank details (Aadhaar / PAN / bank account) - saved through the
+  // separate Admin-only /carpenters/:id/kyc endpoint after the worker
+  // itself. Files picked on a new worker are uploaded once it exists.
+  const [kycForm, setKycForm] = useState<KycForm>(emptyKycForm);
+  const [kycTouched, setKycTouched] = useState(false);
+  const [stagedDocs, setStagedDocs] = useState<{ kind: WorkerDocumentKind; file: File }[]>([]);
+  const { data: editingKyc, mutate: mutateEditingKyc } = useSWR<WorkerKyc>(formOpen && editing ? `/carpenters/${editing.id}/kyc` : null, fetcher);
+  useEffect(() => {
+    if (editingKyc && !kycTouched) setKycForm(kycFormFrom(editingKyc));
+  }, [editingKyc, kycTouched]);
+
+  function stageDocs(kind: WorkerDocumentKind, files: FileList | null) {
+    if (!files?.length) return;
+    const list = Array.from(files);
+    const bad = list.map(validateWorkerDocFile).find(Boolean);
+    if (bad) {
+      setError(bad);
+      return;
+    }
+    setError(null);
+    setStagedDocs((d) => [...d, ...list.map((file) => ({ kind, file }))]);
+  }
 
   function openCreate() {
     setEditing(null);
     setForm(emptyWorkerForm);
+    setKycForm(emptyKycForm);
+    setKycTouched(false);
+    setStagedDocs([]);
     setError(null);
     setTeamMode('view');
     setFormOpen(true);
@@ -94,6 +134,9 @@ export default function CarpentersPage() {
   function openEditWorker(w: CarpenterSummary) {
     setEditing(w);
     setForm({ name: w.name, phone: w.phone ?? '', workerType: w.workerType, userId: w.user?.id ?? '', teamId: w.team?.id ?? '' });
+    setKycForm(emptyKycForm);
+    setKycTouched(false);
+    setStagedDocs([]);
     setError(null);
     setTeamMode('view');
     setFormOpen(true);
@@ -151,7 +194,13 @@ export default function CarpentersPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    const kycInvalid = validateKycForm(kycForm);
+    if (kycInvalid) {
+      setError(kycInvalid);
+      return;
+    }
     setSubmitting(true);
+    let workerId = editing?.id ?? null;
     try {
       if (editing) {
         // Always send userId/teamId explicitly (even when clearing back to
@@ -164,18 +213,45 @@ export default function CarpentersPage() {
           teamId: form.teamId || null,
         });
       } else {
-        await api.post('/carpenters', {
+        const created = await api.post<CarpenterSummary>('/carpenters', {
           name: form.name,
           phone: form.phone || undefined,
           workerType: form.workerType,
           userId: form.userId || undefined,
           teamId: form.teamId || undefined,
         });
+        workerId = created.id;
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to save worker');
+      setSubmitting(false);
+      return;
+    }
+    const pending = [...stagedDocs];
+    try {
+      if (workerId && (kycTouched || (!editing && kycFormHasData(kycForm)))) {
+        await api.put(`/carpenters/${workerId}/kyc`, kycPayload(kycForm));
+      }
+      if (workerId) {
+        while (pending.length) {
+          await uploadWorkerDocument(workerId, pending[0].kind, pending[0].file);
+          pending.shift();
+        }
+        setStagedDocs([]);
       }
       setFormOpen(false);
       mutate();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to save worker');
+      // The worker itself is saved - keep the form open on that worker so
+      // the details / files can be fixed and saved again.
+      const reason = err instanceof ApiError ? err.message : 'unknown error';
+      setError(`Worker saved, but the ID/bank details were not: ${reason}`);
+      setStagedDocs(pending);
+      mutate();
+      if (!editing && workerId) {
+        const saved = (await api.get<CarpenterSummary>(`/carpenters/${workerId}`).catch(() => null)) ?? null;
+        if (saved) setEditing(saved);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -496,6 +572,65 @@ export default function CarpentersPage() {
               </select>
               <p className="text-xs text-brand-400 mt-1">Links this payee to their own login so their jobs show up on their My Work page.</p>
             </div>
+
+            <details className="border border-brand-100 rounded-lg">
+              <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-brand-900">
+                ID &amp; Bank Details (optional) - Aadhaar, PAN, bank account
+              </summary>
+              <div className="px-3 pb-3 pt-1 space-y-4">
+                <KycFields
+                  value={kycForm}
+                  onChange={(next) => {
+                    setKycForm(next);
+                    setKycTouched(true);
+                  }}
+                />
+                <div>
+                  <p className="label">Documents</p>
+                  {editing ? (
+                    editingKyc ? (
+                      <WorkerDocuments carpenterId={editing.id} documents={editingKyc.documents} onChanged={() => mutateEditingKyc()} />
+                    ) : (
+                      <p className="text-xs text-brand-400">Loading...</p>
+                    )
+                  ) : (
+                    <div className="space-y-2">
+                      {(['AADHAAR', 'PAN', 'BANK'] as WorkerDocumentKind[]).map((kind) => (
+                        <div key={kind} className="flex items-center justify-between gap-2 border border-brand-100 rounded-lg px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-brand-900">{DOC_KIND_LABEL[kind]}</p>
+                            {stagedDocs
+                              .filter((d) => d.kind === kind)
+                              .map((d, i) => (
+                                <p key={`${d.file.name}-${i}`} className="text-xs text-brand-500 truncate">
+                                  {d.file.name}{' '}
+                                  <button type="button" className="text-red-500 hover:underline" onClick={() => setStagedDocs((all) => all.filter((x) => x !== d))}>
+                                    remove
+                                  </button>
+                                </p>
+                              ))}
+                          </div>
+                          <label className="btn-secondary text-xs px-3 py-1.5 cursor-pointer whitespace-nowrap">
+                            + Add file
+                            <input
+                              type="file"
+                              className="hidden"
+                              accept={WORKER_DOC_ACCEPT}
+                              multiple
+                              onChange={(e) => {
+                                stageDocs(kind, e.target.files);
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-brand-400">PDF, JPG, PNG or WEBP - up to 5 MB each. Uploaded when you press Create.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </details>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>

@@ -9,6 +9,7 @@ import { AuditService } from '../audit/audit.service';
 import { PdfService } from '../pdf/pdf.service';
 import { escapeHtml, REPORT_PDF_STYLES, renderReportHeader, renderGeneratedFooter } from '../../common/utils/pdf-report.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { WorkerKycService } from './worker-kyc.service';
 import { CreateCarpenterDto } from './dto/create-carpenter.dto';
 import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
 import { CreateWorkItemDto } from './dto/create-work-item.dto';
@@ -65,6 +66,7 @@ export class CarpenterService {
     private notifications: NotificationsService,
     private pdf: PdfService,
     private modelNos: ModelNoService,
+    private kyc: WorkerKycService,
   ) {}
 
   // --- Carpenters ------------------------------------------------------
@@ -350,6 +352,7 @@ export class CarpenterService {
       }
     }
 
+    await this.kyc.purge(id);
     await this.prisma.carpenter.delete({ where: { id } });
     return { success: true };
   }

@@ -10,3 +10,4 @@ coverage/
 *.tsbuildinfo
 backend/uploads/
 frontend/public/build-version.txt
+backend/private-uploads/

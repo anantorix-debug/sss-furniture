@@ -1,7 +1,11 @@
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBody, ApiConsumes } from '@nestjs/swagger';
 import { Response } from 'express';
 import { CarpenterService } from './carpenter.service';
+import { WORKER_DOC_MAX_BYTES, WorkerKycService } from './worker-kyc.service';
+import { UpdateWorkerKycDto } from './dto/update-worker-kyc.dto';
 import { CreateCarpenterDto } from './dto/create-carpenter.dto';
 import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
 import { CreateWorkItemDto } from './dto/create-work-item.dto';
@@ -25,7 +29,53 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 @ApiBearerAuth()
 @Controller()
 export class CarpenterController {
-  constructor(private service: CarpenterService) {}
+  constructor(
+    private service: CarpenterService,
+    private kyc: WorkerKycService,
+  ) {}
+
+  // --- Worker ID & bank details (Aadhaar, PAN, bank account) -------------
+  // Admin and above only. Never part of the /carpenters list/detail
+  // responses, which worker logins can read.
+
+  @Roles(Role.ADMIN)
+  @Get('carpenters/:id/kyc')
+  getWorkerKyc(@Param('id') id: string) {
+    return this.kyc.get(id);
+  }
+
+  @Roles(Role.ADMIN)
+  @Put('carpenters/:id/kyc')
+  updateWorkerKyc(@Param('id') id: string, @Body() dto: UpdateWorkerKycDto, @CurrentUser() user: AuthUser) {
+    return this.kyc.update(id, dto, user.userId);
+  }
+
+  // Aadhaar / PAN / bank proof - PDF, JPG, PNG or WEBP, max 5 MB.
+  @Roles(Role.ADMIN)
+  @Post('carpenters/:id/documents')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { kind: { type: 'string', enum: ['AADHAAR', 'PAN', 'BANK'] }, file: { type: 'string', format: 'binary' } } } })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: WORKER_DOC_MAX_BYTES, files: 1 } }))
+  addWorkerDocument(@Param('id') id: string, @Body('kind') kind: string, @UploadedFile() file: Express.Multer.File, @CurrentUser() user: AuthUser) {
+    return this.kyc.addDocument(id, kind, file, user.userId);
+  }
+
+  @Roles(Role.ADMIN)
+  @Get('carpenters/:id/documents/:documentId')
+  async viewWorkerDocument(@Param('id') id: string, @Param('documentId') documentId: string, @CurrentUser() user: AuthUser, @Res() res: Response) {
+    const { buffer, mimeType, fileName } = await this.kyc.readDocument(id, documentId, user.userId);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${fileName.replace(/"/g, '')}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(buffer);
+  }
+
+  @Roles(Role.ADMIN)
+  @Delete('carpenters/:id/documents/:documentId')
+  removeWorkerDocument(@Param('id') id: string, @Param('documentId') documentId: string, @CurrentUser() user: AuthUser) {
+    return this.kyc.removeDocument(id, documentId, user.userId);
+  }
 
   // Carpenters
 
