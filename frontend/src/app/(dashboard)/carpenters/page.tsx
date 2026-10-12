@@ -456,7 +456,7 @@ export default function CarpentersPage() {
       )}
 
       {formOpen && (
-        <Modal title={editing ? `Edit ${editing.name}` : 'New Worker'} onClose={() => setFormOpen(false)}>
+        <Modal title={editing ? `Edit ${editing.name}` : 'New Worker'} onClose={() => setFormOpen(false)} wide>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="label">Name</label>
@@ -595,8 +595,9 @@ export default function CarpentersPage() {
                     )
                   ) : (
                     <div className="space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       {(['AADHAAR', 'PAN', 'BANK'] as WorkerDocumentKind[]).map((kind) => (
-                        <div key={kind} className="flex items-center justify-between gap-2 border border-brand-100 rounded-lg px-3 py-2">
+                        <div key={kind} className="flex flex-col justify-between gap-2 border border-brand-100 rounded-lg px-3 py-2">
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-brand-900">{DOC_KIND_LABEL[kind]}</p>
                             {stagedDocs
@@ -610,7 +611,7 @@ export default function CarpentersPage() {
                                 </p>
                               ))}
                           </div>
-                          <label className="btn-secondary text-xs px-3 py-1.5 cursor-pointer whitespace-nowrap">
+                          <label className="btn-secondary text-xs px-3 py-1.5 cursor-pointer whitespace-nowrap self-start">
                             + Add file
                             <input
                               type="file"
@@ -625,6 +626,7 @@ export default function CarpentersPage() {
                           </label>
                         </div>
                       ))}
+                      </div>
                       <p className="text-[11px] text-brand-400">PDF, JPG, PNG or WEBP - up to 5 MB each. Uploaded when you press Create.</p>
                     </div>
                   )}
