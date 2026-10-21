@@ -1336,6 +1336,10 @@ export class PartyOrdersService {
       paymentStatus?: 'SETTLED' | 'DUE';
       viewerRole?: Role;
     },
+    // 'products' = Product Supply Details box only, 'ledger' = Payment
+    // Ledger box only (statement format, like Purchasing > Supplier),
+    // omitted = the full report (both).
+    section?: 'products' | 'ledger',
   ): Promise<Buffer> {
     const shop = await this.prisma.shop.findUnique({ where: { id: shopId } });
     if (!shop) throw new NotFoundException('Shop not found');
@@ -1345,6 +1349,8 @@ export class PartyOrdersService {
     const summary = summarizeShopOrders(shop, filteredOrders);
     const supplyRows = buildSupplyRows(filteredOrders, hide);
     const ledgerRows = buildPaymentLedger(filteredOrders, summary.totalValue, hide);
+
+    if (section === 'ledger') return this.renderShopStatementPdf(shop, params, filteredOrders, hide);
 
     const rupees = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
@@ -1385,7 +1391,7 @@ export class PartyOrdersService {
       'Payment Status': params.paymentStatus,
     });
 
-    const paymentSection = hide
+    const paymentSection = hide || section === 'products'
       ? ''
       : `<h2 style="font-size:14px;margin:22px 0 10px">Payment Details</h2>
     <div class="summary">
@@ -1419,6 +1425,96 @@ export class PartyOrdersService {
   </div>
 </body></html>`;
     return this.pdf.renderHtmlToPdf(html);
+  }
+
+  // Payment Ledger box as a PDF - the same running statement the screen
+  // shows: every order (adds to what the shop owes) and every payment
+  // (reduces it), oldest first, with Txn Bal. per order and a running
+  // Balance, plus a Total row. Same layout as the supplier Party Statement.
+  private async renderShopStatementPdf(
+    shop: { name: string; contactPhone?: string | null },
+    params: { status?: string; search?: string; dateFrom?: string; dateTo?: string; paymentStatus?: 'SETTLED' | 'DUE' },
+    filteredOrders: any[],
+    hide: boolean,
+  ): Promise<Buffer> {
+    const rupees = (n: number) => `${n < 0 ? '-' : ''}₹${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const fmt = (d: Date) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const day = (d: Date) => new Date(d).toISOString().slice(0, 10);
+
+    type Row =
+      | { kind: 'order'; date: Date; ref: string; amount: number; detail: string; txnBal: number; cancelled: boolean }
+      | { kind: 'payment'; date: Date; ref: string; amount: number; detail: string };
+    const summary = summarizeShopOrders(shop as any, filteredOrders);
+    const rows: Row[] = hide
+      ? []
+      : [
+          ...buildOrderLedger(filteredOrders, false).map((o) => ({ kind: 'order' as const, date: o.date, ref: o.ref ?? '-', amount: o.total, detail: o.particulars, txnBal: o.balance, cancelled: o.status === 'CANCELLED' })),
+          ...buildPaymentLedger(filteredOrders, summary.totalValue, false).map((p) => ({ kind: 'payment' as const, date: p.date, ref: p.voucherNo ?? '-', amount: p.amount, detail: p.mode ?? '-' })),
+        ].sort((a, b) => day(a.date).localeCompare(day(b.date)) || (a.kind === b.kind ? 0 : a.kind === 'order' ? -1 : 1));
+
+    let balance = 0;
+    const body = rows
+      .map((r) => {
+        balance += r.kind === 'order' ? r.amount : -r.amount;
+        const tint = r.kind === 'payment' ? 'background:#f0fdf4' : '';
+        const main = `<tr style="${tint}">
+          <td>${fmt(r.date)}</td>
+          <td style="font-weight:600">${r.kind === 'payment' ? 'Payment' : r.cancelled ? 'Order (Cancelled)' : 'Order'}</td>
+          <td style="white-space:nowrap">${escapeHtml(r.ref)}</td>
+          <td style="text-align:right">${rupees(r.amount)}</td>
+          <td style="text-align:right">${rupees(r.kind === 'payment' ? r.amount : 0)}</td>
+          <td style="text-align:right">${r.kind === 'order' ? rupees(r.txnBal) : ''}</td>
+          <td style="text-align:right;font-weight:600">${rupees(balance)}</td>
+        </tr>`;
+        const sub = `<tr style="${tint}"><td></td><td colspan="6" style="font-size:10.5px;color:#6b7280;padding-top:0">${
+          r.kind === 'payment' ? `<b>Payment Type:</b> ${escapeHtml(r.detail)}` : escapeHtml(r.detail)
+        }</td></tr>`;
+        return main + sub;
+      })
+      .join('');
+    const ordered = rows.filter((r) => r.kind === 'order').reduce((t, r) => t + r.amount, 0);
+    const paid = rows.filter((r) => r.kind === 'payment').reduce((t, r) => t + r.amount, 0);
+
+    const filterSummary = renderFilterSummary({
+      Search: params.search,
+      Status: params.status ? params.status.replace(/_/g, ' ') : undefined,
+      'Date From': params.dateFrom ? new Date(params.dateFrom).toLocaleDateString('en-IN') : undefined,
+      'Date To': params.dateTo ? new Date(params.dateTo).toLocaleDateString('en-IN') : undefined,
+      'Payment Status': params.paymentStatus,
+    });
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<style>${REPORT_PDF_STYLES}</style></head>
+<body>
+  <div class="header">
+    <h1>${escapeHtml(shop.name)}</h1>
+    <p>SSS Furniture${shop.contactPhone ? ` &middot; ${escapeHtml(shop.contactPhone)}` : ''} &middot; Payment Ledger</p>
+  </div>
+  <div class="body">
+    <h2 style="text-align:center;font-size:18px;margin:4px 0 14px;text-decoration:underline">Party Statement - Payment Ledger</h2>
+    ${filterSummary}
+    ${
+      hide
+        ? '<p style="color:#6b7280">Payment details are not visible for your role.</p>'
+        : `<div class="summary">
+      <div><div class="label">Total Order Value</div><div class="value">${rupees(summary.totalValue)}</div></div>
+      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">${rupees(summary.totalPaid)}</div></div>
+      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">${rupees(summary.balanceDue)}</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Date</th><th>Txn Type</th><th>Ref No.</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Txn Bal.</th><th style="text-align:right">Balance</th></tr></thead>
+      <tbody>
+        ${body || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">No orders or payments</td></tr>'}
+        ${rows.length ? `<tr style="font-weight:bold;background:#e5e7eb"><td></td><td>Total</td><td></td><td style="text-align:right">${rupees(ordered)}</td><td style="text-align:right">${rupees(paid)}</td><td></td><td style="text-align:right">${rupees(balance)}</td></tr>` : ''}
+      </tbody>
+    </table>`
+    }
+    ${renderGeneratedFooter(rows.length, 'transaction')}
+    <img src="${getPdfFooterDataUri()}" alt="SSS Furniture" style="display:block;width:100%;margin-top:18px;break-inside:avoid" />
+  </div>
+</body></html>`;
+    return this.pdf.renderHtmlToPdf(html, { pageNumbers: true });
   }
 
   // Same filtered Product Supply Details rows as generateShopPdf, as CSV -

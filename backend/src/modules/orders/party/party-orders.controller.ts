@@ -195,18 +195,26 @@ export class PartyOrdersController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('paymentStatus') paymentStatus?: 'SETTLED' | 'DUE',
+    // products = Product Supply Details only, ledger = Payment Ledger only;
+    // omit for the full report.
+    @Query('section') section?: 'products' | 'ledger',
     @CurrentUser() user?: AuthUser,
   ) {
-    const buffer = await this.service.generateShopPdf(shopId, {
-      status,
-      search,
-      dateFrom,
-      dateTo,
-      paymentStatus,
-      viewerRole: user?.role as Role,
-    });
+    const part = section === 'products' || section === 'ledger' ? section : undefined;
+    const buffer = await this.service.generateShopPdf(
+      shopId,
+      {
+        status,
+        search,
+        dateFrom,
+        dateTo,
+        paymentStatus,
+        viewerRole: user?.role as Role,
+      },
+      part,
+    );
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="party-orders-${shopId}-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="party-orders-${shopId}${part ? `-${part}` : ''}-${new Date().toISOString().slice(0, 10)}.pdf"`);
     res.send(buffer);
   }
 

@@ -40,12 +40,15 @@ const PAYMENT_STATUS_OPTIONS = [
 // table's row count and totals always agree with the PDF/Excel export for
 // the same filters). price/value columns are omitted entirely (not zeroed)
 // for viewers who can't see financials.
-function ProductSupplyTable({ rows }: { rows: ShopDashboardResult['items'] }) {
+function ProductSupplyTable({ rows, onDownloadPdf, downloading }: { rows: ShopDashboardResult['items']; onDownloadPdf: () => void; downloading: boolean }) {
   const hasFinancials = rows.some((r) => r.value !== undefined) || rows.length === 0;
   return (
     <div className="card p-0 overflow-hidden">
-      <div className="px-4 py-3 border-b border-brand-100">
-        <h2 className="text-sm font-semibold text-brand-900">Product Supply Details</h2>
+      <div className="px-4 py-3 border-b border-brand-100 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-brand-900 whitespace-nowrap">Product Supply Details</h2>
+        <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={onDownloadPdf} disabled={downloading}>
+          {downloading ? 'Preparing...' : 'Download Products PDF'}
+        </button>
       </div>
       {/* Long lists scroll inside the box (header stays visible) instead of
           stretching the page. */}
@@ -124,7 +127,11 @@ function PaymentLedgerPanel({
   onAddPayment,
   onUpdatePayment,
   onRemovePayment,
+  onDownloadPdf,
+  downloading,
 }: {
+  onDownloadPdf: () => void;
+  downloading: boolean;
   summary: ShopSummary;
   ledger: ShopDashboardResult['paymentLedger'];
   orderLedger: ShopDashboardResult['orderLedger'];
@@ -227,6 +234,9 @@ function PaymentLedgerPanel({
     <div className="card p-5">
       <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-brand-100">
         <h2 className="font-semibold text-brand-900 whitespace-nowrap">Payment Ledger</h2>
+        <button type="button" className="btn-secondary text-xs px-3 py-1.5" onClick={onDownloadPdf} disabled={downloading}>
+          {downloading ? 'Preparing...' : 'Download Ledger PDF'}
+        </button>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-2 text-sm">
         <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
@@ -451,6 +461,30 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
     setPage(1);
   }
 
+  // section: 'products' / 'ledger' = just that box (with the filters
+  // applied on screen); omitted = the full report.
+  const [downloadingSection, setDownloadingSection] = useState<'products' | 'ledger' | null>(null);
+  async function downloadSectionPdf(section: 'products' | 'ledger') {
+    setDownloadingSection(section);
+    try {
+      const token = getAccessToken();
+      const params = new URLSearchParams({ ...applied, section });
+      const res = await fetch(`${API_BASE_URL}/party-orders/shops-summary/${shopId}/pdf?${params}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Could not create the PDF');
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${dashboard?.shop.name ?? shopId}-${section === 'ledger' ? 'payment-ledger' : 'products'}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingSection(null);
+    }
+  }
+
   async function downloadListPdf() {
     setDownloadingList(true);
     try {
@@ -592,7 +626,7 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
       {hasFilters && <p className="text-xs text-brand-500 -mt-3">Showing filtered results only. Reset to view the shop&apos;s complete data.</p>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        <ProductSupplyTable rows={items} />
+        <ProductSupplyTable rows={items} onDownloadPdf={() => downloadSectionPdf('products')} downloading={downloadingSection !== null} />
         <PaymentLedgerPanel
           summary={filteredSummary}
           ledger={paymentLedger}
@@ -601,6 +635,8 @@ function ShopDashboardContent({ shopId }: { shopId: string }) {
           onAddPayment={handleAddPayment}
           onUpdatePayment={handleUpdatePayment}
           onRemovePayment={handleRemovePayment}
+          onDownloadPdf={() => downloadSectionPdf('ledger')}
+          downloading={downloadingSection !== null}
         />
       </div>
 
