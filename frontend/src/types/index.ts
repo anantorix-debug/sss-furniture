@@ -256,6 +256,10 @@ export interface ShopLedgerRow {
   // The per-order rows this one shop payment was split into - sent back to
   // edit or remove it.
   paymentIds: string[];
+  // Part of this payment stored against Old Balance orders.
+  oldAmount?: number;
+  // Job Nos of the orders this payment was applied to.
+  orderRefs?: string[];
 }
 
 // One order on the shop statement (debit side of the Payment Ledger).

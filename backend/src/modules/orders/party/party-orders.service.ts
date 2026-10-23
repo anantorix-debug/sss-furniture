@@ -211,6 +211,11 @@ function buildSupplyRows(
 // running balance after that payment (totalOrderValue minus every payment
 // up to and including this one). Never shown to HIDE_FINANCIALS_FOR roles -
 // same rule as every other money field on this dashboard.
+// An Old Balance order (its product / model text says OLD BALANCE etc).
+function isOldOrder(o: any): boolean {
+  return isOldBalance(o.model) || (o.items ?? []).some((i: any) => isOldBalance(i.productName));
+}
+
 function buildPaymentLedger(orders: any[], totalOrderValue: number, hide: boolean) {
   if (hide) return [];
   const raw = orders.flatMap((o) =>
@@ -221,6 +226,9 @@ function buildPaymentLedger(orders: any[], totalOrderValue: number, hide: boolea
       amount: Number(p.amount ?? 0),
       mode: (p.mode as string | null) ?? null,
       paymentIds: [p.id as string],
+      // Part of this payment stored against an Old Balance order.
+      oldAmount: isOldOrder(o) ? Number(p.amount ?? 0) : 0,
+      orderRefs: [((o.jobNumber as string | null) ?? '-') as string],
     })),
   );
   // One shop-level payment is stored as several per-order rows (see
@@ -232,8 +240,10 @@ function buildPaymentLedger(orders: any[], totalOrderValue: number, hide: boolea
     const existing = merged.get(key);
     if (existing) {
       existing.amount += r.amount;
+      existing.oldAmount += r.oldAmount;
       existing.paymentIds.push(...r.paymentIds);
-    } else merged.set(key, { ...r, paymentIds: [...r.paymentIds] });
+      existing.orderRefs.push(...r.orderRefs);
+    } else merged.set(key, { ...r, paymentIds: [...r.paymentIds], orderRefs: [...r.orderRefs] });
   }
   const rows = [...merged.values()];
   rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
@@ -764,14 +774,22 @@ export class PartyOrdersService {
     dto: { date: string; amount: number; mode?: string; note?: string },
     userId: string,
     replace: { id: string; orderId: string; amount: number }[] = [],
+    orderId?: string,
   ) {
     const shop = await this.prisma.shop.findUnique({ where: { id: shopId } });
     if (!shop) throw new NotFoundException('Shop not found');
 
-    const orders = (await this.getFilteredOrders({ shopId }))
-      .filter((o) => o.deliveryStatus !== 'CANCELLED')
-      .sort((a, b) => a.orderDate.getTime() - b.orderDate.getTime());
-    if (orders.length === 0) throw new BadRequestException('This shop has no orders to record a payment against');
+    // Automatic: current orders only (oldest first) - the Old Balance is
+    // kept separate and is paid only when chosen ("Pay for" an Old Balance
+    // order, orderId). Old Balance orders are used automatically only if
+    // the shop has no current orders at all.
+    const all = (await this.getFilteredOrders({ shopId })).filter((o) => o.deliveryStatus !== 'CANCELLED');
+    if (all.length === 0) throw new BadRequestException('This shop has no orders to record a payment against');
+    if (orderId && !all.some((o) => o.id === orderId)) throw new BadRequestException('That order does not belong to this shop (or is cancelled)');
+    const currentOrders = all.filter((o) => !isOldOrder(o));
+    const orders = orderId
+      ? all.filter((o) => o.id === orderId)
+      : (currentOrders.length ? currentOrders : all).sort((a, b) => a.orderDate.getTime() - b.orderDate.getTime());
 
     // When editing, the payment being replaced no longer counts towards
     // what each order still owes.
@@ -1403,6 +1421,7 @@ export class PartyOrdersService {
             title: 'Payment',
             ref: p.voucherNo ?? '-',
             detail: `Payment Type: ${p.mode ?? '-'}`,
+            fixedOld: p.oldAmount,
           })),
         ];
 

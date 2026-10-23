@@ -7,9 +7,10 @@
 //                        folded into one "Brought forward" row.
 //   Current ledger     - newer orders/purchases and payments, with its own
 //                        running balance starting from zero.
-// Payments clear the old balance first (oldest first); the part of a
-// payment that went to the old balance is shown on that payment's row and
-// does not reduce the current balance.
+// The two never mix: a payment reduces the current running balance, like
+// a simple running notebook. The Old Balance goes down only by payments
+// recorded for it (party shops: "Pay for" an Old Balance order; suppliers:
+// a payment whose text says OLD BALANCE).
 
 const OLD_BALANCE_RE = /\b(OLD\s*BAL(ANCE)?|OPENING\s*BAL(ANCE)?|BROUGHT\s*FORWARD|B\s*\/\s*F)\b/i;
 
@@ -23,6 +24,9 @@ export interface LedgerEntry<T> {
   amount: number;
   debit: boolean; // order / purchase (adds to what is owed)
   old: boolean; // an Old Balance entry
+  // Payments only: the part actually stored against Old Balance (party
+  // shops, where each payment is split across orders). Used as-is when set.
+  fixedOld?: number;
   data: T;
 }
 
@@ -77,7 +81,7 @@ export function buildLedger<T>(entries: LedgerEntry<T>[], range: { from?: string
   }
   const oldTotal = r2(oldEntries.reduce((t, e) => t + signed(e), 0));
 
-  // ---- Current ledger; payments clear the old balance first
+  // ---- Current ledger
   let oldLeft = Math.max(0, oldTotal);
   let running = 0;
   let newDebits = 0;
@@ -91,7 +95,7 @@ export function buildLedger<T>(entries: LedgerEntry<T>[], range: { from?: string
       running += e.amount;
     } else {
       paid += e.amount;
-      towardsOld = Math.min(oldLeft, e.amount);
+      towardsOld = Math.min(e.fixedOld ?? 0, e.amount);
       oldLeft -= towardsOld;
       if (towardsOld > 0) oldPayments.push({ key: `op-${e.key}`, entry: e, amount: r2(towardsOld) });
       running -= e.amount - towardsOld;

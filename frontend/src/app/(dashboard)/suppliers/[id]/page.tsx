@@ -407,7 +407,7 @@ function SupplierDetailContent() {
               </button>
             </div>
           </div>
-          <LedgerSummary oldUnpaid={book.oldUnpaid} oldTotal={book.oldTotal} paidToOld={book.paidToOld} currentBalance={book.currentBalance} paid={book.paid} total={book.total} />
+          <LedgerSummary oldUnpaid={book.oldUnpaid} oldTotal={book.oldTotal} paidToOld={book.paidToOld} currentBalance={book.currentBalance} paid={book.paid} />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
             <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={ledgerFilter.q} onChange={(e) => setLedgerFilter((f) => ({ ...f, q: e.target.value }))} />
             <select className="input !py-1.5 text-sm" value={ledgerFilter.kind} onChange={(e) => setLedgerFilter((f) => ({ ...f, kind: e.target.value }))}>
@@ -521,7 +521,7 @@ function SupplierDetailContent() {
                         {r.towardsOld > 0 && <div className="text-[11px] font-normal text-amber-800">{formatCurrency(r.towardsOld)} towards Old Balance</div>}
                       </td>
                       <td className="whitespace-nowrap">{row.ref}</td>
-                      <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
+                      <td></td>
                       <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(row.amount)}</td>
                       <td></td>
                       <td className="text-right whitespace-nowrap font-medium">{formatCurrency(row.balance)}</td>

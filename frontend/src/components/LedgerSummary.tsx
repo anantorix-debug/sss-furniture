@@ -2,7 +2,7 @@ import { formatCurrency, formatDate } from '@/lib/format';
 import type { OldPayment, OldRow } from '@/lib/ledger';
 
 // The four boxes above a Payment Ledger.
-export function LedgerSummary({ oldUnpaid, oldTotal, paidToOld, currentBalance, paid, total }: { oldUnpaid: number; oldTotal: number; paidToOld: number; currentBalance: number; paid: number; total: number }) {
+export function LedgerSummary({ oldUnpaid, oldTotal, paidToOld, currentBalance, paid }: { oldUnpaid: number; oldTotal: number; paidToOld: number; currentBalance: number; paid: number }) {
   const box = (label: string, value: number, sub: string, tone = 'text-ink') => (
     <div className="rounded-lg border border-brand-100 bg-white px-3 py-2">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{label}</p>
@@ -11,11 +11,10 @@ export function LedgerSummary({ oldUnpaid, oldTotal, paidToOld, currentBalance, 
     </div>
   );
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
       {box('Old Balance', oldUnpaid, oldTotal ? `${formatCurrency(oldTotal)} − ${formatCurrency(paidToOld)} paid` : 'No old balance', oldUnpaid > 0 ? 'text-red-700' : 'text-ink')}
-      {box('Current Balance', currentBalance, 'New orders − payments', currentBalance > 0 ? 'text-red-700' : 'text-emerald-700')}
+      {box('Current Balance', currentBalance, 'Orders − payments', currentBalance > 0 ? 'text-red-700' : 'text-emerald-700')}
       {box('Paid', paid, 'Payments in this view', 'text-emerald-700')}
-      {box('Total Balance', total, 'Old + current', total > 0 ? 'text-red-700' : 'text-emerald-700')}
     </div>
   );
 }

@@ -117,7 +117,7 @@ function PaymentSummaryCards({ summary }: { summary: ShopSummary }) {
 // first, with a running balance, filters, a total row, and Edit / Remove
 // on payments. A payment is against the shop's overall balance - the
 // backend splits it across the shop's orders (and re-splits on edit).
-type ShopPaymentPayload = { date: string; amount: number; mode?: string; note?: string };
+type ShopPaymentPayload = { date: string; amount: number; mode?: string; note?: string; orderId?: string };
 const PAY_MODES = ['CASH', 'UPI', 'GPAY', 'BANK TRANSFER'];
 const emptyLedgerFilter = { q: '', kind: '', mode: '', from: '', to: '' };
 
@@ -146,6 +146,8 @@ function PaymentLedgerPanel({
   const [voucherNo, setVoucherNo] = useState('');
   const [amount, setAmount] = useState('');
   const [mode, setMode] = useState('CASH');
+  // '' = automatic (current orders first, then Old Balance); else one order.
+  const [payFor, setPayFor] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState(emptyLedgerFilter);
@@ -163,9 +165,10 @@ function PaymentLedgerPanel({
     }
     setSubmitting(true);
     try {
-      await onAddPayment({ date, amount: numAmount, mode, note: voucherNo || undefined });
+      await onAddPayment({ date, amount: numAmount, mode, note: voucherNo || undefined, orderId: payFor || undefined });
       setAmount('');
       setVoucherNo('');
+      setPayFor('');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to record payment');
     } finally {
@@ -204,7 +207,7 @@ function PaymentLedgerPanel({
   type Data = { kind: 'order'; ref: string; order: ShopOrderLedgerRow } | { kind: 'payment'; ref: string; payment: ShopLedgerRow };
   const entries: LedgerEntry<Data>[] = [
     ...orderLedger.map((o) => ({ key: `o-${o.orderId}`, date: o.date, amount: o.total, debit: true, old: isOldBalance(o.particulars), data: { kind: 'order' as const, ref: o.ref ?? '-', order: o } })),
-    ...ledger.map((p) => ({ key: `p-${p.paymentIds.join('.')}`, date: p.date, amount: p.amount, debit: false, old: false, data: { kind: 'payment' as const, ref: p.voucherNo ?? '-', payment: p } })),
+    ...ledger.map((p) => ({ key: `p-${p.paymentIds.join('.')}`, date: p.date, amount: p.amount, debit: false, old: false, fixedOld: p.oldAmount ?? 0, data: { kind: 'payment' as const, ref: p.voucherNo ?? '-', payment: p } })),
   ];
   const book = buildLedger(entries, { from: filter.from || undefined, to: filter.to || undefined });
 
@@ -236,7 +239,7 @@ function PaymentLedgerPanel({
           {downloading ? 'Preparing...' : 'Download Ledger PDF'}
         </button>
       </div>
-      <LedgerSummary oldUnpaid={book.oldUnpaid} oldTotal={book.oldTotal} paidToOld={book.paidToOld} currentBalance={book.currentBalance} paid={book.paid} total={book.total} />
+      <LedgerSummary oldUnpaid={book.oldUnpaid} oldTotal={book.oldTotal} paidToOld={book.paidToOld} currentBalance={book.currentBalance} paid={book.paid} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-2 text-sm">
         <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
         <select className="input !py-1.5 text-sm" value={filter.kind} onChange={(e) => setFilter((f) => ({ ...f, kind: e.target.value }))}>
@@ -370,10 +373,11 @@ function PaymentLedgerPanel({
                     <td className="font-medium">
                       Payment
                       <div className="text-[11px] font-normal text-ink-muted">Payment Type: {p.mode ?? '-'}</div>
+                      {p.orderRefs && p.orderRefs.length > 0 && <div className="text-[11px] font-normal text-ink-muted">For: {[...new Set(p.orderRefs)].join(', ')}</div>}
                       {r.towardsOld > 0 && <div className="text-[11px] font-normal text-amber-800">{formatCurrency(r.towardsOld)} towards Old Balance</div>}
                     </td>
                     <td className="whitespace-nowrap">{row.ref}</td>
-                    <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
+                    <td></td>
                     <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(row.amount)}</td>
                     <td></td>
                     <td className="text-right whitespace-nowrap font-medium">{formatCurrency(row.balance)}</td>
@@ -417,6 +421,19 @@ function PaymentLedgerPanel({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input type="date" className="input" required value={date} onChange={(e) => setDate(e.target.value)} />
               <input className="input" placeholder="Voucher No." value={voucherNo} onChange={(e) => setVoucherNo(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Pay for</label>
+              <select className="input" value={payFor} onChange={(e) => setPayFor(e.target.value)}>
+                <option value="">Current orders (oldest first)</option>
+                {orderLedger
+                  .filter((o) => o.balance > 0 && o.status !== 'CANCELLED')
+                  .map((o) => (
+                    <option key={o.orderId} value={o.orderId}>
+                      {isOldBalance(o.particulars) ? 'Old Balance' : 'Order'} {o.ref ?? ''} · {o.particulars} · unpaid {formatCurrency(o.balance)}
+                    </option>
+                  ))}
+              </select>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input type="number" step="0.01" min="0.01" className="input" placeholder="Amount" required value={amount} onChange={(e) => setAmount(e.target.value)} />

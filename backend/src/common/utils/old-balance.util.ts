@@ -2,9 +2,9 @@
 // Purchasing supplier) - same rules as the screens (frontend lib/ledger.ts):
 // entries whose text says OLD BALANCE / OPENING BALANCE / B/F / BROUGHT
 // FORWARD go in their own Old Balance table; everything else is the current
-// ledger, whose running balance starts at zero. Payments clear the old
-// balance first; that part is noted on the payment and does not reduce the
-// current balance.
+// ledger, whose running balance starts at zero. The two never mix: a
+// payment reduces the current balance; the old balance goes down only by
+// payments recorded for it (fixedOld). Total = order value only.
 const OLD_BALANCE_RE = /\b(OLD\s*BAL(ANCE)?|OPENING\s*BAL(ANCE)?|BROUGHT\s*FORWARD|B\s*\/\s*F)\b/i;
 
 export function isOldBalance(text: string | null | undefined): boolean {
@@ -20,6 +20,9 @@ export interface PdfLedgerEntry {
   ref: string;
   detail: string; // product names, or "Payment Type: CASH"
   txnBal?: number | null; // still owed on that order (orders only)
+  // Payments only: the part actually stored against Old Balance orders
+  // (party shops). When set it is used as-is instead of the rule.
+  fixedOld?: number;
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -44,7 +47,7 @@ export function renderLedgerTables(entries: PdfLedgerEntry[], rupees: (n: number
         running += e.amount;
       } else {
         paid += e.amount;
-        towardsOld = Math.min(oldLeft, e.amount);
+        towardsOld = Math.min(e.fixedOld ?? 0, e.amount);
         oldLeft -= towardsOld;
         if (towardsOld > 0) oldPayments.push({ e, amount: towardsOld });
         running -= e.amount - towardsOld;
@@ -54,8 +57,8 @@ export function renderLedgerTables(entries: PdfLedgerEntry[], rupees: (n: number
           <td>${fmt(e.date)}</td>
           <td style="font-weight:600">${esc(e.title)}</td>
           <td style="white-space:nowrap">${esc(e.ref)}</td>
-          <td style="text-align:right">${rupees(e.amount)}</td>
-          <td style="text-align:right">${rupees(e.debit ? 0 : e.amount)}</td>
+          <td style="text-align:right">${e.debit ? rupees(e.amount) : ''}</td>
+          <td style="text-align:right">${e.debit ? '' : rupees(e.amount)}</td>
           <td style="text-align:right">${e.debit && e.txnBal != null ? rupees(e.txnBal) : ''}</td>
           <td style="text-align:right;font-weight:600">${rupees(running)}</td>
         </tr>
@@ -66,13 +69,12 @@ export function renderLedgerTables(entries: PdfLedgerEntry[], rupees: (n: number
     .join('');
   const paidToOld = Math.max(0, oldTotal) - oldLeft;
   const oldUnpaid = oldTotal - paidToOld;
-  const total = oldUnpaid + running;
 
   const box = (label: string, value: number, color = '#1f2933') =>
-    `<td style="width:25%;padding:0 5px"><span style="display:block;border:1px solid #e3e1d9;border-radius:8px;padding:9px 12px">` +
+    `<td style="width:33.3%;padding:0 5px"><span style="display:block;border:1px solid #e3e1d9;border-radius:8px;padding:9px 12px">` +
     `<span style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280">${label}</span>` +
     `<span style="display:block;font-size:15px;font-weight:bold;margin-top:2px;color:${color}">${rupees(value)}</span></span></td>`;
-  const boxes = `<table style="width:calc(100% + 10px);margin:0 -5px 16px;border-collapse:separate"><tr>${box('Old Balance', oldUnpaid, oldUnpaid > 0 ? '#b91c1c' : '#1f2933')}${box('Current Balance', running, running > 0 ? '#b91c1c' : '#15803d')}${box('Paid', paid, '#15803d')}${box('Total Balance', total, total > 0 ? '#b91c1c' : '#15803d')}</tr></table>`;
+  const boxes = `<table style="width:calc(100% + 10px);margin:0 -5px 16px;border-collapse:separate"><tr>${box('Old Balance', oldUnpaid, oldUnpaid > 0 ? '#b91c1c' : '#1f2933')}${box('Current Balance', running, running > 0 ? '#b91c1c' : '#15803d')}${box('Paid', paid, '#15803d')}</tr></table>`;
 
   const oldTable = old.length
     ? `<h3 style="font-size:12px;letter-spacing:0.5px;text-transform:uppercase;color:#92400e;margin:4px 0 6px">Old Balance</h3>
@@ -106,5 +108,5 @@ export function renderLedgerTables(entries: PdfLedgerEntry[], rupees: (n: number
         ${current.length ? `<tr style="font-weight:bold;background:#e5e7eb"><td></td><td>Total</td><td></td><td style="text-align:right">${rupees(newDebits)}</td><td style="text-align:right">${rupees(paid)}</td><td></td><td style="text-align:right">${rupees(running)}</td></tr>` : ''}
       </tbody>
     </table>
-    ${old.length ? `<p style="font-size:12px;margin:10px 0 0;text-align:right"><b>Total balance (old + current): ${rupees(total)}</b></p>` : ''}`;
+`;
 }
