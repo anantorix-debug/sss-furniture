@@ -17,7 +17,7 @@ import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { ImportButton } from '@/components/ImportButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { buildLedger, isOldBalance, type LedgerEntry } from '@/lib/ledger';
-import { LedgerSummary, OldBalanceTable } from '@/components/LedgerSummary';
+import { LedgerFooterSummary, LedgerSummary, OldBalanceTable } from '@/components/LedgerSummary';
 import { PURCHASE_STATUS_LABEL } from '@/types';
 import type { SupplierDetail, SupplierPayment, Purchase, PurchaseStatus } from '@/types';
 
@@ -555,6 +555,13 @@ function SupplierDetailContent() {
               </tbody>
             </table>
           </div>
+          <LedgerFooterSummary
+            totalLabel="Total Purchases"
+            totalDebits={statementEntries.reduce((t, e) => t + (e.debit ? e.amount : 0), 0)}
+            totalPaid={statementEntries.reduce((t, e) => t + (e.debit ? 0 : e.amount), 0)}
+            oldUnpaid={book.oldUnpaid}
+            currentBalance={book.currentBalance}
+          />
           {canEdit && (
             <form onSubmit={addPayment} className="space-y-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

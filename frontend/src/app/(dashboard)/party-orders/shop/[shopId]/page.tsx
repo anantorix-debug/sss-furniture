@@ -22,7 +22,7 @@ import type { PartyOrder, ShopDashboardResult, ShopLedgerRow, ShopOrderLedgerRow
 import { Pagination } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
 import { buildLedger, isOldBalance, type LedgerEntry } from '@/lib/ledger';
-import { LedgerSummary, OldBalanceTable } from '@/components/LedgerSummary';
+import { LedgerFooterSummary, LedgerSummary, OldBalanceTable } from '@/components/LedgerSummary';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptyFilters: Record<string, string> = {};
@@ -416,6 +416,13 @@ function PaymentLedgerPanel({
             </tbody>
           </table>
         </div>
+        <LedgerFooterSummary
+          totalLabel="Total Order Value"
+          totalDebits={entries.reduce((t, e) => t + (e.debit ? e.amount : 0), 0)}
+          totalPaid={entries.reduce((t, e) => t + (e.debit ? 0 : e.amount), 0)}
+          oldUnpaid={book.oldUnpaid}
+          currentBalance={book.currentBalance}
+        />
         {canEdit && (
           <form onSubmit={handleAdd} className="space-y-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

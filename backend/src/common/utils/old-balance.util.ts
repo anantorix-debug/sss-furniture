@@ -120,5 +120,15 @@ export function renderLedgerTables(
         ${current.length ? `<tr style="font-weight:bold;background:#e5e7eb"><td></td><td>Total</td><td></td><td style="text-align:right">${rupees(newDebits)}</td><td style="text-align:right">${rupees(paid)}</td><td></td><td style="text-align:right">${rupees(running)}</td></tr>` : ''}
       </tbody>
     </table>
+    <h3 style="font-size:12px;letter-spacing:0.5px;text-transform:uppercase;color:#80011f;margin:16px 0 6px;break-after:avoid">Summary</h3>
+    <table style="break-inside:avoid">
+      <tbody>
+        <tr><td>${totals[0]}</td><td style="text-align:right">${rupees(allDebits)}</td></tr>
+        <tr><td>${totals[1]}</td><td style="text-align:right;color:#15803d">${rupees(allPaid)}</td></tr>
+        <tr><td>Old Balance (still unpaid)</td><td style="text-align:right">${rupees(oldUnpaid)}</td></tr>
+        <tr><td>Current Balance</td><td style="text-align:right">${rupees(running)}</td></tr>
+        <tr style="font-weight:bold;background:#fef3c7"><td>${totals[2]} (Old + Current)</td><td style="text-align:right">${rupees(oldUnpaid + running)}</td></tr>
+      </tbody>
+    </table>
 `;
 }

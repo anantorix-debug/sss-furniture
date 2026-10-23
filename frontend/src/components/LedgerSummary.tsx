@@ -106,3 +106,27 @@ export function OldBalanceTable<T>({
     </div>
   );
 }
+
+// Bottom-of-ledger summary (same numbers as the boxes on top): every
+// order/purchase and payment, then old and current kept apart, then the total.
+export function LedgerFooterSummary({ totalLabel, totalDebits, totalPaid, oldUnpaid, currentBalance }: { totalLabel: string; totalDebits: number; totalPaid: number; oldUnpaid: number; currentBalance: number }) {
+  const total = oldUnpaid + currentBalance;
+  const cell = (label: string, value: number, tone = 'text-ink') => (
+    <div className="px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{label}</p>
+      <p className={`text-sm font-bold ${tone}`}>{formatCurrency(value)}</p>
+    </div>
+  );
+  return (
+    <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50/60">
+      <p className="px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-brand-700">Summary</p>
+      <div className="grid grid-cols-2 lg:grid-cols-5 divide-brand-100">
+        {cell(totalLabel, totalDebits)}
+        {cell('Total Paid', totalPaid, 'text-emerald-700')}
+        {cell('Old Balance', oldUnpaid, oldUnpaid > 0 ? 'text-red-700' : 'text-ink')}
+        {cell('Current Balance', currentBalance, currentBalance > 0 ? 'text-red-700' : 'text-emerald-700')}
+        {cell('Total Balance (Old + Current)', total, total > 0 ? 'text-red-700' : 'text-emerald-700')}
+      </div>
+    </div>
+  );
+}
