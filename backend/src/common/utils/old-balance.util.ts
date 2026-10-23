@@ -77,15 +77,15 @@ export function renderLedgerTables(
   const paidToOld = Math.max(0, oldTotal) - oldLeft;
   const oldUnpaid = oldTotal - paidToOld;
 
-  const box = (label: string, value: number, color = '#1f2933') =>
-    `<td style="width:33.3%;padding:0 5px"><span style="display:block;border:1px solid #e3e1d9;border-radius:8px;padding:9px 12px">` +
+  const box = (label: string, value: number, color = '#1f2933', width = '33.3%') =>
+    `<td style="width:${width};padding:0 5px"><span style="display:block;border:1px solid #e3e1d9;border-radius:8px;padding:9px 12px">` +
     `<span style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280">${label}</span>` +
     `<span style="display:block;font-size:15px;font-weight:bold;margin-top:2px;color:${color}">${rupees(value)}</span></span></td>`;
   // Overall totals - every order/purchase and every payment, old and new.
   const allDebits = entries.filter((e) => e.debit).reduce((t, e) => t + e.amount, 0);
   const allPaid = entries.filter((e) => !e.debit).reduce((t, e) => t + e.amount, 0);
   const overall = `<table style="width:calc(100% + 10px);margin:0 -5px 10px;border-collapse:separate"><tr>${box(totals[0], allDebits)}${box(totals[1], allPaid, '#15803d')}${box(totals[2], allDebits - allPaid, allDebits - allPaid > 0 ? '#b91c1c' : '#15803d')}</tr></table>`;
-  const boxes = `<table style="width:calc(100% + 10px);margin:0 -5px 16px;border-collapse:separate"><tr>${box('Old Balance', oldUnpaid, oldUnpaid > 0 ? '#b91c1c' : '#1f2933')}${box('Current Balance', running, running > 0 ? '#b91c1c' : '#15803d')}${box('Paid', paid, '#15803d')}</tr></table>`;
+  const boxes = `<table style="width:calc(100% + 10px);margin:0 -5px 16px;border-collapse:separate"><tr>${box('Old Balance', oldUnpaid, oldUnpaid > 0 ? '#b91c1c' : '#1f2933', '25%')}${box('Current Balance', running, running > 0 ? '#b91c1c' : '#15803d', '25%')}${box('Paid', paid, '#15803d', '25%')}${box('Old + Current', oldUnpaid + running, oldUnpaid + running > 0 ? '#b91c1c' : '#15803d', '25%')}</tr></table>`;
 
   const oldTable = old.length
     ? `<h3 style="font-size:12px;letter-spacing:0.5px;text-transform:uppercase;color:#92400e;margin:4px 0 6px">Old Balance</h3>
