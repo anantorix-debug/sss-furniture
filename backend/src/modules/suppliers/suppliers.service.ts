@@ -397,7 +397,7 @@ export class SuppliersService {
   ${this.letterhead(supplier)}
   <div class="body">
     <h2 style="text-align:center;font-size:18px;margin:4px 0 14px;text-decoration:underline">Party Statement - Payment Ledger</h2>
-    ${renderLedgerTables(entries, rupees, fmt)}
+    ${renderLedgerTables(entries, rupees, fmt, ['Total Purchases', 'Total Paid', 'Balance Payable'])}
     ${renderGeneratedFooter(entries.length, 'transaction')}
   </div>
 </body></html>`;
