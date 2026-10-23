@@ -35,6 +35,7 @@ export function renderLedgerTables(entries: PdfLedgerEntry[], rupees: (n: number
   let running = 0;
   let newDebits = 0;
   let paid = 0;
+  const oldPayments: { e: PdfLedgerEntry; amount: number }[] = [];
   const body = current
     .map((e) => {
       let towardsOld = 0;
@@ -45,6 +46,7 @@ export function renderLedgerTables(entries: PdfLedgerEntry[], rupees: (n: number
         paid += e.amount;
         towardsOld = Math.min(oldLeft, e.amount);
         oldLeft -= towardsOld;
+        if (towardsOld > 0) oldPayments.push({ e, amount: towardsOld });
         running -= e.amount - towardsOld;
       }
       const tint = e.debit ? '' : 'background:#f0fdf4';
@@ -82,8 +84,13 @@ export function renderLedgerTables(entries: PdfLedgerEntry[], rupees: (n: number
             (e) => `<tr style="background:#fffbeb"><td>${fmt(e.date)}</td><td><b>${e.debit ? 'Old Balance' : 'Payment'}</b><div style="font-size:10.5px;color:#6b7280">${esc(e.detail)}</div></td><td>${esc(e.ref)}</td><td style="text-align:right">${rupees(e.debit ? e.amount : -e.amount)}</td></tr>`,
           )
           .join('')}
-        <tr><td></td><td>Old balance</td><td></td><td style="text-align:right">${rupees(oldTotal)}</td></tr>
-        <tr><td></td><td style="color:#15803d">Paid towards old balance</td><td></td><td style="text-align:right;color:#15803d">- ${rupees(paidToOld)}</td></tr>
+        ${oldPayments
+          .map(
+            (p) => `<tr><td>${fmt(p.e.date)}</td><td style="color:#15803d">Payment<div style="font-size:10.5px;color:#6b7280">${esc(p.e.detail)}${
+              p.amount < p.e.amount ? ` · part of ${rupees(p.e.amount)} payment` : ''
+            }</div></td><td>${esc(p.e.ref)}</td><td style="text-align:right;color:#15803d">- ${rupees(p.amount)}</td></tr>`,
+          )
+          .join('')}
         <tr style="font-weight:bold;background:#fef3c7"><td></td><td>Old balance still unpaid</td><td></td><td style="text-align:right">${rupees(oldUnpaid)}</td></tr>
       </tbody>
     </table>

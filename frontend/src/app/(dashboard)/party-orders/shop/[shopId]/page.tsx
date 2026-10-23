@@ -236,7 +236,7 @@ function PaymentLedgerPanel({
           {downloading ? 'Preparing...' : 'Download Ledger PDF'}
         </button>
       </div>
-      <LedgerSummary oldUnpaid={book.oldUnpaid} oldTotal={book.oldTotal} currentBalance={book.currentBalance} paid={book.paid} total={book.total} />
+      <LedgerSummary oldUnpaid={book.oldUnpaid} oldTotal={book.oldTotal} paidToOld={book.paidToOld} currentBalance={book.currentBalance} paid={book.paid} total={book.total} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-2 text-sm">
         <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
         <select className="input !py-1.5 text-sm" value={filter.kind} onChange={(e) => setFilter((f) => ({ ...f, kind: e.target.value }))}>
@@ -263,8 +263,7 @@ function PaymentLedgerPanel({
       <div className="max-h-[700px] overflow-y-auto pr-1">
         <OldBalanceTable
           rows={book.oldRows}
-          oldTotal={book.oldTotal}
-          paidToOld={book.paidToOld}
+          payments={book.oldPayments}
           oldUnpaid={book.oldUnpaid}
           describe={(d: Data) =>
             d.kind === 'order'

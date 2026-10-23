@@ -35,8 +35,17 @@ export interface CurrentRow<T> {
   balance: number; // running current balance after this row
 }
 
+// One payment (or the part of it) that cleared old balance - listed in the
+// Old Balance table so the sum is visible line by line.
+export interface OldPayment<T> {
+  key: string;
+  entry: LedgerEntry<T>;
+  amount: number; // part of the payment used for old balance
+}
+
 export interface LedgerResult<T> {
   oldRows: OldRow<T>[];
+  oldPayments: OldPayment<T>[];
   oldTotal: number; // old balance before any new payment
   paidToOld: number;
   oldUnpaid: number;
@@ -74,6 +83,7 @@ export function buildLedger<T>(entries: LedgerEntry<T>[], range: { from?: string
   let newDebits = 0;
   let paid = 0;
   const rows: CurrentRow<T>[] = [];
+  const oldPayments: OldPayment<T>[] = [];
   for (const e of sorted(upToEnd.filter((x) => !isOld(x)))) {
     let towardsOld = 0;
     if (e.debit) {
@@ -83,11 +93,12 @@ export function buildLedger<T>(entries: LedgerEntry<T>[], range: { from?: string
       paid += e.amount;
       towardsOld = Math.min(oldLeft, e.amount);
       oldLeft -= towardsOld;
+      if (towardsOld > 0) oldPayments.push({ key: `op-${e.key}`, entry: e, amount: r2(towardsOld) });
       running -= e.amount - towardsOld;
     }
     rows.push({ key: e.key, entry: e, towardsOld: r2(towardsOld), balance: r2(running) });
   }
   const paidToOld = r2(Math.max(0, oldTotal) - oldLeft);
   const oldUnpaid = r2(oldTotal - paidToOld);
-  return { oldRows, oldTotal, paidToOld, oldUnpaid, rows, newDebits: r2(newDebits), paid: r2(paid), currentBalance: r2(running), total: r2(oldUnpaid + running) };
+  return { oldRows, oldPayments, oldTotal, paidToOld, oldUnpaid, rows, newDebits: r2(newDebits), paid: r2(paid), currentBalance: r2(running), total: r2(oldUnpaid + running) };
 }
