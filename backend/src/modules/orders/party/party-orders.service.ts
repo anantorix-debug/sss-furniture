@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isOldBalance, ledgerOrder, ledgerSummaryHtml } from '../../../common/utils/old-balance.util';
 import { AuditService } from '../../audit/audit.service';
 import { StockAllocationService } from '../../inventory/products/stock-allocation.service';
 import { CarpenterService } from '../../carpenter/carpenter.service';
@@ -1439,27 +1440,29 @@ export class PartyOrdersService {
   ): Promise<Buffer> {
     const rupees = (n: number) => `${n < 0 ? '-' : ''}₹${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const fmt = (d: Date) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const day = (d: Date) => new Date(d).toISOString().slice(0, 10);
 
     type Row =
-      | { kind: 'order'; date: Date; ref: string; amount: number; detail: string; txnBal: number; cancelled: boolean }
-      | { kind: 'payment'; date: Date; ref: string; amount: number; detail: string };
+      | { kind: 'order'; date: Date; ref: string; amount: number; detail: string; txnBal: number; cancelled: boolean; old: boolean; debit: true }
+      | { kind: 'payment'; date: Date; ref: string; amount: number; detail: string; old: false; debit: false };
     const summary = summarizeShopOrders(shop as any, filteredOrders);
     const rows: Row[] = hide
       ? []
       : [
-          ...buildOrderLedger(filteredOrders, false).map((o) => ({ kind: 'order' as const, date: o.date, ref: o.ref ?? '-', amount: o.total, detail: o.particulars, txnBal: o.balance, cancelled: o.status === 'CANCELLED' })),
-          ...buildPaymentLedger(filteredOrders, summary.totalValue, false).map((p) => ({ kind: 'payment' as const, date: p.date, ref: p.voucherNo ?? '-', amount: p.amount, detail: p.mode ?? '-' })),
-        ].sort((a, b) => day(a.date).localeCompare(day(b.date)) || (a.kind === b.kind ? 0 : a.kind === 'order' ? -1 : 1));
+          ...buildOrderLedger(filteredOrders, false).map((o) => ({ kind: 'order' as const, date: o.date, ref: o.ref ?? '-', amount: o.total, detail: o.particulars, txnBal: o.balance, cancelled: o.status === 'CANCELLED', old: isOldBalance(o.particulars), debit: true as const })),
+          ...buildPaymentLedger(filteredOrders, summary.totalValue, false).map((p) => ({ kind: 'payment' as const, date: p.date, ref: p.voucherNo ?? '-', amount: p.amount, detail: p.mode ?? '-', old: false as const, debit: false as const })),
+        ].sort(ledgerOrder);
+    const oldTotal = rows.reduce((t, r) => t + (r.kind === 'order' && r.old ? r.amount : 0), 0);
+    const newOrders = rows.reduce((t, r) => t + (r.kind === 'order' && !r.old ? r.amount : 0), 0);
+    const paidTotal = rows.reduce((t, r) => t + (r.kind === 'payment' ? r.amount : 0), 0);
 
     let balance = 0;
     const body = rows
       .map((r) => {
         balance += r.kind === 'order' ? r.amount : -r.amount;
-        const tint = r.kind === 'payment' ? 'background:#f0fdf4' : '';
+        const tint = r.kind === 'payment' ? 'background:#f0fdf4' : r.old ? 'background:#fffbeb' : '';
         const main = `<tr style="${tint}">
           <td>${fmt(r.date)}</td>
-          <td style="font-weight:600">${r.kind === 'payment' ? 'Payment' : r.cancelled ? 'Order (Cancelled)' : 'Order'}</td>
+          <td style="font-weight:600">${r.kind === 'payment' ? 'Payment' : r.old ? 'Old Balance (b/f)' : r.cancelled ? 'Order (Cancelled)' : 'Order'}</td>
           <td style="white-space:nowrap">${escapeHtml(r.ref)}</td>
           <td style="text-align:right">${rupees(r.amount)}</td>
           <td style="text-align:right">${rupees(r.kind === 'payment' ? r.amount : 0)}</td>
@@ -1497,13 +1500,9 @@ export class PartyOrdersService {
     ${
       hide
         ? '<p style="color:#6b7280">Payment details are not visible for your role.</p>'
-        : `<div class="summary">
-      <div><div class="label">Total Order Value</div><div class="value">${rupees(summary.totalValue)}</div></div>
-      <div><div class="label">Total Paid</div><div class="value" style="color:#15803d">${rupees(summary.totalPaid)}</div></div>
-      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">${rupees(summary.balanceDue)}</div></div>
-    </div>
+        : `${ledgerSummaryHtml(oldTotal, newOrders, paidTotal, 'New Orders', rupees)}
     <table>
-      <thead><tr><th>Date</th><th>Txn Type</th><th>Ref No.</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Txn Bal.</th><th style="text-align:right">Balance</th></tr></thead>
+      <thead><tr><th>Date</th><th>Txn Type</th><th>Ref No.</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Txn Bal.</th><th style="text-align:right">Running Balance</th></tr></thead>
       <tbody>
         ${body || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">No orders or payments</td></tr>'}
         ${rows.length ? `<tr style="font-weight:bold;background:#e5e7eb"><td></td><td>Total</td><td></td><td style="text-align:right">${rupees(ordered)}</td><td style="text-align:right">${rupees(paid)}</td><td></td><td style="text-align:right">${rupees(balance)}</td></tr>` : ''}

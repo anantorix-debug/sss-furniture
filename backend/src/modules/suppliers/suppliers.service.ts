@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { isOldBalance, ledgerOrder, ledgerSummaryHtml } from '../../common/utils/old-balance.util';
 import { PdfService } from '../pdf/pdf.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
@@ -365,22 +366,23 @@ export class SuppliersService {
   async generateLedgerPdf(id: string): Promise<Buffer> {
     const supplier = await this.findOne(id);
     const rupees = (n: number) => `${n < 0 ? '-' : ''}₹${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    const day = (d: Date) => d.toISOString().slice(0, 10);
     const fmt = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-    type Row = { kind: 'purchase' | 'payment'; date: Date; ref: string; amount: number; detail: string };
+    type Row = { kind: 'purchase' | 'payment'; date: Date; ref: string; amount: number; detail: string; old: boolean; debit: boolean };
     const rows: Row[] = [
-      ...supplier.purchases.map((p) => ({ kind: 'purchase' as const, date: p.date, ref: p.purchase?.purchaseNumber ?? '-', amount: Number(p.value), detail: p.particulars })),
-      ...supplier.payments.map((p) => ({ kind: 'payment' as const, date: p.date, ref: p.voucherNo ?? '-', amount: Number(p.amount), detail: p.mode ?? '-' })),
-    ].sort((a, b) => day(a.date).localeCompare(day(b.date)) || (a.kind === b.kind ? 0 : a.kind === 'purchase' ? -1 : 1));
+      ...supplier.purchases.map((p) => ({ kind: 'purchase' as const, date: p.date, ref: p.purchase?.purchaseNumber ?? '-', amount: Number(p.value), detail: p.particulars, old: isOldBalance(p.particulars), debit: true })),
+      ...supplier.payments.map((p) => ({ kind: 'payment' as const, date: p.date, ref: p.voucherNo ?? '-', amount: Number(p.amount), detail: p.mode ?? '-', old: isOldBalance(p.particulars), debit: false })),
+    ].sort(ledgerOrder);
+    const signed = (r: Row) => (r.debit ? r.amount : -r.amount);
+    const oldTotal = rows.filter((r) => r.old).reduce((t, r) => t + signed(r), 0);
 
     let balance = 0;
     const body = rows
       .map((r) => {
         balance += r.kind === 'purchase' ? r.amount : -r.amount;
-        const main = `<tr style="${r.kind === 'payment' ? 'background:#f0fdf4' : ''}">
+        const main = `<tr style="${r.kind === 'payment' ? 'background:#f0fdf4' : r.old ? 'background:#fffbeb' : ''}">
           <td>${fmt(r.date)}</td>
-          <td style="font-weight:600">${r.kind === 'payment' ? 'Payment' : r.amount < 0 ? 'Cancelled' : 'Purchase'}</td>
+          <td style="font-weight:600">${r.old ? 'Old Balance (b/f)' : r.kind === 'payment' ? 'Payment' : r.amount < 0 ? 'Cancelled' : 'Purchase'}</td>
           <td style="white-space:nowrap">${escapeHtml(r.ref)}</td>
           <td style="text-align:right">${rupees(r.amount)}</td>
           <td style="text-align:right">${rupees(r.kind === 'payment' ? r.amount : 0)}</td>
@@ -404,8 +406,15 @@ export class SuppliersService {
   ${this.letterhead(supplier)}
   <div class="body">
     <h2 style="text-align:center;font-size:18px;margin:4px 0 14px;text-decoration:underline">Party Statement - Payment Ledger</h2>
+    ${ledgerSummaryHtml(
+      oldTotal,
+      rows.filter((r) => !r.old && r.debit).reduce((t, r) => t + r.amount, 0),
+      rows.filter((r) => !r.old && !r.debit).reduce((t, r) => t + r.amount, 0),
+      'New Purchases',
+      rupees,
+    )}
     <table>
-      <thead><tr><th>Date</th><th>Txn Type</th><th>Ref No.</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Txn Balance</th><th style="text-align:right">Payable Balance</th></tr></thead>
+      <thead><tr><th>Date</th><th>Txn Type</th><th>Ref No.</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Txn Balance</th><th style="text-align:right">Running Balance</th></tr></thead>
       <tbody>
         ${body || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">No purchases or payments</td></tr>'}
         ${rows.length ? `<tr style="font-weight:bold;background:#e5e7eb"><td></td><td>Total</td><td></td><td style="text-align:right">${rupees(purchased)}</td><td style="text-align:right">${rupees(paid)}</td><td></td><td style="text-align:right">${rupees(balance)}</td></tr>` : ''}

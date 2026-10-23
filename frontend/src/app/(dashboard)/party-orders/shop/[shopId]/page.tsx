@@ -21,6 +21,8 @@ import { useForceable } from '@/hooks/useForceable';
 import type { PartyOrder, ShopDashboardResult, ShopLedgerRow, ShopOrderLedgerRow, ShopSummary } from '@/types';
 import { Pagination } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
+import { buildLedger, isOldBalance, type LedgerEntry } from '@/lib/ledger';
+import { LedgerSummary } from '@/components/LedgerSummary';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptyFilters: Record<string, string> = {};
@@ -196,38 +198,35 @@ function PaymentLedgerPanel({
     );
   }
 
-  // Statement: orders add to the balance, payments reduce it - oldest
-  // first, an order before a payment on the same day. The last balance
-  // equals the Balance card above.
-  type Row =
-    | { kind: 'order'; key: string; date: string; ref: string; amount: number; order: ShopOrderLedgerRow; balance: number }
-    | { kind: 'payment'; key: string; date: string; ref: string; amount: number; payment: ShopLedgerRow; balance: number };
-  const statement: Row[] = [
-    ...orderLedger.map((o) => ({ kind: 'order' as const, key: `o-${o.orderId}`, date: o.date, ref: o.ref ?? '-', amount: o.total, order: o, balance: 0 })),
-    ...ledger.map((p) => ({ kind: 'payment' as const, key: `p-${p.paymentIds.join('.')}`, date: p.date, ref: p.voucherNo ?? '-', amount: p.amount, payment: p, balance: 0 })),
-  ].sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)) || (a.kind === b.kind ? 0 : a.kind === 'order' ? -1 : 1));
-  let running = 0;
-  for (const row of statement) {
-    running += row.kind === 'order' ? row.amount : -row.amount;
-    row.balance = Math.round(running * 100) / 100;
-  }
+  // Statement: Old Balance entries first (or, with a From date, one
+  // brought-forward row), then orders (add) and payments (reduce), oldest
+  // first, an order before a payment on the same day. See lib/ledger.ts.
+  type Data = { kind: 'order'; ref: string; order: ShopOrderLedgerRow } | { kind: 'payment'; ref: string; payment: ShopLedgerRow };
+  const entries: LedgerEntry<Data>[] = [
+    ...orderLedger.map((o) => ({ key: `o-${o.orderId}`, date: o.date, amount: o.total, debit: true, old: isOldBalance(o.particulars), data: { kind: 'order' as const, ref: o.ref ?? '-', order: o } })),
+    ...ledger.map((p) => ({ key: `p-${p.paymentIds.join('.')}`, date: p.date, amount: p.amount, debit: false, old: false, data: { kind: 'payment' as const, ref: p.voucherNo ?? '-', payment: p } })),
+  ];
+  const book = buildLedger(entries, { from: filter.from || undefined, to: filter.to || undefined });
 
   const norm = (v: string | null | undefined) => (v ?? '').trim().toUpperCase();
   const modes = [...new Set(ledger.map((p) => norm(p.mode)).filter(Boolean))].sort();
   const filterOn = Object.values(filter).some(Boolean);
-  const filtered = statement.filter((r) => {
+  // Date range is applied in buildLedger; these only hide rows.
+  const viewFilterOn = Boolean(filter.q.trim() || filter.kind || filter.mode);
+  const filtered = book.rows.filter((r) => {
+    if (r.type === 'bf') return !viewFilterOn;
+    const d = r.entry.data;
     if (filter.q.trim()) {
-      const q = norm(filter.q);
-      const text = r.kind === 'order' ? `${r.ref} ${r.order.particulars}` : `${r.ref} ${r.payment.mode ?? ''}`;
-      if (!norm(text).includes(q)) return false;
+      const text = d.kind === 'order' ? `${d.ref} ${d.order.particulars}` : `${d.ref} ${d.payment.mode ?? ''}`;
+      if (!norm(text).includes(norm(filter.q))) return false;
     }
-    if (filter.kind && r.kind !== filter.kind) return false;
-    if (filter.mode && (r.kind !== 'payment' || norm(r.payment.mode) !== filter.mode)) return false;
-    const d = r.date.slice(0, 10);
-    return (!filter.from || d >= filter.from) && (!filter.to || d <= filter.to);
+    if (filter.kind && d.kind !== filter.kind) return false;
+    if (filter.mode && (d.kind !== 'payment' || norm(d.payment.mode) !== filter.mode)) return false;
+    return true;
   });
-  const totalOrders = filtered.filter((r) => r.kind === 'order').reduce((t, r) => t + r.amount, 0);
-  const totalPaid = filtered.filter((r) => r.kind === 'payment').reduce((t, r) => t + r.amount, 0);
+  const totalOrders = filtered.reduce((t, r) => t + (r.type === 'bf' ? r.amount : r.entry.debit ? r.entry.amount : 0), 0);
+  const totalPaid = filtered.reduce((t, r) => t + (r.type === 'entry' && !r.entry.debit ? r.entry.amount : 0), 0);
+  const entryCount = entries.length;
   const cols = canEdit ? 8 : 7;
 
   return (
@@ -238,6 +237,7 @@ function PaymentLedgerPanel({
           {downloading ? 'Preparing...' : 'Download Ledger PDF'}
         </button>
       </div>
+      <LedgerSummary oldBalance={book.oldBalance} newDebits={book.newDebits} paid={book.paid} current={book.current} newLabel="New Orders" fromDate={filter.from || undefined} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-2 text-sm">
         <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
         <select className="input !py-1.5 text-sm" value={filter.kind} onChange={(e) => setFilter((f) => ({ ...f, kind: e.target.value }))}>
@@ -259,7 +259,7 @@ function PaymentLedgerPanel({
           Clear filters
         </button>
       </div>
-      <p className="text-xs text-ink-muted mb-2">{filterOn ? `Showing ${filtered.length} of ${statement.length}` : `${statement.length} entries`}</p>
+      <p className="text-xs text-ink-muted mb-2">{filterOn ? `Showing ${filtered.length} row${filtered.length === 1 ? '' : 's'} of ${entryCount} entries` : `${entryCount} entries`}</p>
       {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
       <div className="max-h-[700px] overflow-y-auto pr-1">
         <div className="overflow-x-auto rounded-lg border border-brand-100 mb-4">
@@ -272,32 +272,51 @@ function PaymentLedgerPanel({
                 <th className="!text-right">Total</th>
                 <th className="!text-right">Paid</th>
                 <th className="!text-right" title="Amount still owed on this order">Txn Bal.</th>
-                <th className="!text-right" title="Total still owed by this shop after this entry">Balance</th>
+                <th className="!text-right" title="Total still owed by this shop after this entry">Running Balance</th>
                 {canEdit && <th></th>}
               </tr>
             </thead>
             <tbody>
-              {statement.length === 0 && (
+              {entryCount === 0 && (
                 <tr>
                   <td colSpan={cols} className="text-center text-brand-400 py-4">
                     No orders or payments yet
                   </td>
                 </tr>
               )}
-              {filterOn && filtered.length === 0 && statement.length > 0 && (
+              {filterOn && filtered.length === 0 && entryCount > 0 && (
                 <tr>
                   <td colSpan={cols} className="text-center text-brand-400 py-4">
                     No entries match these filters
                   </td>
                 </tr>
               )}
-              {filtered.map((row) => {
-                if (row.kind === 'order') {
+              {filtered.map((r) => {
+                if (r.type === 'bf') {
                   return (
-                    <tr key={row.key}>
+                    <tr key={r.key} className="bg-amber-50">
+                      <td className="whitespace-nowrap">{formatDate(r.date)}</td>
+                      <td className="font-semibold">
+                        Old Balance (b/f)
+                        <div className="text-[11px] font-normal text-ink-muted">Owed before this date ({r.count} entr{r.count === 1 ? 'y' : 'ies'})</div>
+                      </td>
+                      <td>-</td>
+                      <td className="text-right whitespace-nowrap">{formatCurrency(r.amount)}</td>
+                      <td></td>
+                      <td></td>
+                      <td className="text-right whitespace-nowrap font-medium">{formatCurrency(r.balance)}</td>
+                      {canEdit && <td></td>}
+                    </tr>
+                  );
+                }
+                const row = { ...r.entry.data, key: r.key, date: r.entry.date, amount: r.entry.amount, balance: r.balance };
+                if (row.kind === 'order') {
+                  const old = r.entry.old;
+                  return (
+                    <tr key={row.key} className={old ? 'bg-amber-50' : undefined}>
                       <td className="whitespace-nowrap">{formatDate(row.date)}</td>
                       <td className="font-medium">
-                        {row.order.status === 'CANCELLED' ? 'Order (Cancelled)' : 'Order'}
+                        {old ? <span className="font-semibold">Old Balance (b/f)</span> : row.order.status === 'CANCELLED' ? 'Order (Cancelled)' : 'Order'}
                         <div className="text-[11px] font-normal text-ink-muted max-w-[140px] truncate" title={row.order.particulars}>
                           {row.order.particulars}
                         </div>
@@ -385,7 +404,7 @@ function PaymentLedgerPanel({
                   <td className="text-right whitespace-nowrap">{formatCurrency(totalOrders)}</td>
                   <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(totalPaid)}</td>
                   <td></td>
-                  <td className="text-right whitespace-nowrap">{!filterOn && formatCurrency(running)}</td>
+                  <td className="text-right whitespace-nowrap">{!viewFilterOn && formatCurrency(book.current)}</td>
                   {canEdit && <td></td>}
                 </tr>
               )}
