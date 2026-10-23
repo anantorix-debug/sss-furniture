@@ -22,7 +22,7 @@ import type { PartyOrder, ShopDashboardResult, ShopLedgerRow, ShopOrderLedgerRow
 import { Pagination } from '@/components/Pagination';
 import { FilterBar } from '@/components/FilterBar';
 import { buildLedger, isOldBalance, type LedgerEntry } from '@/lib/ledger';
-import { LedgerSummary } from '@/components/LedgerSummary';
+import { LedgerSummary, OldBalanceTable } from '@/components/LedgerSummary';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 const emptyFilters: Record<string, string> = {};
@@ -198,9 +198,9 @@ function PaymentLedgerPanel({
     );
   }
 
-  // Statement: Old Balance entries first (or, with a From date, one
-  // brought-forward row), then orders (add) and payments (reduce), oldest
-  // first, an order before a payment on the same day. See lib/ledger.ts.
+  // Two tables (see lib/ledger.ts): the Old Balance on its own, then the
+  // current ledger - newer orders (add) and payments (reduce), oldest
+  // first. Payments clear the old balance first.
   type Data = { kind: 'order'; ref: string; order: ShopOrderLedgerRow } | { kind: 'payment'; ref: string; payment: ShopLedgerRow };
   const entries: LedgerEntry<Data>[] = [
     ...orderLedger.map((o) => ({ key: `o-${o.orderId}`, date: o.date, amount: o.total, debit: true, old: isOldBalance(o.particulars), data: { kind: 'order' as const, ref: o.ref ?? '-', order: o } })),
@@ -214,7 +214,6 @@ function PaymentLedgerPanel({
   // Date range is applied in buildLedger; these only hide rows.
   const viewFilterOn = Boolean(filter.q.trim() || filter.kind || filter.mode);
   const filtered = book.rows.filter((r) => {
-    if (r.type === 'bf') return !viewFilterOn;
     const d = r.entry.data;
     if (filter.q.trim()) {
       const text = d.kind === 'order' ? `${d.ref} ${d.order.particulars}` : `${d.ref} ${d.payment.mode ?? ''}`;
@@ -224,8 +223,8 @@ function PaymentLedgerPanel({
     if (filter.mode && (d.kind !== 'payment' || norm(d.payment.mode) !== filter.mode)) return false;
     return true;
   });
-  const totalOrders = filtered.reduce((t, r) => t + (r.type === 'bf' ? r.amount : r.entry.debit ? r.entry.amount : 0), 0);
-  const totalPaid = filtered.reduce((t, r) => t + (r.type === 'entry' && !r.entry.debit ? r.entry.amount : 0), 0);
+  const totalOrders = filtered.reduce((t, r) => t + (r.entry.debit ? r.entry.amount : 0), 0);
+  const totalPaid = filtered.reduce((t, r) => t + (!r.entry.debit ? r.entry.amount : 0), 0);
   const entryCount = entries.length;
   const cols = canEdit ? 8 : 7;
 
@@ -237,7 +236,7 @@ function PaymentLedgerPanel({
           {downloading ? 'Preparing...' : 'Download Ledger PDF'}
         </button>
       </div>
-      <LedgerSummary oldBalance={book.oldBalance} newDebits={book.newDebits} paid={book.paid} current={book.current} newLabel="New Orders" fromDate={filter.from || undefined} />
+      <LedgerSummary oldUnpaid={book.oldUnpaid} oldTotal={book.oldTotal} currentBalance={book.currentBalance} paid={book.paid} total={book.total} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-2 text-sm">
         <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
         <select className="input !py-1.5 text-sm" value={filter.kind} onChange={(e) => setFilter((f) => ({ ...f, kind: e.target.value }))}>
@@ -262,6 +261,26 @@ function PaymentLedgerPanel({
       <p className="text-xs text-ink-muted mb-2">{filterOn ? `Showing ${filtered.length} row${filtered.length === 1 ? '' : 's'} of ${entryCount} entries` : `${entryCount} entries`}</p>
       {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
       <div className="max-h-[700px] overflow-y-auto pr-1">
+        <OldBalanceTable
+          rows={book.oldRows}
+          oldTotal={book.oldTotal}
+          paidToOld={book.paidToOld}
+          oldUnpaid={book.oldUnpaid}
+          describe={(d: Data) =>
+            d.kind === 'order'
+              ? {
+                  label: 'Old Balance',
+                  detail: d.order.particulars,
+                  ref: (
+                    <Link href={`/party-orders/${d.order.orderId}`} className="text-brand-700 hover:underline">
+                      {d.ref}
+                    </Link>
+                  ),
+                }
+              : { label: 'Payment', detail: `Payment Type: ${d.payment.mode ?? '-'}`, ref: d.ref }
+          }
+        />
+        {book.oldRows.length > 0 && <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-700 mb-1.5">Current Ledger</h3>}
         <div className="overflow-x-auto rounded-lg border border-brand-100 mb-4">
           <table className="table-shell text-sm [&_th]:!px-2 [&_td]:!px-2">
             <thead>
@@ -272,7 +291,7 @@ function PaymentLedgerPanel({
                 <th className="!text-right">Total</th>
                 <th className="!text-right">Paid</th>
                 <th className="!text-right" title="Amount still owed on this order">Txn Bal.</th>
-                <th className="!text-right" title="Total still owed by this shop after this entry">Running Balance</th>
+                <th className="!text-right" title="Current balance (old balance not included) after this entry">Running Balance</th>
                 {canEdit && <th></th>}
               </tr>
             </thead>
@@ -292,31 +311,13 @@ function PaymentLedgerPanel({
                 </tr>
               )}
               {filtered.map((r) => {
-                if (r.type === 'bf') {
-                  return (
-                    <tr key={r.key} className="bg-amber-50">
-                      <td className="whitespace-nowrap">{formatDate(r.date)}</td>
-                      <td className="font-semibold">
-                        Old Balance (b/f)
-                        <div className="text-[11px] font-normal text-ink-muted">Owed before this date ({r.count} entr{r.count === 1 ? 'y' : 'ies'})</div>
-                      </td>
-                      <td>-</td>
-                      <td className="text-right whitespace-nowrap">{formatCurrency(r.amount)}</td>
-                      <td></td>
-                      <td></td>
-                      <td className="text-right whitespace-nowrap font-medium">{formatCurrency(r.balance)}</td>
-                      {canEdit && <td></td>}
-                    </tr>
-                  );
-                }
                 const row = { ...r.entry.data, key: r.key, date: r.entry.date, amount: r.entry.amount, balance: r.balance };
                 if (row.kind === 'order') {
-                  const old = r.entry.old;
                   return (
-                    <tr key={row.key} className={old ? 'bg-amber-50' : undefined}>
+                    <tr key={row.key}>
                       <td className="whitespace-nowrap">{formatDate(row.date)}</td>
                       <td className="font-medium">
-                        {old ? <span className="font-semibold">Old Balance (b/f)</span> : row.order.status === 'CANCELLED' ? 'Order (Cancelled)' : 'Order'}
+                        {row.order.status === 'CANCELLED' ? 'Order (Cancelled)' : 'Order'}
                         <div className="text-[11px] font-normal text-ink-muted max-w-[140px] truncate" title={row.order.particulars}>
                           {row.order.particulars}
                         </div>
@@ -370,6 +371,7 @@ function PaymentLedgerPanel({
                     <td className="font-medium">
                       Payment
                       <div className="text-[11px] font-normal text-ink-muted">Payment Type: {p.mode ?? '-'}</div>
+                      {r.towardsOld > 0 && <div className="text-[11px] font-normal text-amber-800">{formatCurrency(r.towardsOld)} towards Old Balance</div>}
                     </td>
                     <td className="whitespace-nowrap">{row.ref}</td>
                     <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
@@ -404,7 +406,7 @@ function PaymentLedgerPanel({
                   <td className="text-right whitespace-nowrap">{formatCurrency(totalOrders)}</td>
                   <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(totalPaid)}</td>
                   <td></td>
-                  <td className="text-right whitespace-nowrap">{!viewFilterOn && formatCurrency(book.current)}</td>
+                  <td className="text-right whitespace-nowrap">{!viewFilterOn && formatCurrency(book.currentBalance)}</td>
                   {canEdit && <td></td>}
                 </tr>
               )}

@@ -1,4 +1,5 @@
 import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
+import { ItemSpecsDto } from './item-specs.dto';
 import { Type } from 'class-transformer';
 import { DeliveryStatus } from '../../../../common/enums/delivery-status.enum';
 
@@ -61,6 +62,12 @@ export class CustomerOrderItemDto {
   @IsString()
   @IsOptional()
   referenceImageId?: string;
+
+  // Optional quotation details for the order PDF (plywood, polish, foam...).
+  @ValidateNested()
+  @Type(() => ItemSpecsDto)
+  @IsOptional()
+  specs?: ItemSpecsDto;
 }
 
 export class CreateCustomerOrderDto {

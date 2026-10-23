@@ -7,6 +7,7 @@ import { api, ApiError, getAccessToken } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate, toDateInputValue } from '@/lib/format';
 import { Modal } from '@/components/Modal';
+import { ItemSpecsEditor, specsPayload } from '@/components/ItemSpecsEditor';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { StatusBadge, BalanceBadge, Chip, type ChipColor } from '@/components/StatusBadge';
 import { ViewField } from '@/components/ViewField';
@@ -20,7 +21,7 @@ import { ModelNoPicker } from '@/components/ModelNoPicker';
 import { ProductSelector } from '@/components/ProductSelector';
 import type { CompanyProductEntry } from '@/lib/companyProducts';
 import { GalleryGrid } from '@/components/GalleryGrid';
-import type { GalleryImage } from '@/types';
+import type { GalleryImage, ItemSpecs } from '@/types';
 import { assetUrl } from '@/lib/api';
 import { downloadCsv } from '@/lib/csv';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
@@ -51,6 +52,7 @@ interface ItemRow {
   availableQuantity?: number;
   referenceImageId?: string;
   referenceImage?: GalleryImage | null;
+  specs?: ItemSpecs;
 }
 
 const emptyRow: ItemRow = { productName: '', category: '', size: '', sizeUnit: '', color: '', quantity: '1', unitPrice: '' };
@@ -210,6 +212,7 @@ function CustomerOrdersContent() {
           unitPrice: String(i.unitPrice),
           referenceImageId: i.referenceImageId ?? undefined,
           referenceImage: i.referenceImage ?? null,
+          specs: i.specs ?? undefined,
         }))
         : [{ ...emptyRow, productName: order.product, unitPrice: String(order.orderValue ?? 0) }],
     );
@@ -247,6 +250,7 @@ function CustomerOrdersContent() {
           quantity: parseInt(i.quantity, 10) || 1,
           unitPrice: parseFloat(i.unitPrice),
           referenceImageId: i.referenceImageId || undefined,
+          specs: specsPayload(i.specs),
         })),
       // galleryImageIds intentionally omitted - the order-wide gallery
       // picker was removed from this form (each product line has its own
@@ -665,6 +669,7 @@ function CustomerOrdersContent() {
                           Remove
                         </button>
                       </div>
+                      <ItemSpecsEditor value={row.specs} onChange={(specs) => updateItemRow(idx, { specs })} />
                       {row.productId && (
                         <p className="text-[11px] text-brand-500 px-0.5">
                           Model No is {available > 0 ? <span className="text-emerald-700">In Stock</span> : <span className="text-red-600">Sold</span>} - Required: {qty} →{' '}

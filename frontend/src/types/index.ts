@@ -39,6 +39,23 @@ export interface Payment {
   createdAt: string;
 }
 
+// Optional quotation details for one order line, printed in the order PDF.
+export interface ItemSpecs {
+  overallSize?: string;
+  headboardHeight?: string;
+  frameHeight?: string;
+  plywood?: string;
+  innerSide?: string;
+  outerSide?: string;
+  work?: string;
+  polish?: string;
+  finishType?: string;
+  foam?: string;
+  headboard?: string;
+  assemblyMethod?: string;
+  fittings?: string;
+}
+
 export interface CustomerOrderItem {
   id: string;
   productId?: string | null;
@@ -56,6 +73,7 @@ export interface CustomerOrderItem {
   color?: string | null;
   quantity: number;
   unitPrice: number;
+  specs?: ItemSpecs | null;
   // Stock-first split, computed at create/edit time.
   stockReservedQty?: number;
   productionQty?: number;
@@ -113,6 +131,7 @@ export interface PartyOrderItem {
   pattern?: string | null;
   details?: string | null;
   qty: number;
+  specs?: ItemSpecs | null;
   modelNo?: string | null;
   modelNoUpdatedBy?: { id: string; name?: string | null; role?: string | null } | null;
   modelNoUpdatedAt?: string | null;

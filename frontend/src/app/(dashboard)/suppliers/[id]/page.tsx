@@ -17,7 +17,7 @@ import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { ImportButton } from '@/components/ImportButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { buildLedger, isOldBalance, type LedgerEntry } from '@/lib/ledger';
-import { LedgerSummary } from '@/components/LedgerSummary';
+import { LedgerSummary, OldBalanceTable } from '@/components/LedgerSummary';
 import { PURCHASE_STATUS_LABEL } from '@/types';
 import type { SupplierDetail, SupplierPayment, Purchase, PurchaseStatus } from '@/types';
 
@@ -224,7 +224,6 @@ function SupplierDetailContent() {
   // Date range is applied in buildLedger; these only hide rows.
   const ledgerViewFilterOn = Boolean(ledgerFilter.q.trim() || ledgerFilter.kind || ledgerFilter.mode);
   const filteredStatement = book.rows.filter((r) => {
-    if (r.type === 'bf') return !ledgerViewFilterOn;
     const d = r.entry.data;
     const f = ledgerFilter;
     if (f.q.trim() && !norm(d.ref).includes(norm(f.q)) && !norm(d.kind === 'purchase' ? d.particulars : d.payment.particulars || '').includes(norm(f.q))) return false;
@@ -233,8 +232,8 @@ function SupplierDetailContent() {
     return true;
   });
   const ledgerFilterOn = Object.values(ledgerFilter).some(Boolean);
-  const filteredStatementPurchased = filteredStatement.reduce((t, r) => t + (r.type === 'bf' ? r.amount : r.entry.debit ? r.entry.amount : 0), 0);
-  const filteredStatementPaid = filteredStatement.reduce((t, r) => t + (r.type === 'entry' && !r.entry.debit ? r.entry.amount : 0), 0);
+  const filteredStatementPurchased = filteredStatement.reduce((t, r) => t + (r.entry.debit ? r.entry.amount : 0), 0);
+  const filteredStatementPaid = filteredStatement.reduce((t, r) => t + (!r.entry.debit ? r.entry.amount : 0), 0);
 
   return (
     <div className="space-y-6">
@@ -408,7 +407,7 @@ function SupplierDetailContent() {
               </button>
             </div>
           </div>
-          <LedgerSummary oldBalance={book.oldBalance} newDebits={book.newDebits} paid={book.paid} current={book.current} newLabel="New Purchases" fromDate={ledgerFilter.from || undefined} />
+          <LedgerSummary oldUnpaid={book.oldUnpaid} oldTotal={book.oldTotal} currentBalance={book.currentBalance} paid={book.paid} total={book.total} />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-sm">
             <input className="input !py-1.5 text-sm" placeholder="Ref No. / notes" value={ledgerFilter.q} onChange={(e) => setLedgerFilter((f) => ({ ...f, q: e.target.value }))} />
             <select className="input !py-1.5 text-sm" value={ledgerFilter.kind} onChange={(e) => setLedgerFilter((f) => ({ ...f, kind: e.target.value }))}>
@@ -432,6 +431,18 @@ function SupplierDetailContent() {
             {ledgerFilterOn ? `Showing ${filteredStatement.length} row${filteredStatement.length === 1 ? '' : 's'} of ${statementEntries.length} entries` : `${statementEntries.length} entries`}
           </p>
           <div className="max-h-[700px] overflow-y-auto pr-1">
+          <OldBalanceTable
+            rows={book.oldRows}
+            oldTotal={book.oldTotal}
+            paidToOld={book.paidToOld}
+            oldUnpaid={book.oldUnpaid}
+            describe={(d: StmtData) =>
+              d.kind === 'purchase'
+                ? { label: 'Old Balance', detail: d.particulars, ref: d.ref }
+                : { label: 'Payment', detail: `Payment Type: ${d.payment.mode ?? '-'}`, ref: d.ref }
+            }
+          />
+          {book.oldRows.length > 0 && <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-700 mb-1.5">Current Ledger</h3>}
           <div className="overflow-x-auto rounded-lg border border-brand-100 mb-4">
             <table className="table-shell text-sm [&_th]:!px-2 [&_td]:!px-2">
               <thead>
@@ -442,7 +453,7 @@ function SupplierDetailContent() {
                   <th className="!text-right">Total</th>
                   <th className="!text-right">Paid</th>
                   <th className="!text-right" title="Amount still owed on this purchase">Txn Bal.</th>
-                  <th className="!text-right" title="Total still payable to this supplier after this entry">Running Balance</th>
+                  <th className="!text-right" title="Current balance payable (old balance not included) after this entry">Running Balance</th>
                   {canEdit && <th></th>}
                 </tr>
               </thead>
@@ -462,30 +473,13 @@ function SupplierDetailContent() {
                   </tr>
                 )}
                 {filteredStatement.map((r) => {
-                  if (r.type === 'bf') {
-                    return (
-                      <tr key={r.key} className="bg-amber-50">
-                        <td className="whitespace-nowrap">{formatDate(r.date)}</td>
-                        <td className="font-semibold">
-                          Old Balance (b/f)
-                          <div className="text-[11px] font-normal text-ink-muted">Owed before this date ({r.count} entr{r.count === 1 ? 'y' : 'ies'})</div>
-                        </td>
-                        <td>-</td>
-                        <td className="text-right whitespace-nowrap">{formatCurrency(r.amount)}</td>
-                        <td></td>
-                        <td></td>
-                        <td className="text-right whitespace-nowrap font-medium">{formatCurrency(r.balance)}</td>
-                        {canEdit && <td></td>}
-                      </tr>
-                    );
-                  }
                   const row = { ...r.entry.data, key: r.key, date: r.entry.date, amount: r.entry.amount, balance: r.balance };
                   if (row.kind === 'purchase') {
                     return (
-                      <tr key={row.key} className={r.entry.old ? 'bg-amber-50' : undefined}>
+                      <tr key={row.key}>
                         <td className="whitespace-nowrap">{formatDate(row.date)}</td>
                         <td className="font-medium">
-                          {r.entry.old ? <span className="font-semibold">Old Balance (b/f)</span> : row.amount < 0 ? 'Cancelled' : 'Purchase'}
+                          {row.amount < 0 ? 'Cancelled' : 'Purchase'}
                           <div className="text-[11px] font-normal text-ink-muted max-w-[120px] truncate" title={row.particulars}>
                             {row.particulars}
                           </div>
@@ -525,6 +519,7 @@ function SupplierDetailContent() {
                       <td className="font-medium">
                         Payment
                         <div className="text-[11px] font-normal text-ink-muted">Payment Type: {p.mode ?? '-'}</div>
+                        {r.towardsOld > 0 && <div className="text-[11px] font-normal text-amber-800">{formatCurrency(r.towardsOld)} towards Old Balance</div>}
                       </td>
                       <td className="whitespace-nowrap">{row.ref}</td>
                       <td className="text-right whitespace-nowrap">{formatCurrency(row.amount)}</td>
@@ -553,7 +548,7 @@ function SupplierDetailContent() {
                     <td className="text-right whitespace-nowrap text-emerald-700">{formatCurrency(filteredStatementPaid)}</td>
                     <td></td>
                     <td className="text-right whitespace-nowrap">
-                      {!ledgerViewFilterOn && formatCurrency(book.current)}
+                      {!ledgerViewFilterOn && formatCurrency(book.currentBalance)}
                     </td>
                     {canEdit && <td></td>}
                   </tr>

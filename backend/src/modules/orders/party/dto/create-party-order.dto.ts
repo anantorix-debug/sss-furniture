@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
+import { ItemSpecsDto } from '../../customer/dto/item-specs.dto';
 import { DeliveryStatus } from '../../../../common/enums/delivery-status.enum';
 
 // One line of a Party Order - no fixed limit on how many of these an order
@@ -63,6 +64,12 @@ export class PartyOrderItemDto {
   @IsString()
   @IsOptional()
   referenceImageId?: string;
+
+  // Optional quotation details for the order PDF (plywood, polish, foam...).
+  @ValidateNested()
+  @Type(() => ItemSpecsDto)
+  @IsOptional()
+  specs?: ItemSpecsDto;
 }
 
 export class CreatePartyOrderDto {

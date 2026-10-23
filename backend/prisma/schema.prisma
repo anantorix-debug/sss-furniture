@@ -383,6 +383,9 @@ model CustomerOrderItem {
   // customer-facing WhatsApp confirmation instead).
   referenceImageId String?
   referenceImage   GalleryImage? @relation("CustomerOrderItemReferenceImage", fields: [referenceImageId], references: [id], onDelete: SetNull)
+  // Optional quotation details (plywood, polish, foam, assembly...) printed
+  // in the order PDF - see ItemSpecsDto. Null when none were entered.
+  specs            Json?
 
   @@map("customer_order_items")
 }
@@ -548,6 +551,8 @@ model PartyOrderItem {
   // Gallery - same purpose as CustomerOrderItem.referenceImage.
   referenceImageId String?
   referenceImage   GalleryImage? @relation("PartyOrderItemReferenceImage", fields: [referenceImageId], references: [id], onDelete: SetNull)
+  // Optional quotation details printed in the order PDF - see ItemSpecsDto.
+  specs            Json?
 
   @@map("party_order_items")
 }

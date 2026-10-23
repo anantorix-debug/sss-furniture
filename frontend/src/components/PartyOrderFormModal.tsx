@@ -12,12 +12,13 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import { ModelNoPicker } from './ModelNoPicker';
 import { ProductSelector } from './ProductSelector';
+import { ItemSpecsEditor, specsPayload } from './ItemSpecsEditor';
 import type { CompanyProductEntry } from '@/lib/companyProducts';
 import { GalleryGrid } from './GalleryGrid';
 import { OrderWorkEntriesPanel, type StagedWorkEntry } from './OrderWorkEntriesPanel';
 import { SuccessTick } from './SuccessTick';
 import { assetUrl } from '@/lib/api';
-import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product, GalleryImage } from '@/types';
+import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product, GalleryImage, ItemSpecs } from '@/types';
 
 interface ItemForm {
   productId?: string;
@@ -33,6 +34,7 @@ interface ItemForm {
   availableQuantity?: number;
   referenceImageId?: string;
   referenceImage?: GalleryImage | null;
+  specs?: ItemSpecs;
 }
 
 const emptyItem: ItemForm = {
@@ -69,6 +71,7 @@ function itemFromExisting(i: PartyOrderItem): ItemForm {
     modelNo: i.modelNo ?? undefined,
     referenceImageId: i.referenceImageId ?? undefined,
     referenceImage: i.referenceImage ?? null,
+    specs: i.specs ?? undefined,
   };
 }
 
@@ -226,6 +229,7 @@ export function PartyOrderFormModal({
         unitPrice: parseFloat(i.unitPrice) || 0,
         modelNo: i.modelNo || undefined,
         referenceImageId: i.referenceImageId || undefined,
+        specs: specsPayload(i.specs),
       })),
     };
     await runForceable(async (force) => {
@@ -463,6 +467,7 @@ export function PartyOrderFormModal({
                     {item.referenceImage ? 'Change Image' : '+ Add Image'}
                   </button>
                 </div>
+                <ItemSpecsEditor value={item.specs} onChange={(specs) => updateItem(idx, { specs })} />
               </div>
             ))}
           </div>

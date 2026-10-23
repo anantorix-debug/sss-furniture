@@ -1,5 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { buildQuotationHtml, readSpecs, type QuotationLine } from '../../../common/utils/quotation-pdf.util';
+import { cleanSpecs, specsKey } from './dto/item-specs.dto';
 import { AuditService } from '../../audit/audit.service';
 import { CarpenterService } from '../../carpenter/carpenter.service';
 import { StockAllocationService } from '../../inventory/products/stock-allocation.service';
@@ -17,22 +20,25 @@ import { UpdateModelNoDateDto } from './dto/update-model-no-date.dto';
 import { computeBalance, suggestPaymentType } from '../../../common/utils/balance.util';
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
-import { getPdfBannerDataUri } from '../../../common/utils/pdf-banner.util';
-import { galleryImageDataUri } from '../../../common/utils/gallery-image-data-uri.util';
 import { Role } from '../../../common/enums/role.enum';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 
 const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.POLISHER];
 
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-}
 
 // Order-insensitive comparison of the saved lines against a submitted
 // items[] payload - the Edit form always sends the full array (even lines
 // nobody touched), so "items present" alone can't tell us whether anything
 // actually changed. Only a genuine difference should trigger the release/
 // reallocate cycle.
+// One order line's identity for "did the lines change?" - everything
+// except the quotation specs, so editing only specs never re-creates lines
+// (which would release and re-allocate stock/production).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function itemLineKey(i: any): string {
+  return `${i.productId ?? ''}|${i.productName}|${i.category ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.quantity ?? 1}|${Number(i.unitPrice)}|${i.referenceImageId ?? ''}`;
+}
+
 function itemsDiffer(
   current: {
     productId?: string | null;
@@ -61,10 +67,7 @@ function itemsDiffer(
     }[],
   ) =>
     items
-      .map(
-        (i) =>
-          `${i.productId ?? ''}|${i.productName}|${i.category ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.quantity ?? 1}|${Number(i.unitPrice)}|${i.referenceImageId ?? ''}`,
-      )
+      .map(itemLineKey)
       .sort()
       .join(';');
   return serialize(current) !== serialize(incoming);
@@ -270,6 +273,7 @@ export class CustomerOrdersService {
                 modelNoSetById: i.modelNoSetById,
                 modelNoSetAt: i.modelNoSetAt,
                 referenceImageId: i.referenceImageId,
+                specs: cleanSpecs(i.specs) ?? Prisma.JsonNull,
               })),
             }
           : undefined,
@@ -322,6 +326,23 @@ export class CustomerOrdersService {
         data: { stockReservedQty: result.stockReservedQty, productionQty: result.productionQty },
       });
     }
+  }
+
+  // Spec-only edits: lines unchanged, so update each line's specs in place
+  // (matched by line content). A line sent without a specs field is left
+  // as it is. Returns true when anything changed.
+  private async syncItemSpecs(current: { id: string; specs?: unknown }[], incoming: CustomerOrderItemDto[]): Promise<boolean> {
+    const pool = new Map<string, { id: string; specs?: unknown }[]>();
+    for (const c of current) pool.set(itemLineKey(c), [...(pool.get(itemLineKey(c)) ?? []), c]);
+    let changed = false;
+    for (const i of incoming) {
+      if (i.specs === undefined) continue;
+      const c = pool.get(itemLineKey(i))?.shift();
+      if (!c || specsKey(c.specs) === specsKey(i.specs)) continue;
+      await this.prisma.customerOrderItem.update({ where: { id: c.id }, data: { specs: cleanSpecs(i.specs) ?? Prisma.JsonNull } });
+      changed = true;
+    }
+    return changed;
   }
 
   async update(id: string, dto: UpdateCustomerOrderDto, userId: string, force = false, viewerRole?: Role) {
@@ -405,6 +426,7 @@ export class CustomerOrdersService {
                 modelNoSetById: i.modelNoSetById,
                 modelNoSetAt: i.modelNoSetAt,
                 referenceImageId: i.referenceImageId,
+                specs: cleanSpecs(i.specs) ?? Prisma.JsonNull,
               })),
             }
           : undefined,
@@ -419,6 +441,7 @@ export class CustomerOrdersService {
       await this.allocateItems(order.id, order.jobNumber ?? order.orderId, order.items, userId);
       return this.findOne(order.id);
     }
+    if (dto.items?.length && !usingItems && (await this.syncItemSpecs(current.items ?? [], dto.items))) return this.findOne(order.id);
     if (replacingGallery) return this.findOne(order.id);
     return withBalance(order);
   }
@@ -730,151 +753,44 @@ export class CustomerOrdersService {
   // every WhatsApp order-confirmation message; everything below it (item
   // boxes, payment summary, grand total) is generated from the real order
   // data instead of copied text.
-  private buildPdfHtml(order: Awaited<ReturnType<CustomerOrdersService['findOne']>>, recipientType: 'customer' | 'employee' = 'customer'): string {
-    const isEmployee = recipientType === 'employee';
-    // Falls back to the order-wide gallery selection (older orders that
-    // predate per-line images) only when this specific line has none of its
-    // own - see the identical fallback used for the list-page thumbnail.
-    const orderFallbackImageUrl = order.galleryImages?.[0]?.url ?? null;
-    const lines: { label: string; qty: number; unitPrice: number; total: number; details: string[]; imageUrl: string | null }[] =
-      order.items.length
-        ? order.items.map((i) => ({
-            label: i.category || i.productName,
-            qty: i.quantity,
-            unitPrice: Number(i.unitPrice),
-            total: i.quantity * Number(i.unitPrice),
-            details: [
-              i.category ? `Category : ${i.category}` : null,
-              `Product : ${i.productName}`,
-              i.size ? `Size : ${i.size}${i.sizeUnit ? ` ${i.sizeUnit}` : ''}` : null,
-              i.color ? `Colour : ${i.color}` : null,
-              `Quantity : ${i.quantity}`,
-              isEmployee ? null : `Price : ₹${Number(i.unitPrice).toLocaleString('en-IN')}/-`,
-            ].filter((d): d is string => d !== null),
-            imageUrl: i.referenceImage?.url ?? orderFallbackImageUrl,
-          }))
-        : [
-            {
-              label: order.product,
-              qty: 1,
-              unitPrice: Number(order.orderValue),
-              total: Number(order.orderValue),
-              details: [`Product : ${order.product}`, isEmployee ? null : `Price : ₹${Number(order.orderValue).toLocaleString('en-IN')}/-`].filter(
-                (d): d is string => d !== null,
-              ),
-              imageUrl: orderFallbackImageUrl,
-            },
-          ];
-
-    const itemBoxes = lines
-      .map((l) => {
-        const dataUri = l.imageUrl ? galleryImageDataUri(l.imageUrl) : null;
-        return `
-        <div class="item-box">
-          <div class="item-title">${escapeHtml(l.label.toUpperCase())}</div>
-          <div class="item-body">
-            ${dataUri ? `<img class="item-photo" src="${dataUri}" alt="${escapeHtml(l.label)}" />` : ''}
-            <ul>${l.details.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}</ul>
-          </div>
-        </div>`;
-      })
-      .join('');
-
-    const summaryRows = lines
-      .map(
-        (l, i) => `<tr>
-          <td>${i + 1}</td>
-          <td>${escapeHtml(l.label)}${l.qty > 1 ? ` (${l.qty} Nos)` : ''}</td>
-          <td style="text-align:right">₹${l.total.toLocaleString('en-IN')}/-</td>
-        </tr>`,
-      )
-      .join('');
-
-    const latestPayment = order.payments && order.payments.length > 0 ? order.payments[order.payments.length - 1] : null;
-    const paymentMode = latestPayment?.mode || 'Cash / Bank';
-
-    return `<!DOCTYPE html>
-<html><head><meta charset="utf-8" />
-<style>
-  body { font-family: 'Noto Sans', Arial, Helvetica, sans-serif; color: #2b2b2b; margin: 0; background: #fff; }
-  .banner { width: 100%; display: block; }
-  .body { padding: 20px 28px 28px; }
-  .title-row { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 6px; }
-  .title h1 { margin: 0; font-size: 26px; letter-spacing: 0.5px; }
-  .title h1 .accent { color: #80011f; }
-  .title p { margin: 2px 0 0; font-size: 12px; letter-spacing: 3px; color: #80011f; font-weight: bold; }
-  .meta-box { border: 1px solid #c9a227; border-radius: 6px; padding: 10px 16px; font-size: 12px; text-align: left; min-width: 220px; }
-  .meta-box div { margin: 2px 0; }
-  .meta-box b { display: inline-block; width: 100px; }
-  .greeting { margin: 18px 0 4px; font-size: 14px; }
-  .greeting .name { font-weight: bold; }
-  /* Chromium's print engine (Puppeteer) will otherwise slice a box right
-     across a page boundary, cutting its border/background mid-item - both
-     break-inside (standard) and page-break-inside (older WebKit alias, kept
-     for safety) are needed to actually stop that. */
-  .item-box { border: 1px solid #e3d9c6; border-radius: 6px; margin-top: 12px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
-  .item-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; }
-  .item-body { display: flex; align-items: flex-start; gap: 14px; padding: 8px 16px 10px; }
-  .item-photo { width: 280px; height: 280px; object-fit: contain; background: #faf9f6; border-radius: 8px; border: 1px solid #e3d9c6; flex-shrink: 0; }
-  .item-box ul { list-style: none; margin: 0; padding: 0; font-size: 12.5px; flex: 1; }
-  .item-box li { padding: 2px 0; }
-  .summary-section { break-inside: avoid; page-break-inside: avoid; margin-top: 20px; }
-  .summary-title { background: #80011f; color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.5px; padding: 7px 14px; border-radius: 6px 6px 0 0; }
-  table.summary { width: 100%; border-collapse: collapse; font-size: 12.5px; border: 1px solid #e3d9c6; border-top: none; }
-  table.summary th { background: #f4f2ec; text-align: left; padding: 8px 14px; border-bottom: 1px solid #e3d9c6; }
-  table.summary td { padding: 8px 14px; border-bottom: 1px solid #efede6; }
-  table.summary tr { break-inside: avoid; page-break-inside: avoid; }
-  .grand-total td { font-weight: bold; font-size: 14px; background: #f1e4c0; border-top: 2px solid #c9a227; }
-  .thanks { text-align: center; margin-top: 22px; font-size: 12px; color: #6b6b6b; break-inside: avoid; page-break-inside: avoid; }
-  .thanks strong { color: #80011f; }
-</style></head>
-<body>
-  <img class="banner" src="${getPdfBannerDataUri()}" alt="SSS Furniture" />
-  <div class="body">
-    <div class="title-row" style="break-inside: avoid; page-break-inside: avoid;">
-      <div class="title">
-        ${isEmployee ? `<h1>ORDER <span class="accent">DETAILS</span></h1>` : `<h1>BILL <span class="accent">&amp; PAYMENT</span></h1>`}
-        <p>ORDER CONFIRMATION</p>
-      </div>
-      <div class="meta-box">
-        <div><b>Invoice No</b> : ${escapeHtml(order.jobNumber ?? order.orderId)}</div>
-        <div><b>Date</b> : ${order.orderDate.toLocaleDateString('en-IN')}</div>
-        ${order.phone ? `<div><b>Phone</b> : ${escapeHtml(order.phone)}</div>` : ''}
-        ${isEmployee ? '' : `<div><b>Payment Mode</b> : ${escapeHtml(paymentMode)}</div>`}
-      </div>
-    </div>
-
-    <p class="greeting">Dear <span class="name">${escapeHtml(isEmployee ? (order.assignedEmployee?.name ?? 'Team') : order.customerName)}</span>,<br/>${
-      isEmployee ? 'Please proceed with the following order:' : 'Kindly check and confirm the following order details:'
-    }</p>
-
-    ${itemBoxes}
-
-    ${
-      isEmployee
-        ? ''
-        : `<div class="summary-section">
-      <div class="summary-title">PAYMENT SUMMARY</div>
-      <table class="summary">
-        <thead><tr><th style="width:40px">S.No</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
-        <tbody>
-          ${summaryRows}
-          <tr class="grand-total"><td colspan="2" style="text-align:right">GRAND TOTAL</td><td style="text-align:right">₹${Number(order.orderValue).toLocaleString('en-IN')}/-</td></tr>
-          <tr><td colspan="2" style="text-align:right">Amount Received</td><td style="text-align:right">₹${Number(order.totalReceived).toLocaleString('en-IN')}/-</td></tr>
-          <tr class="grand-total"><td colspan="2" style="text-align:right">BALANCE DUE</td><td style="text-align:right">₹${Number(order.balanceAmount).toLocaleString('en-IN')}/-</td></tr>
-        </tbody>
-      </table>
-    </div>`
-    }
-
-    <p class="thanks"><strong>Thank you</strong> for your trust and support - SSS Furniture</p>
-  </div>
-</body></html>`;
-  }
-
+  // Order PDF (download / WhatsApp) in the SSS Quotation layout - one block
+  // per line with its spec boxes and price. The employee copy leaves out
+  // prices and payments.
   async generatePdf(id: string, recipientType: 'customer' | 'employee' = 'customer'): Promise<Buffer> {
     const order = await this.findOne(id);
-    return this.pdf.renderHtmlToPdf(this.buildPdfHtml(order, recipientType));
+    const isEmployee = recipientType === 'employee';
+    const lines: QuotationLine[] = order.items.length
+      ? order.items.map((i) => ({
+          productName: i.productName,
+          category: i.category,
+          size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || null,
+          color: i.color,
+          qty: i.quantity,
+          unitPrice: Number(i.unitPrice),
+          specs: readSpecs(i.specs),
+        }))
+      : [
+          {
+            productName: order.product,
+            size: [order.size, order.sizeUnit].filter(Boolean).join(' ') || null,
+            color: order.colour,
+            details: order.specialInstructions,
+            qty: 1,
+            unitPrice: Number(order.orderValue),
+          },
+        ];
+    const html = buildQuotationHtml({
+      title: isEmployee ? 'Order Details' : 'Quotation',
+      docNo: order.jobNumber ?? order.orderId,
+      date: order.orderDate,
+      partyLabel: isEmployee ? 'For' : 'Customer',
+      partyName: isEmployee ? (order.assignedEmployee?.name ?? 'Team') : order.customerName,
+      phone: isEmployee ? null : order.phone,
+      lines,
+      showPrices: !isEmployee,
+      received: isEmployee ? 0 : Number(order.totalReceived ?? 0),
+    });
+    return this.pdf.renderHtmlToPdf(html);
   }
 
   async sendPdfToCustomer(id: string) {

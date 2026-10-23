@@ -30,3 +30,15 @@ export function getPdfFooterDataUri(): string {
   }
   return cachedFooterDataUri;
 }
+
+// SSS Furniture / Sakthi Vinayaga logo header used at the top of the
+// customer/party order PDF (Quotation layout).
+let cachedQuotationLogoDataUri: string | null = null;
+
+export function getQuotationLogoDataUri(): string {
+  if (!cachedQuotationLogoDataUri) {
+    const bytes = readFileSync(join(process.cwd(), 'src/assets/quotation-logo.jpeg'));
+    cachedQuotationLogoDataUri = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+  }
+  return cachedQuotationLogoDataUri;
+}

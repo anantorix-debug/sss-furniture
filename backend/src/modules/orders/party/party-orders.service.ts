@@ -1,6 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { isOldBalance, ledgerOrder, ledgerSummaryHtml } from '../../../common/utils/old-balance.util';
+import { buildQuotationHtml, readSpecs, type QuotationLine } from '../../../common/utils/quotation-pdf.util';
+import { cleanSpecs, specsKey } from '../customer/dto/item-specs.dto';
+import { isOldBalance, renderLedgerTables, type PdfLedgerEntry } from '../../../common/utils/old-balance.util';
 import { AuditService } from '../../audit/audit.service';
 import { StockAllocationService } from '../../inventory/products/stock-allocation.service';
 import { CarpenterService } from '../../carpenter/carpenter.service';
@@ -17,8 +20,7 @@ import { UpdateModelNoDto } from '../customer/dto/update-model-no.dto';
 import { computeBalance, suggestPaymentType } from '../../../common/utils/balance.util';
 import { generateJobNumber } from '../../../common/utils/job-number.util';
 import { paginate, toSkipTake } from '../../../common/utils/pagination.util';
-import { getPdfBannerDataUri, getPdfFooterDataUri } from '../../../common/utils/pdf-banner.util';
-import { galleryImageDataUri } from '../../../common/utils/gallery-image-data-uri.util';
+import { getPdfFooterDataUri } from '../../../common/utils/pdf-banner.util';
 import { REPORT_PDF_STYLES, renderReportHeader, renderFilterSummary, renderGeneratedFooter } from '../../../common/utils/pdf-report.util';
 import { Role } from '../../../common/enums/role.enum';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
@@ -34,6 +36,14 @@ function escapeHtml(s: string) {
 // reallocate cycle (which also blocks the whole save if any line is
 // already dispatched/in-progress - not something an unrelated field
 // change like Delivery Status should ever trigger).
+// One order line's identity for "did the lines change?" - everything
+// except the quotation specs, so editing only specs never re-creates lines
+// (which would release and re-allocate stock/production).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function itemLineKey(i: any): string {
+  return `${i.productId ?? ''}|${i.productName}|${i.finish ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.pattern ?? ''}|${i.details ?? ''}|${i.qty ?? 1}|${Number(i.unitPrice)}|${i.modelNo ?? ''}|${i.referenceImageId ?? ''}`;
+}
+
 function itemsDiffer(
   current: {
     productId?: string | null;
@@ -68,10 +78,7 @@ function itemsDiffer(
     }[],
   ) =>
     items
-      .map(
-        (i) =>
-          `${i.productId ?? ''}|${i.productName}|${i.finish ?? ''}|${i.size ?? ''}|${i.sizeUnit ?? ''}|${i.color ?? ''}|${i.pattern ?? ''}|${i.details ?? ''}|${i.qty ?? 1}|${Number(i.unitPrice)}|${i.modelNo ?? ''}|${i.referenceImageId ?? ''}`,
-      )
+      .map(itemLineKey)
       .sort()
       .join(';');
   return serialize(current) !== serialize(incoming);
@@ -541,6 +548,7 @@ export class PartyOrdersService {
             modelNoUpdatedById: i.modelNo?.trim() ? userId : undefined,
             modelNoUpdatedAt: i.modelNo?.trim() ? new Date() : undefined,
             referenceImageId: i.referenceImageId,
+                specs: cleanSpecs(i.specs) ?? Prisma.JsonNull,
           })),
         },
       },
@@ -584,6 +592,23 @@ export class PartyOrdersService {
         data: { stockReservedQty: result.stockReservedQty, productionQty: result.productionQty },
       });
     }
+  }
+
+  // Spec-only edits: lines unchanged, so update each line's specs in place
+  // (matched by line content). A line sent without a specs field is left
+  // as it is. Returns true when anything changed.
+  private async syncItemSpecs(current: { id: string; specs?: unknown }[], incoming: PartyOrderItemDto[]): Promise<boolean> {
+    const pool = new Map<string, { id: string; specs?: unknown }[]>();
+    for (const c of current) pool.set(itemLineKey(c), [...(pool.get(itemLineKey(c)) ?? []), c]);
+    let changed = false;
+    for (const i of incoming) {
+      if (i.specs === undefined) continue;
+      const c = pool.get(itemLineKey(i))?.shift();
+      if (!c || specsKey(c.specs) === specsKey(i.specs)) continue;
+      await this.prisma.partyOrderItem.update({ where: { id: c.id }, data: { specs: cleanSpecs(i.specs) ?? Prisma.JsonNull } });
+      changed = true;
+    }
+    return changed;
   }
 
   async update(id: string, dto: UpdatePartyOrderDto, userId: string, force = false, viewerRole?: Role) {
@@ -656,6 +681,7 @@ export class PartyOrdersService {
                 modelNoUpdatedById: i.modelNo?.trim() ? userId : undefined,
                 modelNoUpdatedAt: i.modelNo?.trim() ? new Date() : undefined,
                 referenceImageId: i.referenceImageId,
+                specs: cleanSpecs(i.specs) ?? Prisma.JsonNull,
               })),
             }
           : undefined,
@@ -667,6 +693,7 @@ export class PartyOrdersService {
       await this.allocateItems(order.jobNumber ?? order.id, order.items, userId);
       return this.findOne(order.id);
     }
+    if (dto.items?.length && !usingItems && (await this.syncItemSpecs(current.items ?? [], dto.items))) return this.findOne(order.id);
     return withBalance(order);
   }
 
@@ -1023,130 +1050,43 @@ export class PartyOrdersService {
   // information is traditionally presented on paper, modernized with the
   // shop's existing banner/branding. One template for both Download PDF
   // and Send PDF via WhatsApp - not two.
-  private buildPdfHtml(order: Awaited<ReturnType<PartyOrdersService['findOne']>>, recipientType: 'customer' | 'employee' = 'customer'): string {
+  // Order PDF (download / WhatsApp) in the SSS Quotation layout - see
+  // CustomerOrdersService.generatePdf. Employee copy: no prices/payments.
+  async generatePdf(id: string, recipientType: 'customer' | 'employee' = 'customer'): Promise<Buffer> {
+    const order: any = await this.findOne(id);
     const isEmployee = recipientType === 'employee';
-    const lines = order.items.length
-      ? order.items.map((i) => ({
-          date: order.orderDate,
-          order: i.productName,
-          polishColor: i.color ?? "-",
-          size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || '-',
-          pattern: i.pattern ?? '-',
-          price: i.unitPrice != null ? Number(i.unitPrice) : null,
-          modelNo: i.modelNo ?? '-',
-          value: i.totalValue != null ? Number(i.totalValue) : (i.qty ?? 1) * Number(i.unitPrice ?? 0),
-          imageUrl: i.referenceImage?.url ?? null,
+    const lines: QuotationLine[] = order.items?.length
+      ? order.items.map((i: any) => ({
+          productName: i.productName,
+          category: i.finish,
+          size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || null,
+          color: i.color,
+          pattern: i.pattern,
+          details: i.details,
+          qty: i.qty ?? 1,
+          unitPrice: Number(i.unitPrice),
+          specs: readSpecs(i.specs),
         }))
       : [
           {
-            date: order.orderDate,
-            order: order.model ?? 'Order',
-            polishColor: "-",
-            size: [order.size, order.sizeUnit].filter(Boolean).join(' ') || '-',
-            pattern: '-',
-            price: order.price != null ? Number(order.price) : null,
-            modelNo: order.cotNo ?? '-',
-            value: Number(order.totalAmount ?? 0),
-            imageUrl: null,
+            productName: order.model ?? order.shopName,
+            size: [order.size, order.sizeUnit].filter(Boolean).join(' ') || null,
+            qty: order.qty ?? 1,
+            unitPrice: Number(order.price ?? order.totalAmount ?? 0),
           },
         ];
-
-    const rows = lines
-      .map((l, idx) => {
-        const dataUri = l.imageUrl ? galleryImageDataUri(l.imageUrl) : null;
-        return `<tr>
-          <td>${idx + 1}</td>
-          <td>${dataUri ? `<img class="row-photo" src="${dataUri}" alt="${escapeHtml(l.order)}" />` : '-'}</td>
-          <td>${l.date.toLocaleDateString('en-IN')}</td>
-          <td>${escapeHtml(l.order)}</td>
-          <td>${escapeHtml(l.polishColor)}</td>
-          <td>${escapeHtml(l.size)}</td>
-          <td>${escapeHtml(l.pattern)}</td>
-          ${isEmployee ? '' : `<td style="text-align:right">${l.price != null ? `₹${l.price.toLocaleString('en-IN')}` : '-'}</td>`}
-          <td>${escapeHtml(l.modelNo)}</td>
-          ${isEmployee ? '' : `<td style="text-align:right">₹${l.value.toLocaleString('en-IN')}</td>`}
-        </tr>`;
-      })
-      .join('');
-
-    const totalOrderValue = Number(order.totalAmount ?? 0);
-    const received = Number((order as any).receivedAmount ?? 0);
-    const balance = Number((order as any).balanceAmount ?? totalOrderValue - received);
-
-    const deliveryBlock =
-      order.courierTrack || order.actualDeliveryDate
-        ? `<div style="margin-top:18px">
-             <h3 style="font-size:13px;margin:0 0 8px">Delivery Details</h3>
-             <p style="font-size:12px;color:#374151;margin:0">
-               ${order.courierTrack ? `Vehicle Number: ${escapeHtml(order.courierTrack)}<br/>` : ''}
-               ${order.actualDeliveryDate ? `Actual Delivery Date: ${order.actualDeliveryDate.toLocaleDateString('en-IN')}<br/>` : ''}
-               Delivery Status: ${escapeHtml(String(order.deliveryStatus).replace(/_/g, ' '))}
-             </p>
-           </div>`
-        : '';
-
-    return `<!DOCTYPE html>
-<html><head><meta charset="utf-8" />
-<style>
-  body { font-family: 'Noto Sans', Arial, Helvetica, sans-serif; color: #1f2933; margin: 0; background: #fff; }
-  .banner { width: 100%; display: block; }
-  .body { padding: 20px 28px 28px; }
-  .title { text-align: center; margin: 10px 0 18px; }
-  .title h1 { margin: 0; font-size: 20px; letter-spacing: 1px; color: #80011f; }
-  .title p { margin: 2px 0 0; font-size: 12px; letter-spacing: 2px; color: #6b7280; font-weight: bold; }
-  .meta { display: flex; flex-wrap: wrap; gap: 20px; font-size: 12px; margin-bottom: 16px; }
-  .meta div b { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }
-  table { width: 100%; border-collapse: collapse; font-size: 11.5px; break-inside: avoid; }
-  th { background: #f4f2ec; text-align: left; padding: 7px 9px; border-bottom: 1px solid #e3e1d9; }
-  td { padding: 7px 9px; border-bottom: 1px solid #efede6; }
-  .row-photo { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1px solid #e3e1d9; display: block; }
-  .summary { display: flex; gap: 20px; margin-top: 18px; }
-  .summary div { flex: 1; border: 1px solid #e3e1d9; border-radius: 8px; padding: 10px 14px; }
-  .summary .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }
-  .summary .value { font-size: 16px; font-weight: bold; margin-top: 2px; }
-  .thanks { text-align: center; margin-top: 22px; font-size: 12px; color: #6b6b6b; }
-  .thanks strong { color: #80011f; }
-</style></head>
-<body>
-  <img class="banner" src="${getPdfBannerDataUri()}" alt="SSS Furniture" />
-  <div class="body">
-    <div class="title">
-      <h1>SSS COMPANY</h1>
-      <p>PRODUCT SUPPLY DETAILS</p>
-    </div>
-    <div class="meta">
-      <div><b>Dealer Name</b>${escapeHtml(order.shopName)}</div>
-      ${order.phone ? `<div><b>Phone</b>${escapeHtml(order.phone)}</div>` : ''}
-      <div><b>Job No</b>${escapeHtml(order.jobNumber ?? order.cotNo ?? order.id)}</div>
-      <div><b>Order Date</b>${order.orderDate.toLocaleDateString('en-IN')}</div>
-    </div>
-    <table>
-      <thead>
-        <tr><th>S.No</th><th>Photo</th><th>Date</th><th>Order</th><th>Polish Colour</th><th>Size</th><th>Pattern</th>${
-          isEmployee ? '' : '<th style="text-align:right">Price</th>'
-        }<th>Model No</th>${isEmployee ? '' : '<th style="text-align:right">Value</th>'}</tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-    ${
-      isEmployee
-        ? ''
-        : `<div class="summary">
-      <div><div class="label">Total Order Value</div><div class="value">₹${totalOrderValue.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Received</div><div class="value" style="color:#15803d">₹${received.toLocaleString('en-IN')}</div></div>
-      <div><div class="label">Balance</div><div class="value" style="color:#b91c1c">₹${balance.toLocaleString('en-IN')}</div></div>
-    </div>`
-    }
-    ${deliveryBlock}
-    <p class="thanks"><strong>Thank you</strong> for your trust and support - SSS Furniture</p>
-    <img src="${getPdfFooterDataUri()}" alt="SSS Furniture" style="display:block;width:100%;margin-top:18px;break-inside:avoid" />
-  </div>
-</body></html>`;
-  }
-
-  async generatePdf(id: string, recipientType: 'customer' | 'employee' = 'customer'): Promise<Buffer> {
-    const order = await this.findOne(id);
-    return this.pdf.renderHtmlToPdf(this.buildPdfHtml(order, recipientType));
+    const html = buildQuotationHtml({
+      title: isEmployee ? 'Order Details' : 'Quotation',
+      docNo: order.jobNumber ?? order.cotNo ?? order.id,
+      date: new Date(order.orderDate),
+      partyLabel: isEmployee ? 'For' : 'Shop',
+      partyName: isEmployee ? 'Production Team' : order.shopName,
+      phone: isEmployee ? null : order.phone,
+      lines,
+      showPrices: !isEmployee,
+      received: isEmployee ? 0 : Number(order.receivedAmount ?? 0),
+    });
+    return this.pdf.renderHtmlToPdf(html);
   }
 
   async sendPdfToShop(id: string) {
@@ -1441,42 +1381,30 @@ export class PartyOrdersService {
     const rupees = (n: number) => `${n < 0 ? '-' : ''}₹${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const fmt = (d: Date) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-    type Row =
-      | { kind: 'order'; date: Date; ref: string; amount: number; detail: string; txnBal: number; cancelled: boolean; old: boolean; debit: true }
-      | { kind: 'payment'; date: Date; ref: string; amount: number; detail: string; old: false; debit: false };
     const summary = summarizeShopOrders(shop as any, filteredOrders);
-    const rows: Row[] = hide
+    const entries: PdfLedgerEntry[] = hide
       ? []
       : [
-          ...buildOrderLedger(filteredOrders, false).map((o) => ({ kind: 'order' as const, date: o.date, ref: o.ref ?? '-', amount: o.total, detail: o.particulars, txnBal: o.balance, cancelled: o.status === 'CANCELLED', old: isOldBalance(o.particulars), debit: true as const })),
-          ...buildPaymentLedger(filteredOrders, summary.totalValue, false).map((p) => ({ kind: 'payment' as const, date: p.date, ref: p.voucherNo ?? '-', amount: p.amount, detail: p.mode ?? '-', old: false as const, debit: false as const })),
-        ].sort(ledgerOrder);
-    const oldTotal = rows.reduce((t, r) => t + (r.kind === 'order' && r.old ? r.amount : 0), 0);
-    const newOrders = rows.reduce((t, r) => t + (r.kind === 'order' && !r.old ? r.amount : 0), 0);
-    const paidTotal = rows.reduce((t, r) => t + (r.kind === 'payment' ? r.amount : 0), 0);
-
-    let balance = 0;
-    const body = rows
-      .map((r) => {
-        balance += r.kind === 'order' ? r.amount : -r.amount;
-        const tint = r.kind === 'payment' ? 'background:#f0fdf4' : r.old ? 'background:#fffbeb' : '';
-        const main = `<tr style="${tint}">
-          <td>${fmt(r.date)}</td>
-          <td style="font-weight:600">${r.kind === 'payment' ? 'Payment' : r.old ? 'Old Balance (b/f)' : r.cancelled ? 'Order (Cancelled)' : 'Order'}</td>
-          <td style="white-space:nowrap">${escapeHtml(r.ref)}</td>
-          <td style="text-align:right">${rupees(r.amount)}</td>
-          <td style="text-align:right">${rupees(r.kind === 'payment' ? r.amount : 0)}</td>
-          <td style="text-align:right">${r.kind === 'order' ? rupees(r.txnBal) : ''}</td>
-          <td style="text-align:right;font-weight:600">${rupees(balance)}</td>
-        </tr>`;
-        const sub = `<tr style="${tint}"><td></td><td colspan="6" style="font-size:10.5px;color:#6b7280;padding-top:0">${
-          r.kind === 'payment' ? `<b>Payment Type:</b> ${escapeHtml(r.detail)}` : escapeHtml(r.detail)
-        }</td></tr>`;
-        return main + sub;
-      })
-      .join('');
-    const ordered = rows.filter((r) => r.kind === 'order').reduce((t, r) => t + r.amount, 0);
-    const paid = rows.filter((r) => r.kind === 'payment').reduce((t, r) => t + r.amount, 0);
+          ...buildOrderLedger(filteredOrders, false).map((o) => ({
+            date: o.date,
+            amount: o.total,
+            debit: true,
+            old: isOldBalance(o.particulars),
+            title: o.status === 'CANCELLED' ? 'Order (Cancelled)' : 'Order',
+            ref: o.ref ?? '-',
+            detail: o.particulars,
+            txnBal: o.balance,
+          })),
+          ...buildPaymentLedger(filteredOrders, summary.totalValue, false).map((p) => ({
+            date: p.date,
+            amount: p.amount,
+            debit: false,
+            old: false,
+            title: 'Payment',
+            ref: p.voucherNo ?? '-',
+            detail: `Payment Type: ${p.mode ?? '-'}`,
+          })),
+        ];
 
     const filterSummary = renderFilterSummary({
       Search: params.search,
@@ -1500,16 +1428,9 @@ export class PartyOrdersService {
     ${
       hide
         ? '<p style="color:#6b7280">Payment details are not visible for your role.</p>'
-        : `${ledgerSummaryHtml(oldTotal, newOrders, paidTotal, 'New Orders', rupees)}
-    <table>
-      <thead><tr><th>Date</th><th>Txn Type</th><th>Ref No.</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Txn Bal.</th><th style="text-align:right">Running Balance</th></tr></thead>
-      <tbody>
-        ${body || '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">No orders or payments</td></tr>'}
-        ${rows.length ? `<tr style="font-weight:bold;background:#e5e7eb"><td></td><td>Total</td><td></td><td style="text-align:right">${rupees(ordered)}</td><td style="text-align:right">${rupees(paid)}</td><td></td><td style="text-align:right">${rupees(balance)}</td></tr>` : ''}
-      </tbody>
-    </table>`
+        : renderLedgerTables(entries, rupees, fmt)
     }
-    ${renderGeneratedFooter(rows.length, 'transaction')}
+    ${renderGeneratedFooter(entries.length, 'transaction')}
     <img src="${getPdfFooterDataUri()}" alt="SSS Furniture" style="display:block;width:100%;margin-top:18px;break-inside:avoid" />
   </div>
 </body></html>`;
