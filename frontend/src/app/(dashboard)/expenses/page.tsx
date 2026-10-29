@@ -267,18 +267,48 @@ function ExpensesContent() {
         />
       )}
       {tab === 'category' && activeCategory && (
-        <ExpenseListTab
-          key={activeCategory.id}
-          title={activeCategory.name}
-          description={`Transactions categorized as ${activeCategory.name}${
-            activeCategory.scope === 'PERSONAL'
-              ? ' (Personal Expense - isolated from company operational totals)'
-              : ''
-          }.`}
-          categoryId={activeCategory.id}
-          exportName={`expenses-${activeCategory.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
-          onCreate={() => setAddOpen(true)}
-        />
+        <div className="space-y-4">
+          <div className="card p-3 bg-brand-50/60 border border-brand-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-brand-700">Active Category:</span>
+              <select
+                value={selectedCategoryId}
+                onChange={(e) => setSelectedCategoryId(e.target.value)}
+                className="input text-xs py-1.5 px-2.5 font-bold text-brand-900 bg-white border border-brand-300 rounded-md"
+              >
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.scope === 'PERSONAL' ? '🏠 ' : '🏢 '}
+                    {c.name} [{c.scope ?? 'COMPANY'}]
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setAddOpen(true)}
+                className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1 shadow-xs"
+              >
+                <span>+</span>
+                <span>Add Entry to {activeCategory.name}</span>
+              </button>
+            </div>
+          </div>
+
+          <ExpenseListTab
+            key={activeCategory.id}
+            title={activeCategory.name}
+            description={`Transactions categorized as ${activeCategory.name}${
+              activeCategory.scope === 'PERSONAL'
+                ? ' (Personal Expense - isolated from company operational totals)'
+                : ''
+            }.`}
+            categoryId={activeCategory.id}
+            exportName={`expenses-${activeCategory.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+            onCreate={() => setAddOpen(true)}
+          />
+        </div>
       )}
       {tab === 'settings' && <ExpenseSettingsTab />}
       {tab === 'reports' && <ReportsTab />}

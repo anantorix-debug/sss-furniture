@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
@@ -172,7 +172,26 @@ export function PartyOrderFormModal({
   function setItemImage(idx: number, image: GalleryImage | null) {
     updateItem(idx, { referenceImageId: image?.id, referenceImage: image });
   }
+  const lastAddedIdxRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (lastAddedIdxRef.current !== null) {
+      const idx = lastAddedIdxRef.current;
+      lastAddedIdxRef.current = null;
+      const timer = setTimeout(() => {
+        const cardEl = document.getElementById(`party-order-item-${idx}`);
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          const firstInput = cardEl.querySelector('input') as HTMLInputElement | null;
+          firstInput?.focus();
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [items.length]);
+
   function addItem() {
+    lastAddedIdxRef.current = items.length;
     setItems((rows) => [...rows, { ...emptyItem }]);
   }
   function removeItem(idx: number) {
@@ -410,7 +429,7 @@ export function PartyOrderFormModal({
           </div>
           <div className="space-y-3 max-h-[45vh] overflow-y-auto">
             {items.map((item, idx) => (
-              <div key={idx} className="border border-brand-100 rounded-lg p-3 space-y-2">
+              <div key={idx} id={`party-order-item-${idx}`} className="border border-brand-100 rounded-lg p-3 space-y-2">
                 <span className="text-xs font-medium text-brand-400">Product {idx + 1}</span>
                 <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr_auto] gap-2 items-start">
                   <ModelNoPicker
@@ -495,6 +514,17 @@ export function PartyOrderFormModal({
                 <ItemSpecsEditor value={item.specs} onChange={(specs) => updateItem(idx, { specs })} />
               </div>
             ))}
+
+            <button
+              type="button"
+              onClick={addItem}
+              className="w-full py-2.5 px-4 border-2 border-dashed border-brand-300 rounded-lg text-brand-700 hover:bg-brand-50 hover:border-brand-500 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/20 shadow-sm"
+            >
+              <svg className="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span>+ Add Product</span>
+            </button>
           </div>
           <div className="flex justify-end">
             <p className="text-sm font-semibold text-brand-900">Total Order Value: {formatCurrency(orderTotal)}</p>
