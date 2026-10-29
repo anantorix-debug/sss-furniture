@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
@@ -366,6 +367,54 @@ export default function TrackPage() {
                   <div>
                     <span className="text-brand-400">Supplier Phone:</span>
                     <p className="font-medium text-brand-700">{po.supplierPhone ?? '—'}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Supplier Payments & Ref Vouchers */}
+      {data && data.supplierPayments && data.supplierPayments.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="font-semibold text-brand-900">
+            Matching Supplier Payment &amp; Ref Voucher{data.supplierPayments.length > 1 ? `s (${data.supplierPayments.length})` : ''}
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {data.supplierPayments.map((sp) => (
+              <div key={sp.id} className="card p-5 hover:border-brand-300 transition-all">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="font-mono font-bold text-xs bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded">
+                    {sp.voucherNo ? `REF / VOUCHER #${sp.voucherNo}` : 'PAYMENT'}
+                  </span>
+                  <span className="text-xs text-brand-500">{formatDate(sp.date)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <Link
+                    href={`/suppliers/${sp.supplierId}`}
+                    className="font-semibold text-brand-900 text-base hover:underline hover:text-brand-700 inline-flex items-center gap-1"
+                  >
+                    {sp.supplierName}
+                    <span className="text-xs text-brand-400 font-normal">↗ Open Ledger</span>
+                  </Link>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-brand-100 text-xs">
+                  <div>
+                    <span className="text-brand-400">Ref / Voucher No:</span>
+                    <p className="font-mono font-bold text-brand-800">{sp.voucherNo ?? '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Amount Paid:</span>
+                    <p className="font-bold text-emerald-700 text-sm">{formatCurrency(sp.amount)}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Payment Mode:</span>
+                    <p className="font-medium text-brand-700">{sp.mode ?? '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Particulars:</span>
+                    <p className="font-medium text-brand-700">{sp.particulars ?? '—'}</p>
                   </div>
                 </div>
               </div>

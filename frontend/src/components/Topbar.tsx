@@ -164,12 +164,12 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
           </div>
         </form>
 
-        <form onSubmit={handleVoucherSearch} className="w-[125px] sm:w-[155px] md:w-[170px]">
+        <form onSubmit={handleVoucherSearch} className="w-[130px] sm:w-[160px] md:w-[185px]" title="Search by Voucher No or Ref No">
           <div className="relative">
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted text-xs">🧾</span>
             <input
               className="input h-8 pl-7 pr-2 text-xs w-full bg-brand-50/50 border-brand-200 focus:bg-white"
-              placeholder="Voucher No..."
+              placeholder="Voucher / Ref No..."
               value={voucherSearch}
               onChange={(e) => setVoucherSearch(e.target.value)}
             />

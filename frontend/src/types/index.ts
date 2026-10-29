@@ -1013,6 +1013,19 @@ export interface TrackResult {
     notes?: string | null;
     investorName: string;
   }[];
+  supplierPayments?: {
+    id: string;
+    voucherNo?: string | null;
+    particulars?: string | null;
+    date: string;
+    amount: number;
+    balanceAfter?: number | null;
+    mode?: string | null;
+    supplierId: string;
+    supplierName: string;
+    supplierPhone?: string | null;
+    createdBy?: string | null;
+  }[];
 }
 
 export interface AuditLogEntry {

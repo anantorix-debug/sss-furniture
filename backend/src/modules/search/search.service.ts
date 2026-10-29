@@ -35,6 +35,7 @@ export class SearchService {
       carpenterPayments,
       purchaseOrders,
       investorTransactions,
+      supplierPayments,
     ] = await Promise.all([
       this.prisma.product.findFirst({ where: { modelNo: { contains: trimmed } } }),
       this.prisma.customerOrder.findMany({
@@ -154,6 +155,22 @@ export class SearchService {
         orderBy: { date: 'desc' },
         take: 20,
       }),
+      // Supplier Payments / Ref Vouchers
+      this.prisma.supplierPayment.findMany({
+        where: {
+          OR: [
+            { voucherNo: { contains: trimmed } },
+            { particulars: { contains: trimmed } },
+            { mode: { contains: trimmed } },
+          ],
+        },
+        include: {
+          supplier: { select: { id: true, name: true, phone: true } },
+          createdBy: { select: { id: true, name: true } },
+        },
+        orderBy: { date: 'desc' },
+        take: 20,
+      }),
     ]);
 
     // A work item's own modelNo can differ from the Model No actually
@@ -216,7 +233,8 @@ export class SearchService {
           expenses.length ||
           carpenterPayments.length ||
           purchaseOrders.length ||
-          investorTransactions.length,
+          investorTransactions.length ||
+          supplierPayments.length,
       ),
       product: product
         ? {
@@ -432,6 +450,19 @@ export class SearchService {
         notes: tx.notes,
         investorName: tx.investor.name,
       })),
+      supplierPayments: supplierPayments.map((sp) => ({
+        id: sp.id,
+        voucherNo: sp.voucherNo,
+        particulars: sp.particulars,
+        date: sp.date,
+        amount: Number(sp.amount),
+        balanceAfter: sp.balanceAfter !== null ? Number(sp.balanceAfter) : null,
+        mode: sp.mode,
+        supplierId: sp.supplierId,
+        supplierName: sp.supplier?.name ?? 'Unknown Supplier',
+        supplierPhone: sp.supplier?.phone ?? null,
+        createdBy: sp.createdBy?.name ?? null,
+      })),
     };
   }
 
@@ -492,6 +523,19 @@ export class SearchService {
       )
       .join('');
 
+    const supplierPaymentRows = (result.supplierPayments ?? [])
+      .map(
+        (sp: any) => `<tr>
+          <td>${escapeHtml(sp.voucherNo ?? '-')}</td>
+          <td>${escapeHtml(sp.supplierName)}</td>
+          <td>${escapeHtml(sp.particulars ?? '-')}</td>
+          <td>₹${Number(sp.amount).toLocaleString('en-IN')}</td>
+          <td>${fmt(sp.date)}</td>
+          <td>${escapeHtml(sp.mode ?? '-')}</td>
+        </tr>`,
+      )
+      .join('');
+
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>${REPORT_PDF_STYLES}</style></head>
@@ -524,6 +568,14 @@ export class SearchService {
         ? `<h3>Expenses &amp; Vouchers</h3><table>
       <thead><tr><th>Voucher / Ref</th><th>Particulars</th><th>Category</th><th>Amount</th><th>Date</th><th>Mode</th></tr></thead>
       <tbody>${expenseRows}</tbody>
+    </table>`
+        : ''
+    }
+    ${
+      supplierPaymentRows
+        ? `<h3>Supplier Payments &amp; Ref Vouchers</h3><table>
+      <thead><tr><th>Ref / Voucher No</th><th>Supplier</th><th>Particulars</th><th>Amount</th><th>Date</th><th>Mode</th></tr></thead>
+      <tbody>${supplierPaymentRows}</tbody>
     </table>`
         : ''
     }
