@@ -2,6 +2,30 @@ import { getAccessToken } from './api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
+/**
+ * Direct file download: Fetches the PDF with auth and triggers an immediate browser file
+ * download straight to the user's Downloads folder without opening the OS share sheet.
+ */
+export async function downloadPdf(path: string, filename: string): Promise<void> {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to download PDF (status ${res.status} ${res.statusText})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 // Genuinely separate from both "Download PDF" and "Send PDF via WhatsApp" -
 // this doesn't depend on the backend's own WhatsApp connection being up at
 // all. It hands the file to the device's native share sheet (WhatsApp,
@@ -35,7 +59,9 @@ export async function sharePdf(path: string, filename: string, title: string): P
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
   return 'downloaded';
 }

@@ -6,7 +6,7 @@ import { fetcher } from '@/lib/swr';
 import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { formatCurrency, formatDate } from '@/lib/format';
-import { sharePdf } from '@/lib/sharePdf';
+import { downloadPdf } from '@/lib/sharePdf';
 import { RoleGate } from '@/components/RoleGate';
 import { StatCard } from '@/components/StatCard';
 import { Chip } from '@/components/StatusBadge';
@@ -195,12 +195,11 @@ export default function InvestorsPage() {
 
       const qs = params.toString();
       const filename = `Company_PnL_Report_${periodKey}_${new Date().toISOString().slice(0, 10)}.pdf`;
-      await sharePdf(
+      await downloadPdf(
         `/investors/pnl-pdf${qs ? `?${qs}` : ''}`,
         filename,
-        `Company P&L Statement (${activePeriodObj?.label || 'Period'})`,
       );
-      toast.success('P&L Report PDF generated');
+      toast.success('P&L Report PDF downloaded');
     } catch {
       toast.error('Failed to download P&L report PDF');
     } finally {
@@ -211,11 +210,11 @@ export default function InvestorsPage() {
   // Download Statement PDF
   async function handleDownloadStatement(investorId: string, name: string) {
     try {
-      await sharePdf(
+      await downloadPdf(
         `/investors/${investorId}/statement-pdf`,
         `Investor_Statement_${name.replace(/\s+/g, '_')}.pdf`,
-        `Investor Statement: ${name}`,
       );
+      toast.success('Investor Statement PDF downloaded');
     } catch {
       toast.error('Failed to download statement PDF');
     }
