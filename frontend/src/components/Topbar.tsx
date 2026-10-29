@@ -3,9 +3,25 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import useSWR from 'swr';
+import { fetcher } from '@/lib/swr';
+import { formatCurrency } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
 import { NotificationBell } from './NotificationBell';
 import type { Role } from '@/types';
+
+interface LiveSensex {
+  monthProfit: number;
+  monthRevenue: number;
+  monthCosts: number;
+  profitMargin: number;
+  lifetimeProfit: number;
+  lifetimeRevenue: number;
+  activeInvestors: number;
+  netActiveCapital: number;
+  isProfit: boolean;
+  timestamp: string;
+}
 
 const TITLES: Record<string, { title: string; crumb: string }> = {
   '/dashboard': { title: 'Dashboard', crumb: 'Dashboard' },
@@ -17,12 +33,13 @@ const TITLES: Record<string, { title: string; crumb: string }> = {
   '/carpenters': { title: 'Production', crumb: 'Production › Carpenter Work' },
   '/payments': { title: 'Payments', crumb: 'Payments' },
   '/expenses': { title: 'Expenses', crumb: 'Expenses' },
+  '/investors': { title: 'Investors Management', crumb: 'Investors › P&L & Dividends' },
   '/reports': { title: 'Reports', crumb: 'Reports' },
   '/users': { title: 'Users', crumb: 'Users & Roles › Users' },
   '/audit-log': { title: 'Audit Log', crumb: 'Users & Roles › Audit Log' },
   '/settings/whatsapp': { title: 'Settings', crumb: 'Settings › WhatsApp' },
   '/profile': { title: 'My Profile', crumb: 'My Profile & Security' },
-  '/track': { title: 'Track', crumb: 'Search by Model No' },
+  '/track': { title: 'Track', crumb: 'Global Search' },
 };
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -37,7 +54,15 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { user } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const [search, setSearch] = useState('');
+  const [modelSearch, setModelSearch] = useState('');
+  const [voucherSearch, setVoucherSearch] = useState('');
+
+  const isManagement = user?.role === 'SUPERADMIN' || user?.role === 'ADMIN';
+  const { data: sensex } = useSWR<LiveSensex>(
+    isManagement ? '/investors/live-sensex' : null,
+    fetcher,
+    { refreshInterval: 30000, revalidateOnFocus: true }
+  );
 
   const entry =
     TITLES[pathname ?? ''] ??
@@ -53,9 +78,16 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
     .join('')
     .toUpperCase();
 
-  function handleSearch(e: React.FormEvent) {
+  function handleModelSearch(e: React.FormEvent) {
     e.preventDefault();
-    const q = search.trim();
+    const q = modelSearch.trim();
+    if (!q) return;
+    router.push(`/track/${encodeURIComponent(q)}`);
+  }
+
+  function handleVoucherSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const q = voucherSearch.trim();
     if (!q) return;
     router.push(`/track/${encodeURIComponent(q)}`);
   }
@@ -77,17 +109,73 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
 
       <div className="flex-1" />
 
-      <form onSubmit={handleSearch} className="w-full max-w-[220px] sm:max-w-xs shrink min-w-0">
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted text-base">⌕</span>
-          <input
-            className="input h-9 pl-8 text-xs w-full"
-            placeholder="Search by Model No..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-      </form>
+      {/* Live Sensex / Profit & Loss Ticker */}
+      {isManagement && sensex && (
+        <Link
+          href="/investors"
+          className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-all text-xs group shrink-0 shadow-2xs"
+          title={`Live P&L this month. Revenue: ${formatCurrency(sensex.monthRevenue)} | Costs: ${formatCurrency(sensex.monthCosts)}. Click to open Investors & P&L.`}
+        >
+          <span className="relative flex h-2 w-2">
+            <span
+              className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                sensex.isProfit ? 'bg-emerald-400' : 'bg-red-400'
+              }`}
+            />
+            <span
+              className={`relative inline-flex rounded-full h-2 w-2 ${
+                sensex.isProfit ? 'bg-emerald-500' : 'bg-red-500'
+              }`}
+            />
+          </span>
+          <span className="font-bold text-[10px] tracking-wider uppercase text-slate-500 group-hover:text-brand-700 transition-colors">
+            P&amp;L SENSEX
+          </span>
+          <span
+            className={`font-mono font-bold text-xs ${
+              sensex.isProfit ? 'text-emerald-700' : 'text-red-600'
+            }`}
+          >
+            {formatCurrency(sensex.monthProfit)}
+          </span>
+          <span
+            className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+              sensex.isProfit
+                ? 'bg-emerald-100/80 text-emerald-800'
+                : 'bg-red-100/80 text-red-800'
+            }`}
+          >
+            {sensex.profitMargin > 0 ? `+${sensex.profitMargin}%` : `${sensex.profitMargin}%`}
+          </span>
+        </Link>
+      )}
+
+      {/* Dual Global Search: Model No & Voucher No */}
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink min-w-0">
+        <form onSubmit={handleModelSearch} className="w-[125px] sm:w-[155px] md:w-[170px]">
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted text-xs">⌕</span>
+            <input
+              className="input h-8 pl-7 pr-2 text-xs w-full bg-brand-50/50 border-brand-200 focus:bg-white"
+              placeholder="Model No..."
+              value={modelSearch}
+              onChange={(e) => setModelSearch(e.target.value)}
+            />
+          </div>
+        </form>
+
+        <form onSubmit={handleVoucherSearch} className="w-[125px] sm:w-[155px] md:w-[170px]">
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted text-xs">🧾</span>
+            <input
+              className="input h-8 pl-7 pr-2 text-xs w-full bg-brand-50/50 border-brand-200 focus:bg-white"
+              placeholder="Voucher No..."
+              value={voucherSearch}
+              onChange={(e) => setVoucherSearch(e.target.value)}
+            />
+          </div>
+        </form>
+      </div>
 
       <NotificationBell />
 

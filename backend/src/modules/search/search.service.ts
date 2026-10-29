@@ -23,15 +23,28 @@ export class SearchService {
   async track(modelNo: string, viewerRole?: Role) {
     const hideFinancials = viewerRole ? HIDE_FINANCIALS_FOR.includes(viewerRole) : false;
     const trimmed = modelNo.trim();
+    const voucherNumberInt = !isNaN(Number(trimmed)) && Number.isInteger(Number(trimmed)) ? Number(trimmed) : null;
 
-    const [product, customerOrders, customerOrderItems, partyOrders, partyOrderItems] = await Promise.all([
+    const [
+      product,
+      customerOrders,
+      customerOrderItems,
+      partyOrders,
+      partyOrderItems,
+      expenses,
+      carpenterPayments,
+      purchaseOrders,
+      investorTransactions,
+    ] = await Promise.all([
       this.prisma.product.findFirst({ where: { modelNo: { contains: trimmed } } }),
       this.prisma.customerOrder.findMany({
-        // cotTrack can be a combined value (e.g. "JOB-2026-00008, 309" when
-        // an order has multiple items, each with its own Model No joined
-        // back into one string) - contains, not equals, so searching for
-        // just one of those Model Nos still finds the order.
-        where: { cotTrack: { contains: trimmed } },
+        where: {
+          OR: [
+            { cotTrack: { contains: trimmed } },
+            { orderId: { contains: trimmed } },
+            { jobNumber: { contains: trimmed } },
+          ],
+        },
         include: {
           payments: true,
           createdBy: { select: { name: true } },
@@ -40,13 +53,6 @@ export class SearchService {
         },
         orderBy: { orderDate: 'desc' },
       }),
-      // A line's own Catalog Model No (linked to a Product, set via the
-      // order form's search box - see CustomerOrdersService.resolveItemModelNos)
-      // is a completely different place Model No lives from cotTrack above,
-      // and is now the primary way one gets set. Missing this meant an
-      // order could be fully tagged with a real Model No and still never
-      // show up here at all - same "order -> production -> employee ->
-      // delivery" gap PartyOrderItem's own modelNo search already covers.
       this.prisma.customerOrderItem.findMany({
         where: { product: { modelNo: { contains: trimmed } } },
         include: {
@@ -57,7 +63,12 @@ export class SearchService {
         orderBy: { order: { orderDate: 'desc' } },
       }),
       this.prisma.partyOrder.findMany({
-        where: { cotNo: { contains: trimmed } },
+        where: {
+          OR: [
+            { cotNo: { contains: trimmed } },
+            { jobNumber: { contains: trimmed } },
+          ],
+        },
         include: {
           payments: true,
           createdBy: { select: { name: true } },
@@ -73,6 +84,75 @@ export class SearchService {
           modelNoUpdatedBy: { select: { name: true } },
         },
         orderBy: { createdAt: 'desc' },
+      }),
+      // Expense Vouchers
+      this.prisma.expense.findMany({
+        where: {
+          status: 'ACTIVE',
+          OR: [
+            ...(voucherNumberInt !== null ? [{ voucherNumber: voucherNumberInt }] : []),
+            { particulars: { contains: trimmed } },
+            { vendorName: { contains: trimmed } },
+            { paidBy: { contains: trimmed } },
+            { notes: { contains: trimmed } },
+            { referenceType: { is: { code: { contains: trimmed } } } },
+            { referenceType: { is: { label: { contains: trimmed } } } },
+          ],
+        },
+        include: {
+          category: { select: { id: true, name: true, scope: true } },
+          referenceType: { select: { id: true, code: true, label: true } },
+          paymentMode: { select: { id: true, name: true } },
+          createdBy: { select: { id: true, name: true } },
+        },
+        orderBy: { date: 'desc' },
+        take: 20,
+      }),
+      // Carpenter Payment Vouchers
+      this.prisma.carpenterPayment.findMany({
+        where: {
+          OR: [
+            { reference: { contains: trimmed } },
+            { note: { contains: trimmed } },
+            { mode: { contains: trimmed } },
+          ],
+        },
+        include: {
+          carpenter: { select: { id: true, name: true, phone: true } },
+          createdBy: { select: { id: true, name: true } },
+        },
+        orderBy: { date: 'desc' },
+        take: 20,
+      }),
+      // Purchase Orders
+      this.prisma.purchase.findMany({
+        where: {
+          OR: [
+            { purchaseNumber: { contains: trimmed } },
+            { notes: { contains: trimmed } },
+          ],
+        },
+        include: {
+          supplier: { select: { id: true, name: true, phone: true } },
+          createdBy: { select: { id: true, name: true } },
+          items: { select: { quantity: true, unitPrice: true } },
+        },
+        orderBy: { purchaseDate: 'desc' },
+        take: 20,
+      }),
+      // Investor Transactions / Vouchers
+      this.prisma.investorTransaction.findMany({
+        where: {
+          OR: [
+            { reference: { contains: trimmed } },
+            { notes: { contains: trimmed } },
+          ],
+        },
+        include: {
+          investor: { select: { id: true, name: true, phone: true } },
+        },
+        orderBy: { date: 'desc' },
+        take: 20,
       }),
     ]);
 
@@ -127,7 +207,16 @@ export class SearchService {
     return {
       query: trimmed,
       found: Boolean(
-        product || customerOrders.length || customerOrderItems.length || partyOrders.length || partyOrderItems.length || workItems.length,
+        product ||
+          customerOrders.length ||
+          customerOrderItems.length ||
+          partyOrders.length ||
+          partyOrderItems.length ||
+          workItems.length ||
+          expenses.length ||
+          carpenterPayments.length ||
+          purchaseOrders.length ||
+          investorTransactions.length,
       ),
       product: product
         ? {
@@ -291,6 +380,58 @@ export class SearchService {
           })),
         })),
       })),
+      expenses: expenses.map((e) => ({
+        id: e.id,
+        voucherNumber: e.voucherNumber,
+        date: e.date,
+        amount: Number(e.amount),
+        particulars: e.particulars,
+        reference: e.referenceType?.code ?? null,
+        categoryName: e.category.name,
+        categoryScope: e.category.scope,
+        referenceTypeName: e.referenceType?.label ?? null,
+        paymentMode: e.paymentMode.name,
+        createdBy: e.createdBy.name,
+      })),
+      carpenterPayments: carpenterPayments.map((p) => ({
+        id: p.id,
+        voucherNo: p.reference,
+        reference: p.reference,
+        date: p.date,
+        amount: Number(p.amount),
+        mode: p.mode,
+        paymentType: p.paymentType,
+        carpenterName: p.carpenter.name,
+        carpenterPhone: p.carpenter.phone,
+        createdBy: p.createdBy?.name ?? null,
+      })),
+      purchaseOrders: purchaseOrders.map((po) => ({
+        id: po.id,
+        purchaseNumber: po.purchaseNumber,
+        invoiceNumber: po.purchaseNumber,
+        date: po.purchaseDate,
+        status: po.status,
+        supplierName: po.supplier?.name ?? 'Unknown Supplier',
+        supplierPhone: po.supplier?.phone ?? null,
+        ...(hideFinancials
+          ? {}
+          : {
+              totalAmount: po.items.reduce(
+                (sum, it) => sum + Number(it.quantity) * Number(it.unitPrice),
+                0,
+              ),
+            }),
+      })),
+      investorTransactions: investorTransactions.map((tx) => ({
+        id: tx.id,
+        type: tx.type,
+        date: tx.date,
+        amount: Number(tx.amount),
+        reference: tx.reference,
+        paymentMode: tx.paymentMode,
+        notes: tx.notes,
+        investorName: tx.investor.name,
+      })),
     };
   }
 
@@ -338,11 +479,24 @@ export class SearchService {
       )
       .join('');
 
+    const expenseRows = (result.expenses ?? [])
+      .map(
+        (e: any) => `<tr>
+          <td>${e.voucherNumber ? `V-${e.voucherNumber}` : (e.reference ?? '-')}</td>
+          <td>${escapeHtml(e.particulars)}</td>
+          <td>${escapeHtml(e.categoryName)}</td>
+          <td>₹${Number(e.amount).toLocaleString('en-IN')}</td>
+          <td>${fmt(e.date)}</td>
+          <td>${escapeHtml(e.paymentMode ?? '-')}</td>
+        </tr>`,
+      )
+      .join('');
+
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8" />
 <style>${REPORT_PDF_STYLES}</style></head>
 <body>
-  ${renderReportHeader(`Model No "${escapeHtml(result.query)}"`)}
+  ${renderReportHeader(`Search & Track Record "${escapeHtml(result.query)}"`)}
   <div class="body">
     ${
       result.product
@@ -366,6 +520,14 @@ export class SearchService {
         : ''
     }
     ${
+      expenseRows
+        ? `<h3>Expenses &amp; Vouchers</h3><table>
+      <thead><tr><th>Voucher / Ref</th><th>Particulars</th><th>Category</th><th>Amount</th><th>Date</th><th>Mode</th></tr></thead>
+      <tbody>${expenseRows}</tbody>
+    </table>`
+        : ''
+    }
+    ${
       workItemRows
         ? `<h3>Production / Employee History</h3><table>
       <thead><tr><th>Stage</th><th>Product</th><th>Employee</th><th>Qty</th><th>Status</th><th>Work Started</th><th>Work Finished</th></tr></thead>
@@ -373,8 +535,8 @@ export class SearchService {
     </table>`
         : ''
     }
-    ${!result.found ? '<p style="color:#9ca3af">No order, product, or production record found for this Model No.</p>' : ''}
-    ${renderGeneratedFooter(result.customerOrders.length + result.partyOrders.length + result.partyOrderItems.length, 'matching record')}
+    ${!result.found ? '<p style="color:#9ca3af">No order, voucher, product, or production record found.</p>' : ''}
+    ${renderGeneratedFooter(result.customerOrders.length + result.partyOrders.length + result.partyOrderItems.length + (result.expenses?.length || 0), 'matching record')}
   </div>
 </body></html>`;
     return this.pdf.renderHtmlToPdf(html);

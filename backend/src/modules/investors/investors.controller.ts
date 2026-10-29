@@ -48,6 +48,11 @@ export class InvestorsController {
     return this.service.getStats();
   }
 
+  @Get('live-sensex')
+  getLiveSensex() {
+    return this.service.getLiveSensex();
+  }
+
   @Get('pnl-calculation')
   calculatePnl(@Query('from') from?: string, @Query('to') to?: string) {
     return this.service.calculatePnl({ from, to });

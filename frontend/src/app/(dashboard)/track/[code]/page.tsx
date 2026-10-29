@@ -73,8 +73,8 @@ export default function TrackPage() {
           <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.back()}>
             &larr; Back
           </button>
-          <h1 className="text-2xl font-bold text-brand-900">Model No &ldquo;{decoded}&rdquo;</h1>
-          <p className="text-sm text-brand-500 mt-1">Complete order &rarr; production &rarr; employee &rarr; delivery history for this Model No.</p>
+          <h1 className="text-2xl font-bold text-brand-900">Search Record &ldquo;{decoded}&rdquo;</h1>
+          <p className="text-sm text-brand-500 mt-1">Complete order &rarr; voucher &rarr; production &rarr; employee &rarr; delivery history for &ldquo;{decoded}&rdquo;.</p>
         </div>
         <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
           {downloading ? 'Preparing...' : 'Download PDF'}
@@ -249,6 +249,128 @@ export default function TrackPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Expense Vouchers */}
+      {data && data.expenses && data.expenses.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="font-semibold text-brand-900">
+            Matching Expense Voucher{data.expenses.length > 1 ? `s (${data.expenses.length})` : ''}
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {data.expenses.map((e) => (
+              <div key={e.id} className="card p-5">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="font-mono font-bold text-xs bg-brand-100 text-brand-800 px-2.5 py-0.5 rounded">
+                    {e.voucherNumber ? `VOUCHER #${e.voucherNumber}` : (e.reference ? `REF: ${e.reference}` : 'EXPENSE VOUCHER')}
+                  </span>
+                  <span className="text-xs text-brand-500">{formatDate(e.date)}</span>
+                </div>
+                <p className="font-semibold text-brand-900 text-base">{e.particulars}</p>
+                <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-brand-100 text-xs">
+                  <div>
+                    <span className="text-brand-400">Category:</span>
+                    <p className="font-medium text-brand-800">{e.categoryName} [{e.categoryScope ?? 'COMPANY'}]</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Amount:</span>
+                    <p className="font-bold text-brand-900 text-sm">{formatCurrency(e.amount)}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Payment Mode:</span>
+                    <p className="font-medium text-brand-700">{e.paymentMode ?? '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Recorded By:</span>
+                    <p className="font-medium text-brand-700">{e.createdBy}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Carpenter Payment Vouchers */}
+      {data && data.carpenterPayments && data.carpenterPayments.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="font-semibold text-brand-900">
+            Matching Worker / Payment Voucher{data.carpenterPayments.length > 1 ? `s (${data.carpenterPayments.length})` : ''}
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {data.carpenterPayments.map((p) => (
+              <div key={p.id} className="card p-5">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="font-mono font-bold text-xs bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded">
+                    {p.voucherNo ? `VOUCHER #${p.voucherNo}` : (p.reference ? `REF: ${p.reference}` : 'PAYMENT')}
+                  </span>
+                  <span className="text-xs text-brand-500">{formatDate(p.date)}</span>
+                </div>
+                <p className="font-semibold text-brand-900 text-base">{p.carpenterName}</p>
+                <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-brand-100 text-xs">
+                  <div>
+                    <span className="text-brand-400">Worker Phone:</span>
+                    <p className="font-medium text-brand-800">{p.carpenterPhone ?? '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Amount Paid:</span>
+                    <p className="font-bold text-emerald-700 text-sm">{formatCurrency(p.amount)}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Mode:</span>
+                    <p className="font-medium text-brand-700">{p.mode ?? '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Payment Type:</span>
+                    <p className="font-medium text-brand-700">{p.paymentType}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Purchase Orders */}
+      {data && data.purchaseOrders && data.purchaseOrders.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="font-semibold text-brand-900">
+            Matching Purchase Order{data.purchaseOrders.length > 1 ? `s (${data.purchaseOrders.length})` : ''}
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {data.purchaseOrders.map((po) => (
+              <div key={po.id} className="card p-5">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="font-mono font-bold text-xs bg-blue-100 text-blue-900 px-2.5 py-0.5 rounded">
+                    PO #{po.purchaseNumber}
+                  </span>
+                  <span className="text-xs text-brand-500">{formatDate(po.date)}</span>
+                </div>
+                <p className="font-semibold text-brand-900 text-base">{po.supplierName}</p>
+                <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-brand-100 text-xs">
+                  <div>
+                    <span className="text-brand-400">Invoice:</span>
+                    <p className="font-medium text-brand-800">{po.invoiceNumber ?? '—'}</p>
+                  </div>
+                  {po.totalAmount !== undefined && (
+                    <div>
+                      <span className="text-brand-400">Total:</span>
+                      <p className="font-bold text-brand-900 text-sm">{formatCurrency(po.totalAmount)}</p>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-brand-400">Status:</span>
+                    <p className="font-medium text-brand-700">{po.status}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-400">Supplier Phone:</span>
+                    <p className="font-medium text-brand-700">{po.supplierPhone ?? '—'}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

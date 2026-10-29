@@ -968,6 +968,51 @@ export interface TrackResult {
     balanceAmount?: number;
   }[];
   workItems: TrackWorkItem[];
+  expenses?: {
+    id: string;
+    voucherNumber?: number | null;
+    date: string;
+    amount: number;
+    particulars: string;
+    reference?: string | null;
+    categoryName: string;
+    categoryScope?: string | null;
+    referenceTypeName?: string | null;
+    paymentMode?: string | null;
+    createdBy: string;
+  }[];
+  carpenterPayments?: {
+    id: string;
+    voucherNo?: string | null;
+    reference?: string | null;
+    date: string;
+    amount: number;
+    mode?: string | null;
+    paymentType: string;
+    carpenterName: string;
+    carpenterPhone?: string | null;
+    createdBy?: string | null;
+  }[];
+  purchaseOrders?: {
+    id: string;
+    purchaseNumber: string;
+    invoiceNumber?: string | null;
+    date: string;
+    status: string;
+    supplierName: string;
+    supplierPhone?: string | null;
+    totalAmount?: number;
+  }[];
+  investorTransactions?: {
+    id: string;
+    type: string;
+    date: string;
+    amount: number;
+    reference?: string | null;
+    paymentMode?: string | null;
+    notes?: string | null;
+    investorName: string;
+  }[];
 }
 
 export interface AuditLogEntry {

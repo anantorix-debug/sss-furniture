@@ -428,6 +428,59 @@ export class InvestorsService {
   }
 
   // ---------------------------------------------------------------------------
+  // Live Sensex (Top Task Bar Profit & Loss Live Tracker)
+  // ---------------------------------------------------------------------------
+
+  async getLiveSensex() {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthRange = { gte: startOfMonth, lte: now };
+
+    const [
+      customerMonthPays,
+      partyMonthPays,
+      supplierMonthPays,
+      workerMonthPays,
+      expenseMonthPays,
+      stats,
+    ] = await Promise.all([
+      this.prisma.customerOrderPayment.findMany({ where: { date: monthRange }, select: { amount: true } }),
+      this.prisma.partyOrderPayment.findMany({ where: { date: monthRange }, select: { amount: true } }),
+      this.prisma.supplierPayment.findMany({ where: { date: monthRange }, select: { amount: true } }),
+      this.prisma.carpenterPayment.findMany({ where: { date: monthRange, paymentType: { not: 'DEDUCTION' } }, select: { amount: true } }),
+      this.prisma.expense.findMany({ where: { date: monthRange, status: 'ACTIVE', scope: 'COMPANY' }, select: { amount: true } }),
+      this.getStats(),
+    ]);
+
+    const monthRevenue = round(
+      customerMonthPays.reduce((s, p) => s + num(p.amount), 0) +
+      partyMonthPays.reduce((s, p) => s + num(p.amount), 0),
+    );
+
+    const monthCosts = round(
+      supplierMonthPays.reduce((s, p) => s + num(p.amount), 0) +
+      workerMonthPays.reduce((s, p) => s + num(p.amount), 0) +
+      expenseMonthPays.reduce((s, e) => s + num(e.amount), 0),
+    );
+
+    const monthProfit = round(monthRevenue - monthCosts);
+    const profitMargin = monthRevenue > 0 ? round((monthProfit / monthRevenue) * 100) : 0;
+
+    return {
+      monthProfit,
+      monthRevenue,
+      monthCosts,
+      profitMargin,
+      lifetimeProfit: stats.lifetimeCompanyNetProfit,
+      lifetimeRevenue: stats.lifetimeCompanyRevenue,
+      activeInvestors: stats.activeInvestors,
+      netActiveCapital: stats.netActiveCapital,
+      isProfit: monthProfit >= 0,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Profit & Loss Calculation & Investor Share Allocation
   // ---------------------------------------------------------------------------
 
