@@ -1081,3 +1081,100 @@ export interface ExpenseMonthly {
   personal: number;
   byCategory: { categoryId: string; categoryName: string; total: number }[];
 }
+
+// ---------------------------------------------------------------------------
+// Investor Management & Profit Sharing
+// ---------------------------------------------------------------------------
+
+export type InvestorTransactionType = 'INVESTMENT' | 'PAYOUT';
+
+export interface InvestorTransaction {
+  id: string;
+  investorId: string;
+  type: InvestorTransactionType;
+  date: string;
+  amount: number;
+  paymentMode?: string | null;
+  reference?: string | null;
+  notes?: string | null;
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  createdById?: string | null;
+  createdBy?: { id: string; name: string; email?: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Investor {
+  id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  panNumber?: string | null;
+  bankDetails?: string | null;
+  sharePercentage?: number | null;
+  expectedRoi?: number | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  joinedDate: string;
+  notes?: string | null;
+  totalInvested: number;
+  totalPayouts: number;
+  currentBalance: number;
+  roi: number;
+  effectiveSharePercentage?: number;
+  isDynamicShare?: boolean;
+  transactionsCount?: number;
+  transactions?: InvestorTransaction[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InvestorStats {
+  totalInvestors: number;
+  activeInvestors: number;
+  totalCapitalInvested: number;
+  totalPayoutsDistributed: number;
+  netActiveCapital: number;
+  overallRoi: number;
+  lifetimeCompanyRevenue: number;
+  lifetimeCompanyCosts: number;
+  lifetimeCompanyNetProfit: number;
+}
+
+export interface InvestorPnlBreakdown {
+  id: string;
+  name: string;
+  phone?: string | null;
+  totalInvested: number;
+  activeCapital: number;
+  sharePercentage: number;
+  isDynamicShare: boolean;
+  allocatedProfit: number;
+  payoutsInPeriod: number;
+  balanceToDistribute: number;
+  allTimePayouts: number;
+}
+
+export interface InvestorPnlCalculation {
+  period: { from: string | null; to: string | null };
+  revenue: {
+    retail: number;
+    wholesale: number;
+    total: number;
+  };
+  costs: {
+    materials: number;
+    labour: number;
+    expenses: number;
+    total: number;
+  };
+  companyNetProfit: number;
+  profitMargin: number;
+  totalActiveCapital: number;
+  totalAllocatedProfit: number;
+  totalPayoutsInPeriod: number;
+  retainedCompanyProfit: number;
+  investors: InvestorPnlBreakdown[];
+}
+

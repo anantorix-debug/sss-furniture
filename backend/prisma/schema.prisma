@@ -236,6 +236,7 @@ model User {
   expenseAuditLogs             ExpenseAuditLog[]
   whatsappGroupSettingsUpdated WhatsappGroupSetting[]
   productionTeamsHeaded        ProductionTeam[]       @relation("ProductionTeamHead")
+  investorTransactionsCreated  InvestorTransaction[]  @relation("InvestorTransactionCreatedBy")
 
   customerOrdersAssigned        CustomerOrder[]        @relation("CustomerOrderAssignedEmployee")
   customerOrdersAssignedBy      CustomerOrder[]        @relation("CustomerOrderAssignedBy")
@@ -1492,4 +1493,59 @@ model ExpenseAuditLog {
 
   @@index([expenseId])
   @@map("expense_audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Investor Management & Profit Sharing
+// ---------------------------------------------------------------------------
+
+enum InvestorTransactionType {
+  INVESTMENT
+  PAYOUT
+}
+
+model Investor {
+  id              String   @id @default(cuid())
+  name            String
+  phone           String?
+  email           String?
+  address         String?
+  panNumber       String?
+  bankDetails     String?  @db.Text
+  sharePercentage Decimal? @db.Decimal(5, 2)
+  expectedRoi     Decimal? @db.Decimal(5, 2)
+  status          String   @default("ACTIVE") // ACTIVE, INACTIVE
+  joinedDate      DateTime @default(now())
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  transactions InvestorTransaction[]
+
+  @@map("investors")
+}
+
+model InvestorTransaction {
+  id          String                  @id @default(cuid())
+  investorId  String
+  investor    Investor                @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  type        InvestorTransactionType // INVESTMENT or PAYOUT
+  date        DateTime
+  amount      Decimal                 @db.Decimal(12, 2)
+  paymentMode String? // CASH, BANK_TRANSFER, UPI, CHEQUE, NEFT, RTGS
+  reference   String? // Transaction ID, Cheque No, UTR, Voucher No
+  notes       String?                 @db.Text
+  periodFrom  DateTime?
+  periodTo    DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("InvestorTransactionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([investorId])
+  @@index([date])
+  @@index([type])
+  @@map("investor_transactions")
 }

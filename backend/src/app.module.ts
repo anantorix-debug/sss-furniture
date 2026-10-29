@@ -30,6 +30,7 @@ import { GalleryModule } from './modules/gallery/gallery.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ImportsModule } from './modules/imports/imports.module';
 import { ModelNoModule } from './modules/model-no/model-no.module';
+import { InvestorsModule } from './modules/investors/investors.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { ModelNoModule } from './modules/model-no/model-no.module';
     NotificationsModule,
     ModelNoModule,
     ImportsModule,
+    InvestorsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
