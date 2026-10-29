@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
@@ -106,6 +106,18 @@ export function PartyOrderFormModal({
       }
       : { ...emptyForm, shopId: initialShopId ?? '' },
   );
+
+  // When initialShopId is provided on create and shops load, auto-fill phone if empty
+  useEffect(() => {
+    if (!editing && form.shopId && shops && !form.phone) {
+      const initialShop = shops.find((s) => s.id === form.shopId);
+      const phone = initialShop?.contactPhone?.trim() || initialShop?.whatsapp?.trim() || '';
+      if (phone) {
+        setForm((f) => (f.phone ? f : { ...f, phone }));
+      }
+    }
+  }, [editing, form.shopId, shops, form.phone]);
+
   const [addingShop, setAddingShop] = useState(false);
   const [newShop, setNewShop] = useState({ name: '', contactPerson: '', contactPhone: '', whatsapp: '', address: '' });
   const [newShopError, setNewShopError] = useState<string | null>(null);
@@ -122,13 +134,14 @@ export function PartyOrderFormModal({
     try {
       const created = await api.post<Shop>('/shops', {
         name: newShop.name.trim(),
-        contactPerson: newShop.contactPerson || undefined,
-        contactPhone: newShop.contactPhone || undefined,
-        whatsapp: newShop.whatsapp || undefined,
-        address: newShop.address || undefined,
+        contactPerson: newShop.contactPerson.trim() || undefined,
+        contactPhone: newShop.contactPhone.trim() || undefined,
+        whatsapp: newShop.whatsapp.trim() || undefined,
+        address: newShop.address.trim() || undefined,
       });
       await mutateShops();
-      setForm((f) => ({ ...f, shopId: created.id }));
+      const createdPhone = created.contactPhone?.trim() || created.whatsapp?.trim() || '';
+      setForm((f) => ({ ...f, shopId: created.id, phone: createdPhone }));
       setAddingShop(false);
       setNewShop({ name: '', contactPerson: '', contactPhone: '', whatsapp: '', address: '' });
     } catch (err) {
@@ -301,12 +314,18 @@ export function PartyOrderFormModal({
               required={!addingShop}
               value={form.shopId}
               onChange={(e) => {
-                if (e.target.value === '__add_new__') {
+                const selectedShopId = e.target.value;
+                if (selectedShopId === '__add_new__') {
                   setAddingShop(true);
                   return;
                 }
-                const shop = shops?.find((s) => s.id === e.target.value);
-                setForm((f) => ({ ...f, shopId: e.target.value, phone: shop?.contactPhone ?? shop?.whatsapp ?? f.phone }));
+                const shop = shops?.find((s) => s.id === selectedShopId);
+                const shopPhone = (shop?.contactPhone?.trim() || shop?.whatsapp?.trim()) || '';
+                setForm((f) => ({
+                  ...f,
+                  shopId: selectedShopId,
+                  phone: shopPhone,
+                }));
               }}
             >
               <option value="">Select shop...</option>
@@ -373,7 +392,13 @@ export function PartyOrderFormModal({
         )}
 
         <FormField label="Phone">
-          <input className="input" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+          <input
+            type="tel"
+            className="input"
+            placeholder="Auto-filled from shop, or enter phone..."
+            value={form.phone}
+            onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+          />
         </FormField>
 
         <div className="border-t border-brand-100 pt-3 space-y-3">

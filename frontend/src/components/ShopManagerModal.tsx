@@ -72,11 +72,11 @@ export function ShopManagerModal({
     setSubmitting(true);
     try {
       const payload = {
-        name: form.name,
-        contactPerson: form.contactPerson || undefined,
-        contactPhone: form.contactPhone || undefined,
-        whatsapp: form.whatsapp || undefined,
-        address: form.address || undefined,
+        name: form.name.trim(),
+        contactPerson: form.contactPerson.trim() || (editing ? null : undefined),
+        contactPhone: form.contactPhone.trim() || (editing ? null : undefined),
+        whatsapp: form.whatsapp.trim() || (editing ? null : undefined),
+        address: form.address.trim() || (editing ? null : undefined),
       };
       if (editing) {
         await api.patch(`/shops/${editing.id}`, payload);

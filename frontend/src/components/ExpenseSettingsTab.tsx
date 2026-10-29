@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { mutate as globalMutate } from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api, ApiError } from '@/lib/api';
 import { Chip } from '@/components/StatusBadge';
@@ -69,6 +69,7 @@ function CategoriesPanel() {
       setScope('');
       setDefaultReferenceTypeId('');
       mutate();
+      globalMutate((k) => typeof k === 'string' && k.startsWith('/expense-config/categories'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to create category');
     }
@@ -77,6 +78,7 @@ function CategoriesPanel() {
   async function toggleActive(cat: ExpenseCategory) {
     await api.patch(`/expense-config/categories/${cat.id}`, { isActive: !cat.isActive });
     mutate();
+    globalMutate((k) => typeof k === 'string' && k.startsWith('/expense-config/categories'));
   }
 
   async function handleDelete() {
@@ -84,6 +86,7 @@ function CategoriesPanel() {
     await api.delete(`/expense-config/categories/${deleteTarget.id}`);
     setDeleteTarget(null);
     mutate();
+    globalMutate((k) => typeof k === 'string' && k.startsWith('/expense-config/categories'));
   }
 
   return (
