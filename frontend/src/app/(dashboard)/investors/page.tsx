@@ -75,6 +75,7 @@ export default function InvestorsPage() {
   // Quick Distribute Modal State
   const [quickDistributeOpen, setQuickDistributeOpen] = useState(false);
   const [distributeTarget, setDistributeTarget] = useState<InvestorPnlBreakdown | null>(null);
+  const [downloadingPnlPdf, setDownloadingPnlPdf] = useState(false);
 
   // Compute date range for SWR URL
   const range = useMemo(() => {
@@ -182,6 +183,31 @@ export default function InvestorsPage() {
     }
   }
 
+  // Download Profit & Loss PDF Report
+  async function handleDownloadPnlPdf() {
+    setDownloadingPnlPdf(true);
+    try {
+      const params = new URLSearchParams();
+      if (range.from) params.set('from', range.from);
+      if (range.to) params.set('to', range.to);
+      const activePeriodObj = PERIODS.find((p) => p.key === periodKey);
+      if (activePeriodObj) params.set('periodLabel', activePeriodObj.label);
+
+      const qs = params.toString();
+      const filename = `Company_PnL_Report_${periodKey}_${new Date().toISOString().slice(0, 10)}.pdf`;
+      await sharePdf(
+        `/investors/pnl-pdf${qs ? `?${qs}` : ''}`,
+        filename,
+        `Company P&L Statement (${activePeriodObj?.label || 'Period'})`,
+      );
+      toast.success('P&L Report PDF generated');
+    } catch {
+      toast.error('Failed to download P&L report PDF');
+    } finally {
+      setDownloadingPnlPdf(false);
+    }
+  }
+
   // Download Statement PDF
   async function handleDownloadStatement(investorId: string, name: string) {
     try {
@@ -215,6 +241,18 @@ export default function InvestorsPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadPnlPdf}
+              disabled={downloadingPnlPdf}
+              className="btn-secondary text-xs sm:text-sm flex items-center gap-1.5 shadow-sm border border-brand-200 hover:bg-brand-50"
+              title="Download Profit & Loss Executive Statement PDF"
+            >
+              <svg className="w-4 h-4 text-brand-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span>{downloadingPnlPdf ? 'Generating PDF...' : 'Download P&L PDF'}</span>
+            </button>
+
             <button
               onClick={() => {
                 setEditingInvestor(null);
@@ -315,23 +353,37 @@ export default function InvestorsPage() {
                 ))}
               </div>
 
-              {periodKey === 'custom' && (
-                <div className="flex items-center gap-2 text-xs">
-                  <input
-                    type="date"
-                    value={customFrom}
-                    onChange={(e) => setCustomFrom(e.target.value)}
-                    className="input py-1 px-2 text-xs"
-                  />
-                  <span className="text-brand-400">to</span>
-                  <input
-                    type="date"
-                    value={customTo}
-                    onChange={(e) => setCustomTo(e.target.value)}
-                    className="input py-1 px-2 text-xs"
-                  />
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {periodKey === 'custom' && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <input
+                      type="date"
+                      value={customFrom}
+                      onChange={(e) => setCustomFrom(e.target.value)}
+                      className="input py-1 px-2 text-xs"
+                    />
+                    <span className="text-brand-400">to</span>
+                    <input
+                      type="date"
+                      value={customTo}
+                      onChange={(e) => setCustomTo(e.target.value)}
+                      className="input py-1 px-2 text-xs"
+                    />
+                  </div>
+                )}
+
+                <button
+                  onClick={handleDownloadPnlPdf}
+                  disabled={downloadingPnlPdf}
+                  className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1.5 border border-brand-200 hover:bg-brand-50 shadow-2xs"
+                  title="Export Current Period Statement as PDF"
+                >
+                  <svg className="w-3.5 h-3.5 text-brand-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>{downloadingPnlPdf ? 'Exporting...' : 'Export PDF'}</span>
+                </button>
+              </div>
             </div>
 
             {pnlLoading ? (
@@ -667,6 +719,16 @@ export default function InvestorsPage() {
                                 className="px-2 py-1 rounded bg-brand-50 hover:bg-brand-100 text-brand-800 text-[11px] font-medium"
                               >
                                 📋 Ledger
+                              </button>
+
+                              {/* Download Statement PDF */}
+                              <button
+                                onClick={() => handleDownloadStatement(inv.id, inv.name)}
+                                title="Download Investor Statement PDF"
+                                className="px-2 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-900 text-[11px] font-medium flex items-center gap-1"
+                              >
+                                <span>📄</span>
+                                <span>PDF</span>
                               </button>
 
                               {/* Add Capital */}

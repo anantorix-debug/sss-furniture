@@ -53,6 +53,20 @@ export class InvestorsController {
     return this.service.calculatePnl({ from, to });
   }
 
+  @Get('pnl-pdf')
+  @Header('Content-Type', 'application/pdf')
+  async downloadPnlPdf(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('periodLabel') periodLabel: string | undefined,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.service.generatePnlPdf({ from, to, periodLabel });
+    const filename = `company-pnl-report-${from || 'all'}-to-${to || 'now'}.pdf`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.end(pdf);
+  }
+
   @Post('distribute-profit')
   distributeProfit(@Body() dto: DistributeProfitDto, @CurrentUser() user: AuthUser) {
     return this.service.distributeProfit(dto, user.userId, user.email);

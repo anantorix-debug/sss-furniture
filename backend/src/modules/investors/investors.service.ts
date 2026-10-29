@@ -653,4 +653,147 @@ export class InvestorsService {
 
     return this.pdf.renderHtmlToPdf(html);
   }
+
+  async generatePnlPdf(params: { from?: string; to?: string; periodLabel?: string }): Promise<Buffer> {
+    const pnl = await this.calculatePnl(params);
+    const periodDisplay = params.periodLabel || (params.from && params.to ? `${params.from} to ${params.to}` : 'All Time');
+
+    const investorRows = pnl.investors.map((inv) => `
+      <tr>
+        <td style="font-weight: 600;">${escapeHtml(inv.name)}</td>
+        <td>₹${inv.activeCapital.toLocaleString('en-IN')}</td>
+        <td style="text-align: center;">
+          <span style="background: #eef2ff; color: #4338ca; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 11px;">
+            ${inv.sharePercentage}% ${inv.isDynamicShare ? '(Dynamic)' : '(Fixed)'}
+          </span>
+        </td>
+        <td style="text-align: right; font-weight: 600; color: #166534;">₹${inv.allocatedProfit.toLocaleString('en-IN')}</td>
+        <td style="text-align: right; color: #2563eb;">₹${inv.payoutsInPeriod.toLocaleString('en-IN')}</td>
+        <td style="text-align: right; font-weight: 700; color: ${inv.balanceToDistribute > 0 ? '#b91c1c' : '#166534'};">
+          ₹${inv.balanceToDistribute.toLocaleString('en-IN')}
+        </td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Company Profit &amp; Loss &amp; Investor Statement - ${escapeHtml(periodDisplay)}</title>
+        <style>
+          ${REPORT_PDF_STYLES}
+          .pnl-header-card {
+            border: 1px solid #e3e1d9;
+            background: #faf9f6;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+          }
+          .kpi-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px 14px;
+            background: #ffffff;
+          }
+          .kpi-card.green { border-left: 4px solid #16a34a; }
+          .kpi-card.orange { border-left: 4px solid #ea580c; }
+          .kpi-card.blue { border-left: 4px solid #2563eb; }
+          .kpi-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; }
+          .kpi-val { font-size: 18px; font-weight: 800; margin: 3px 0 6px; }
+          .kpi-sub { font-size: 10.5px; color: #4b5563; line-height: 1.4; }
+        </style>
+      </head>
+      <body>
+        ${renderReportHeader('Company Profit & Loss & Investor Statement')}
+        <div class="body">
+          <div class="pnl-header-card">
+            <div>
+              <span style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 700;">Calculation Period:</span>
+              <strong style="font-size: 13px; color: #80011f; margin-left: 6px;">${escapeHtml(periodDisplay)}</strong>
+              ${pnl.period.from && pnl.period.to ? `<div style="font-size: 10.5px; color: #6b7280; margin-top: 2px;">Dates: ${pnl.period.from} to ${pnl.period.to}</div>` : ''}
+            </div>
+            <div style="text-align: right; font-size: 11px; color: #6b7280;">
+              <div>Generated: <strong>${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong></div>
+              <div>Status: <span style="color: #16a34a; font-weight: 700;">AUDITED / LIVE</span></div>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card green">
+              <div class="kpi-label">Total Revenue (Money In)</div>
+              <div class="kpi-val" style="color: #166534;">₹${pnl.revenue.total.toLocaleString('en-IN')}</div>
+              <div class="kpi-sub">
+                Retail Sales: ₹${pnl.revenue.retail.toLocaleString('en-IN')}<br/>
+                Wholesale (Party): ₹${pnl.revenue.wholesale.toLocaleString('en-IN')}
+              </div>
+            </div>
+
+            <div class="kpi-card orange">
+              <div class="kpi-label">Total Costs &amp; Expenses (Money Out)</div>
+              <div class="kpi-val" style="color: #c2410c;">₹${pnl.costs.total.toLocaleString('en-IN')}</div>
+              <div class="kpi-sub">
+                Materials: ₹${pnl.costs.materials.toLocaleString('en-IN')}<br/>
+                Labour / Wages: ₹${pnl.costs.labour.toLocaleString('en-IN')}<br/>
+                Operating Expenses: ₹${pnl.costs.expenses.toLocaleString('en-IN')}
+              </div>
+            </div>
+
+            <div class="kpi-card blue">
+              <div class="kpi-label">Net Company Profit</div>
+              <div class="kpi-val" style="color: ${pnl.companyNetProfit >= 0 ? '#1e40af' : '#b91c1c'};">₹${pnl.companyNetProfit.toLocaleString('en-IN')}</div>
+              <div class="kpi-sub">
+                Profit Margin: <strong>${pnl.profitMargin}%</strong><br/>
+                Total Investors Share: ₹${pnl.totalAllocatedProfit.toLocaleString('en-IN')}<br/>
+                Retained by Company: ₹${pnl.retainedCompanyProfit.toLocaleString('en-IN')}
+              </div>
+            </div>
+          </div>
+
+          <h3 style="font-size: 13px; margin: 18px 0 8px 0; color: #80011f; text-transform: uppercase; letter-spacing: 0.5px;">
+            Investor Profit &amp; Loss Distribution Matrix
+          </h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Investor Name</th>
+                <th>Active Capital</th>
+                <th style="text-align: center;">Share %</th>
+                <th style="text-align: right;">Calculated Profit</th>
+                <th style="text-align: right;">Paid in Period</th>
+                <th style="text-align: right;">Balance to Pay</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${investorRows || '<tr><td colspan="6" style="text-align: center; color: #6b7280; padding: 18px;">No active investors registered in this calculation period.</td></tr>'}
+            </tbody>
+            <tfoot>
+              <tr style="background: #f9fafb; font-weight: 700; border-top: 2px solid #e5e7eb;">
+                <td>Total Active Investors (${pnl.investors.length})</td>
+                <td>₹${pnl.totalActiveCapital.toLocaleString('en-IN')}</td>
+                <td style="text-align: center;">—</td>
+                <td style="text-align: right; color: #166534;">₹${pnl.totalAllocatedProfit.toLocaleString('en-IN')}</td>
+                <td style="text-align: right; color: #2563eb;">₹${pnl.totalPayoutsInPeriod.toLocaleString('en-IN')}</td>
+                <td style="text-align: right; color: #80011f;">₹${(pnl.totalAllocatedProfit - pnl.totalPayoutsInPeriod).toLocaleString('en-IN')}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          ${renderGeneratedFooter(pnl.investors.length, 'investor record')}
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.pdf.renderHtmlToPdf(html);
+  }
 }
