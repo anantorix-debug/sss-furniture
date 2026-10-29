@@ -759,17 +759,32 @@ export class CustomerOrdersService {
   async generatePdf(id: string, recipientType: 'customer' | 'employee' = 'customer'): Promise<Buffer> {
     const order = await this.findOne(id);
     const isEmployee = recipientType === 'employee';
+    const gallery = ((order as any).galleryImages as Array<{ url: string; caption?: string | null; modelNo?: string | null }> ?? []);
+
     const lines: QuotationLine[] = order.items.length
-      ? order.items.map((i) => ({
-          productName: i.productName,
-          modelNo: (i as any).modelNo?.trim() || i.product?.modelNo?.trim() || (order.items.length === 1 ? order.cotTrack?.trim() : null) || null,
-          category: i.category,
-          size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || null,
-          color: i.color,
-          qty: i.quantity,
-          unitPrice: Number(i.unitPrice),
-          specs: readSpecs(i.specs),
-        }))
+      ? order.items.map((i, idx) => {
+          const itemImg =
+            (i as any).referenceImage?.url ||
+            gallery.find((g) => g.modelNo && (g.modelNo === (i as any).modelNo || g.modelNo === (i as any).product?.modelNo))?.url ||
+            (gallery.length === 1 ? gallery[0]?.url : gallery[idx]?.url) ||
+            null;
+
+          return {
+            productName: i.productName,
+            modelNo:
+              (i as any).modelNo?.trim() ||
+              i.product?.modelNo?.trim() ||
+              (order.items.length === 1 ? order.cotTrack?.trim() : null) ||
+              null,
+            category: i.category,
+            size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || null,
+            color: i.color,
+            qty: i.quantity,
+            unitPrice: Number(i.unitPrice),
+            specs: readSpecs(i.specs),
+            imageUrl: itemImg,
+          };
+        })
       : [
           {
             productName: order.product,
@@ -779,6 +794,7 @@ export class CustomerOrdersService {
             details: order.specialInstructions,
             qty: 1,
             unitPrice: Number(order.orderValue),
+            imageUrl: gallery[0]?.url || null,
           },
         ];
     const html = buildQuotationHtml({
@@ -791,6 +807,7 @@ export class CustomerOrdersService {
       lines,
       showPrices: !isEmployee,
       received: isEmployee ? 0 : Number(order.totalReceived ?? 0),
+      galleryImages: gallery.map((g) => ({ url: g.url, caption: g.caption || g.modelNo || null })),
     });
     return this.pdf.renderHtmlToPdf(html);
   }

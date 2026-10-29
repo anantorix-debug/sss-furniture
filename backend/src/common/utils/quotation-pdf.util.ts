@@ -1,9 +1,11 @@
 import { getQuotationLogoDataUri } from './pdf-banner.util';
+import { galleryImageDataUri } from './gallery-image-data-uri.util';
 
 // Customer Order / Party Order PDF in the SSS "Quotation" layout: header,
 // one block per product (name, size chips, four spec boxes, price bar) and
-// a total. No product drawing/photo. Spec boxes only show what was filled
-// in on the order line (see ItemSpecsDto); empty boxes are left out.
+// a total. Spec boxes only show what was filled in on the order line (see
+// ItemSpecsDto); empty boxes are left out. Selected reference images/photos
+// are embedded as base64 data URIs.
 
 export interface ItemSpecs {
   overallSize?: string | null;
@@ -32,6 +34,7 @@ export interface QuotationLine {
   qty: number;
   unitPrice: number;
   specs?: ItemSpecs | null;
+  imageUrl?: string | null;
 }
 
 export interface QuotationInput {
@@ -45,6 +48,7 @@ export interface QuotationInput {
   showPrices: boolean;
   received?: number; // shown only when > 0
   note?: string | null;
+  galleryImages?: Array<{ url: string; caption?: string | null }>;
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -113,6 +117,7 @@ export function buildQuotationHtml(q: QuotationInput): string {
       const lineTotal = l.qty * l.unitPrice;
       const modelEyebrow = formatModelEyebrow(l.modelNo);
       const modelBadge = formatModelChip(l.modelNo);
+      const imgDataUri = l.imageUrl ? galleryImageDataUri(l.imageUrl) : null;
       return `<section class="product">
         <div class="product-head">
           <div>
@@ -121,9 +126,21 @@ export function buildQuotationHtml(q: QuotationInput): string {
           </div>
           ${idx === 0 ? `<div class="meta">Date: <b>${q.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</b><br/>${q.lines.length === 1 ? `Quantity: <b>${l.qty} Nos</b>` : `Items: <b>${q.lines.length}</b>`}</div>` : `<div class="meta">Quantity: <b>${l.qty} Nos</b></div>`}
         </div>
-        ${chips(l)}
-        ${specBoxes(l)}
-        ${clean(l.details) ? `<p class="details">${esc(l.details!)}</p>` : ''}
+        <div class="product-body">
+          <div class="product-main">
+            ${chips(l)}
+            ${specBoxes(l)}
+            ${clean(l.details) ? `<p class="details">${esc(l.details!)}</p>` : ''}
+          </div>
+          ${
+            imgDataUri
+              ? `<div class="product-photo">
+            <img src="${imgDataUri}" alt="${esc(l.productName)}" />
+            <span class="photo-tag">Selected Design</span>
+          </div>`
+              : ''
+          }
+        </div>
         ${
           q.showPrices
             ? `<div class="pricebar">
@@ -141,8 +158,41 @@ export function buildQuotationHtml(q: QuotationInput): string {
   const grand =
     q.showPrices && (q.lines.length > 1 || received > 0)
       ? `<div class="grand">
-      ${q.lines.length > 1 ? `<div class="grand-row"><span>TOTAL AMOUNT (${q.lines.length} items)</span><b>${rupees(total)}</b></div>` : ''}
-      ${received > 0 ? `<div class="grand-row small"><span>Amount received</span><span>${rupees(received)}</span></div><div class="grand-row small"><span>Balance</span><b>${rupees(total - received)}</b></div>` : ''}
+      ${q.lines.length > 1 ? `<div class="grand-row grand-total"><span>TOTAL AMOUNT (${q.lines.length} items)</span><b class="grand-val">${rupees(total)}</b></div>` : ''}
+      ${
+        received > 0
+          ? `<div class="grand-row grand-received"><span>Amount Received</span><b class="grand-val">${rupees(received)}</b></div>
+             <div class="grand-row grand-balance"><span>Balance</span><b class="grand-val balance-val">${rupees(total - received)}</b></div>`
+          : ''
+      }
+    </div>`
+      : '';
+
+  const orderGalleryUris = (q.galleryImages ?? [])
+    .map((g) => ({
+      dataUri: galleryImageDataUri(g.url),
+      caption: g.caption ?? null,
+    }))
+    .filter((g): g is { dataUri: string; caption: string | null } => Boolean(g.dataUri));
+
+  const gallerySection =
+    orderGalleryUris.length > 0
+      ? `<div class="customer-gallery">
+      <div class="gallery-head">
+        <div class="gallery-line"></div>
+        <div class="gallery-title">CUSTOMER SELECTED REFERENCE DESIGNS (${orderGalleryUris.length})</div>
+        <div class="gallery-line"></div>
+      </div>
+      <div class="gallery-grid">
+        ${orderGalleryUris
+          .map(
+            (img, idx) => `<div class="gallery-item">
+          <img src="${img.dataUri}" alt="Reference Design ${idx + 1}" />
+          ${img.caption ? `<div class="gallery-cap">${esc(img.caption)}</div>` : ''}
+        </div>`,
+          )
+          .join('')}
+      </div>
     </div>`
       : '';
 
@@ -165,6 +215,11 @@ export function buildQuotationHtml(q: QuotationInput): string {
   .to b { color: #2b2321; }
   .product { break-inside: avoid; page-break-inside: avoid; margin-bottom: 22px; }
   .product-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; }
+  .product-body { display: flex; gap: 16px; align-items: flex-start; }
+  .product-main { flex: 1; min-width: 0; }
+  .product-photo { width: 145px; min-width: 145px; background: #fff; border: 1px solid #e6dfd3; border-radius: 6px; padding: 6px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); align-self: flex-start; margin-top: 14px; }
+  .product-photo img { width: 100%; max-height: 125px; object-fit: contain; border-radius: 4px; display: block; }
+  .photo-tag { display: block; font-size: 8.5px; font-weight: 700; letter-spacing: 1px; color: #8e0d16; text-transform: uppercase; margin-top: 5px; }
   .eyebrow { font-size: 10px; letter-spacing: 2px; font-weight: bold; color: #9a6a3a; }
   h2 { font-family: Georgia, 'Times New Roman', serif; font-weight: normal; font-size: 30px; margin: 4px 0 0; color: #1f1a19; }
   .meta { text-align: right; font-size: 11.5px; color: #6b5f58; line-height: 1.7; white-space: nowrap; }
@@ -188,10 +243,23 @@ export function buildQuotationHtml(q: QuotationInput): string {
   .pb-value { font-size: 22px; font-weight: bold; margin-top: 4px; }
   .pb-value.big { font-size: 28px; }
   .qtybar { margin-top: 14px; background: #970d16; color: #fff; padding: 10px 18px; font-size: 13px; }
-  .grand { border-top: 2px solid #8e0d16; padding-top: 10px; break-inside: avoid; page-break-inside: avoid; }
-  .grand-row { display: flex; justify-content: space-between; font-size: 15px; padding: 3px 0; color: #1f1a19; }
+  .grand { border-top: 2.5px solid #8e0d16; padding-top: 12px; margin-top: 12px; break-inside: avoid; page-break-inside: avoid; }
+  .grand-row { display: flex; justify-content: space-between; align-items: center; font-size: 16px; padding: 5px 0; color: #1f1a19; }
   .grand-row b { color: #6e0710; }
-  .grand-row.small { font-size: 12px; color: #6b5f58; }
+  .grand-row.grand-total { font-size: 17px; font-weight: bold; border-bottom: 1px dashed #d9cfc0; padding-bottom: 7px; margin-bottom: 5px; }
+  .grand-row.grand-total .grand-val { font-size: 21px; color: #1f1a19; }
+  .grand-row.grand-received { font-size: 16px; font-weight: 600; color: #1b5e20; }
+  .grand-row.grand-received .grand-val { font-size: 18px; color: #1b5e20; font-weight: 700; }
+  .grand-row.grand-balance { font-size: 18px; font-weight: 800; color: #8e0d16; border-top: 1.5px solid #ecc2c6; margin-top: 6px; padding-top: 8px; }
+  .grand-row.grand-balance .balance-val { font-size: 24px; color: #8e0d16; font-weight: 800; }
+  .customer-gallery { margin-top: 22px; padding-top: 14px; border-top: 1px dashed #d9cfc0; break-inside: avoid; page-break-inside: avoid; }
+  .gallery-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .gallery-line { flex: 1; height: 1px; background: #d9cfc0; }
+  .gallery-title { font-family: Georgia, 'Times New Roman', serif; font-size: 11px; letter-spacing: 3px; font-weight: bold; color: #8e0d16; }
+  .gallery-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+  .gallery-item { background: #fff; border: 1px solid #e6dfd3; border-radius: 6px; padding: 6px; width: 135px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .gallery-item img { width: 100%; height: 95px; object-fit: contain; border-radius: 4px; display: block; }
+  .gallery-cap { font-size: 9.5px; color: #5c4f48; margin-top: 4px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .note { font-size: 11px; color: #6b5f58; margin-top: 12px; }
   .foot { text-align: center; border-top: 1px solid #d9cfc0; margin-top: 26px; padding-top: 14px; break-inside: avoid; page-break-inside: avoid; }
   .foot .motto { font-size: 12px; letter-spacing: 5px; font-weight: bold; color: #1f1a19; }
@@ -210,6 +278,7 @@ export function buildQuotationHtml(q: QuotationInput): string {
     </div>
     ${blocks}
     ${grand}
+    ${gallerySection}
     ${q.note ? `<p class="note">${esc(q.note)}</p>` : ''}
     <div class="foot">
       <div class="motto">QUALITY | TRUST | COMFORT</div>

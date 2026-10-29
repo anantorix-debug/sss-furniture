@@ -1092,6 +1092,7 @@ export class PartyOrdersService {
           qty: i.qty ?? 1,
           unitPrice: Number(i.unitPrice),
           specs: readSpecs(i.specs),
+          imageUrl: i.referenceImage?.url ?? (order.referenceImage?.url || null),
         }))
       : [
           {
@@ -1100,6 +1101,7 @@ export class PartyOrdersService {
             size: [order.size, order.sizeUnit].filter(Boolean).join(' ') || null,
             qty: order.qty ?? 1,
             unitPrice: Number(order.price ?? order.totalAmount ?? 0),
+            imageUrl: order.referenceImage?.url || null,
           },
         ];
     const html = buildQuotationHtml({
