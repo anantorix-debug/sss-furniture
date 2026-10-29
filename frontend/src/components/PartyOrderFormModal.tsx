@@ -68,7 +68,7 @@ function itemFromExisting(i: PartyOrderItem): ItemForm {
     details: i.details ?? '',
     qty: String(i.qty),
     unitPrice: String(i.unitPrice ?? 0),
-    modelNo: i.modelNo ?? undefined,
+    modelNo: i.modelNo ?? i.product?.modelNo ?? undefined,
     referenceImageId: i.referenceImageId ?? undefined,
     referenceImage: i.referenceImage ?? null,
     specs: i.specs ?? undefined,

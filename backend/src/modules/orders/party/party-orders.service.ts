@@ -107,7 +107,14 @@ function stripOrderMoney<
 }
 
 const itemsInclude = {
-  items: { orderBy: { createdAt: 'asc' as const }, include: { referenceImage: true, modelNoUpdatedBy: { select: { id: true, name: true, role: true } } } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: {
+      referenceImage: true,
+      modelNoUpdatedBy: { select: { id: true, name: true, role: true } },
+      product: { select: { modelNo: true } },
+    },
+  },
 };
 
 // A shop's aggregated numbers, computed from whatever order array is handed
@@ -1076,6 +1083,7 @@ export class PartyOrdersService {
     const lines: QuotationLine[] = order.items?.length
       ? order.items.map((i: any) => ({
           productName: i.productName,
+          modelNo: i.modelNo?.trim() || i.product?.modelNo?.trim() || (order.items.length === 1 ? order.cotNo?.trim() : null) || null,
           category: i.finish,
           size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || null,
           color: i.color,
@@ -1088,6 +1096,7 @@ export class PartyOrdersService {
       : [
           {
             productName: order.model ?? order.shopName,
+            modelNo: order.cotNo?.trim() || order.model?.trim() || null,
             size: [order.size, order.sizeUnit].filter(Boolean).join(' ') || null,
             qty: order.qty ?? 1,
             unitPrice: Number(order.price ?? order.totalAmount ?? 0),

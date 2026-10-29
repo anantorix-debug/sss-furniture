@@ -121,6 +121,7 @@ export interface CustomerOrder {
 export interface PartyOrderItem {
   id: string;
   productId?: string | null;
+  product?: Product | null;
   productName: string;
   finish?: string | null;
   size?: string | null;

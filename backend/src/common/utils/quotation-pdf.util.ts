@@ -23,6 +23,7 @@ export interface ItemSpecs {
 
 export interface QuotationLine {
   productName: string;
+  modelNo?: string | null;
   category?: string | null;
   size?: string | null;
   color?: string | null;
@@ -75,17 +76,34 @@ function specBoxes(line: QuotationLine): string {
     .join('')}</div>`;
 }
 
+function formatModelChip(raw?: string | null): string | null {
+  const v = clean(raw);
+  if (!v) return null;
+  return /^(model|serial|no|#)/i.test(v) ? v : `Model No: ${v}`;
+}
+
+function formatModelEyebrow(raw?: string | null): string | null {
+  const v = clean(raw);
+  if (!v) return null;
+  const num = v.replace(/^(model\s*(no\.?)?|serial\s*(no\.?)?|#)\s*:?\s*/i, '').trim();
+  return /serial/i.test(v) ? `SERIAL NO: ${num || v}` : `MODEL NO: ${num || v}`;
+}
+
 function chips(line: QuotationLine): string {
   const s = readSpecs(line.specs);
   const size = clean(s.overallSize) ?? clean(line.size);
+  const model = formatModelChip(line.modelNo);
   const list = [
-    size ? `Overall ${size}` : null,
-    clean(s.headboardHeight) ? `Headboard height ${clean(s.headboardHeight)}` : null,
-    clean(s.frameHeight) ? `Frame height ${clean(s.frameHeight)}` : null,
-    /dismant/i.test(s.assemblyMethod ?? '') ? 'Fully dismantlable' : null,
-    clean(line.pattern) ? `Pattern ${clean(line.pattern)}` : null,
-  ].filter((c): c is string => Boolean(c));
-  return list.length ? `<div class="chips">${list.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}</div>` : '';
+    model ? { text: model, isModel: true } : null,
+    size ? { text: `Overall ${size}`, isModel: false } : null,
+    clean(s.headboardHeight) ? { text: `Headboard height ${clean(s.headboardHeight)}`, isModel: false } : null,
+    clean(s.frameHeight) ? { text: `Frame height ${clean(s.frameHeight)}`, isModel: false } : null,
+    /dismant/i.test(s.assemblyMethod ?? '') ? { text: 'Fully dismantlable', isModel: false } : null,
+    clean(line.pattern) ? { text: `Pattern ${clean(line.pattern)}`, isModel: false } : null,
+  ].filter((c): c is { text: string; isModel: boolean } => Boolean(c));
+  return list.length
+    ? `<div class="chips">${list.map((c) => `<span class="chip${c.isModel ? ' chip-model' : ''}">${esc(c.text)}</span>`).join('')}</div>`
+    : '';
 }
 
 export function buildQuotationHtml(q: QuotationInput): string {
@@ -93,11 +111,13 @@ export function buildQuotationHtml(q: QuotationInput): string {
   const blocks = q.lines
     .map((l, idx) => {
       const lineTotal = l.qty * l.unitPrice;
+      const modelEyebrow = formatModelEyebrow(l.modelNo);
+      const modelBadge = formatModelChip(l.modelNo);
       return `<section class="product">
         <div class="product-head">
           <div>
-            <div class="eyebrow">${q.lines.length > 1 ? `PRODUCT ${idx + 1}` : 'PRODUCT'}${clean(l.category) ? ` · ${esc(l.category!.toUpperCase())}` : ''}</div>
-            <h2>${esc(l.productName)}</h2>
+            <div class="eyebrow">${q.lines.length > 1 ? `PRODUCT ${idx + 1}` : 'PRODUCT'}${modelEyebrow ? ` · ${esc(modelEyebrow)}` : ''}${clean(l.category) ? ` · ${esc(l.category!.toUpperCase())}` : ''}</div>
+            <h2>${esc(l.productName)}${modelBadge ? ` <span class="model-badge">${esc(modelBadge)}</span>` : ''}</h2>
           </div>
           ${idx === 0 ? `<div class="meta">Date: <b>${q.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</b><br/>${q.lines.length === 1 ? `Quantity: <b>${l.qty} Nos</b>` : `Items: <b>${q.lines.length}</b>`}</div>` : `<div class="meta">Quantity: <b>${l.qty} Nos</b></div>`}
         </div>
@@ -151,6 +171,8 @@ export function buildQuotationHtml(q: QuotationInput): string {
   .meta b { color: #1f1a19; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
   .chip { border: 1px solid #e3d9c6; background: #f3efe7; border-radius: 999px; padding: 5px 14px; font-size: 11px; color: #3b3230; }
+  .chip.chip-model { background: #8e0d16; color: #ffffff; border-color: #8e0d16; font-weight: 700; letter-spacing: 0.3px; }
+  .model-badge { display: inline-block; font-family: 'Noto Sans', Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; color: #8e0d16; background: #fbf3f3; border: 1px solid #ecc2c6; padding: 2px 10px; border-radius: 999px; vertical-align: middle; margin-left: 8px; }
   .specs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 14px; }
   .spec { background: #fff; border: 1px solid #e6dfd3; padding: 12px 14px; min-height: 120px; }
   .spec-no { color: #8e0d16; font-weight: bold; font-size: 15px; }

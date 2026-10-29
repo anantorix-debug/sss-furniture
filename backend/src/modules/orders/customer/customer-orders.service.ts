@@ -762,6 +762,7 @@ export class CustomerOrdersService {
     const lines: QuotationLine[] = order.items.length
       ? order.items.map((i) => ({
           productName: i.productName,
+          modelNo: (i as any).modelNo?.trim() || i.product?.modelNo?.trim() || (order.items.length === 1 ? order.cotTrack?.trim() : null) || null,
           category: i.category,
           size: [i.size, i.sizeUnit].filter(Boolean).join(' ') || null,
           color: i.color,
@@ -772,6 +773,7 @@ export class CustomerOrdersService {
       : [
           {
             productName: order.product,
+            modelNo: order.cotTrack?.trim() || null,
             size: [order.size, order.sizeUnit].filter(Boolean).join(' ') || null,
             color: order.colour,
             details: order.specialInstructions,
