@@ -285,7 +285,7 @@ export class WhatsappService implements OnModuleInit {
   ): Promise<{ sent: boolean; reason?: string; error?: string; chatId?: string }> {
     const status = this.client.getStatus();
     if (!status.operational) {
-      return { sent: false, reason: 'whatsapp_not_ready', chatId };
+      return { sent: false, reason: 'whatsapp_not_ready', error: 'WhatsApp is reconnecting. Your file was not sent. Please try again in 2 minutes.', chatId };
     }
 
     if (!chatId || !doc.buffer?.length) {

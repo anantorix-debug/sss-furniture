@@ -49,6 +49,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   private lidToPhoneJidCache = new Map<string, string>();
   private readonly sendTimeoutMs: number;
   private readonly lookupTimeoutMs: number;
+  private readonly healthIntervalMs: number;
   private readonly lidResolutionTimeoutMs: number;
   // Belt-and-suspenders against any future cause of client.initialize()
   // never emitting anything (a bad Puppeteer arg, a wedged Chromium launch,
@@ -58,10 +59,13 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   private initWatchdog: NodeJS.Timeout | null = null;
   private static readonly INIT_TIMEOUT_MS = 90_000;
   private static readonly LOOKUP_RESTART_COOLDOWN_MS = 10 * 60_000;
+  private static readonly MAX_RESTART_DELAY_MS = 5 * 60_000;
+  private static readonly HEALTH_FAILURES_BEFORE_RESTART = 2;
 
   constructor(private config: ConfigService) {
     this.sendTimeoutMs = Number(this.config.get('WHATSAPP_SEND_TIMEOUT_MS') ?? 30000);
     this.lookupTimeoutMs = Number(this.config.get('WHATSAPP_LOOKUP_TIMEOUT_MS') ?? 15000);
+    this.healthIntervalMs = Number(this.config.get('WHATSAPP_HEALTH_INTERVAL_MS') ?? 120000);
     this.lidResolutionTimeoutMs = Number(this.config.get('WHATSAPP_LID_RESOLUTION_TIMEOUT_MS') ?? 8000);
     this.logger.log(`WhatsApp timeouts: send=${this.sendTimeoutMs}ms, lid-resolution=${this.lidResolutionTimeoutMs}ms`);
   }
@@ -85,6 +89,12 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   // code on its own, without requiring a server restart.
   private restarting = false;
   private lastLookupRestartAt = 0;
+  // Auto-heal: restarts in a row with no healthy check in between (sets the
+  // wait before the next one), and the periodic check of a READY client.
+  private consecutiveRestarts = 0;
+  private healthTimer: NodeJS.Timeout | null = null;
+  private healthCheckRunning = false;
+  private healthFailures = 0;
 
   // Detects the class of Puppeteer error that means the underlying Chrome
   // page/frame has gone stale (WhatsApp Web reloaded internally, the tab
@@ -101,6 +111,11 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   private async restartClient(delayMs = 3000) {
     if (this.restarting) return;
     this.restarting = true;
+    this.stopHealthChecks();
+
+    const wait = this.nextRestartDelay(delayMs);
+    this.consecutiveRestarts += 1;
+    this.logger.warn(`[WhatsApp] Restart #${this.consecutiveRestarts} in a row, starting again in ${wait}ms`);
 
     this.setState('RECONNECTING');
     this.authenticated = false;
@@ -109,21 +124,76 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     this.latestQr = null;
 
     if (this.client) {
+      const oldClient = this.client;
+      const chrome = oldClient.pupBrowser?.process?.();
+      // A dying client must not be able to trigger another restart later.
+      oldClient.removeAllListeners?.();
       try {
         await Promise.race([
-          this.client.destroy(),
+          oldClient.destroy(),
           new Promise((resolve) => setTimeout(resolve, 5000)),
         ]);
       } catch (err) {
         this.logger.warn(`[WhatsApp] Error destroying old client (ignored): ${err}`);
       }
+      // destroy() can hang on a stuck page, leaving Chrome holding the session
+      // folder and debug port, which would block the new client from starting.
+      if (chrome && chrome.exitCode == null) chrome.kill('SIGKILL');
       this.client = null;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await new Promise((resolve) => setTimeout(resolve, wait));
 
     this.restarting = false;
     this.startClient();
+  }
+
+  // Doubles with each restart in a row, so a long WhatsApp or network outage
+  // doesn't turn into constant Chrome restarts.
+  private nextRestartDelay(baseMs: number): number {
+    return Math.min(baseMs * 2 ** this.consecutiveRestarts, WhatsappClientWrapper.MAX_RESTART_DELAY_MS);
+  }
+
+  private startHealthChecks() {
+    this.stopHealthChecks();
+    this.healthFailures = 0;
+    this.healthTimer = setInterval(() => void this.runHealthCheck(), this.healthIntervalMs);
+    this.healthTimer.unref?.();
+  }
+
+  private stopHealthChecks() {
+    if (this.healthTimer) clearInterval(this.healthTimer);
+    this.healthTimer = null;
+  }
+
+  // A READY client can break with nothing reporting it: the page goes stale,
+  // or number lookups hang (both seen on live). So keep asking WhatsApp about
+  // our own number, the same call a send needs, and restart if it stops
+  // working. That way the next customer send doesn't find the fault first.
+  private async runHealthCheck() {
+    if (this.healthCheckRunning || this.restarting || !this.isOperational()) return;
+    this.healthCheckRunning = true;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const self = this.client.info?.wid?._serialized;
+      const check = self ? this.client.getNumberId(self) : this.client.getState();
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`no answer in ${this.lookupTimeoutMs}ms`)), this.lookupTimeoutMs);
+      });
+      await Promise.race([check, timeout]);
+      this.healthFailures = 0;
+      this.consecutiveRestarts = 0;
+    } catch (err) {
+      this.healthFailures += 1;
+      this.logger.warn(`[WhatsApp] Health check failed (${this.healthFailures}): ${err instanceof Error ? err.message : err}`);
+      if (this.isFatalPageError(err) || this.healthFailures >= WhatsappClientWrapper.HEALTH_FAILURES_BEFORE_RESTART) {
+        this.logger.error('[WhatsApp] Unhealthy - restarting the client');
+        void this.restartClient();
+      }
+    } finally {
+      clearTimeout(timer);
+      this.healthCheckRunning = false;
+    }
   }
 
   private startClient() {
@@ -232,6 +302,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       this.authenticated = true;
       this.latestQr = null;
       this.lastError = null;
+      this.startHealthChecks();
       if (this.readyResolve) {
         this.readyResolve();
         this.readyResolve = null;
@@ -275,11 +346,15 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     });
 
     // Initialize the client
-    this.client.initialize().catch((err: Error) => {
+    const startedClient = this.client;
+    startedClient.initialize().catch((err: Error) => {
+      // An old client being torn down also lands here; only the current one counts.
+      if (startedClient !== this.client) return;
       const errorMsg = err.message || 'Unknown initialization error';
       this.logger.error(`[WhatsApp] Initialization failed: ${errorMsg}`);
       this.setState('ERROR');
       this.lastError = errorMsg;
+      void this.restartClient();
     });
   }
 
@@ -1177,6 +1252,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
 
   async onModuleDestroy() {
     this.logger.log('[WhatsApp] Shutdown: destroying client');
+    this.stopHealthChecks();
     if (this.client) {
       try {
         await this.client.destroy();
