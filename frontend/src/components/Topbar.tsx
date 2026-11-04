@@ -33,7 +33,7 @@ const TITLES: Record<string, { title: string; crumb: string }> = {
   '/carpenters': { title: 'Production', crumb: 'Production › Carpenter Work' },
   '/payments': { title: 'Payments', crumb: 'Payments' },
   '/expenses': { title: 'Expenses', crumb: 'Expenses' },
-  '/investors': { title: 'Investors Management', crumb: 'Investors › P&L & Dividends' },
+  '/investors': { title: 'Investors', crumb: 'Investors › Profit & Payments' },
   '/reports': { title: 'Reports', crumb: 'Reports' },
   '/users': { title: 'Users', crumb: 'Users & Roles › Users' },
   '/audit-log': { title: 'Audit Log', crumb: 'Users & Roles › Audit Log' },
