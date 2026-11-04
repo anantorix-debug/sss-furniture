@@ -203,6 +203,7 @@ export function PaymentsPanel({
             <label className="label">Mode</label>
             <select className="input" value={mode} onChange={(e) => setMode(e.target.value)}>
               <option>UPI</option>
+              <option>UPI-HDFC</option>
               <option>CASH</option>
               <option>GPAY</option>
               <option>BANK TRANSFER</option>

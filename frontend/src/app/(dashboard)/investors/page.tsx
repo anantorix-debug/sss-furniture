@@ -39,6 +39,7 @@ const iso = (d: Date) =>
 const PAYMENT_MODES = [
   'BANK_TRANSFER',
   'UPI',
+  'UPI-HDFC',
   'CASH',
   'CHEQUE',
   'NEFT',

@@ -11,6 +11,7 @@ import { ItemSpecsEditor, specsPayload } from '@/components/ItemSpecsEditor';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { StatusBadge, BalanceBadge, Chip, type ChipColor } from '@/components/StatusBadge';
 import { ViewField } from '@/components/ViewField';
+import { StatCard } from '@/components/StatCard';
 import { PaymentsPanel } from '@/components/PaymentsPanel';
 import { FormRow, FormField } from '@/components/orders/OrderFormFields';
 import { AssignProductionModal, type AssignProductionPayload } from '@/components/AssignProductionModal';
@@ -30,6 +31,17 @@ import { WhatsAppActionButton } from '@/components/WhatsAppActionButton';
 import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { useForceable } from '@/hooks/useForceable';
 import { sharePdf } from '@/lib/sharePdf';
+
+interface CustomerOrderSummary {
+  orders: number;
+  pending: number;
+  delivered: number;
+  cancelled: number;
+  orderValue?: number;
+  received?: number;
+  balanceDue?: number;
+  dueOrders?: number;
+}
 import { buildCustomerOrderMessage } from '@/lib/orderMessages';
 import { OrderWorkEntriesPanel, type StagedWorkEntry } from '@/components/OrderWorkEntriesPanel';
 import { HoverPreview } from '@/components/HoverPreview';
@@ -76,7 +88,7 @@ function CustomerOrdersContent() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
-  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<CustomerOrder>>(
+  const { data: result, isLoading, mutate } = useSWR<PaginatedResult<CustomerOrder> & { summary?: CustomerOrderSummary }>(
     `/customer-orders?${new URLSearchParams({
       ...(search ? { search } : {}),
       ...(statusFilter ? { status: statusFilter } : {}),
@@ -86,6 +98,7 @@ function CustomerOrdersContent() {
     fetcher,
   );
   const data = result?.data;
+  const summary = result?.summary;
 
   // Any filter change starts back at page 1 - otherwise you can land on a
   // now-empty page 4 after narrowing a search down to 2 results.
@@ -434,6 +447,26 @@ function CustomerOrdersContent() {
           <option value="DELIVERED">Delivered</option>
           <option value="CANCELLED">Cancelled</option>
         </select>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard
+          label="Orders"
+          value={summary ? String(summary.orders) : '-'}
+          sub={summary ? `${summary.pending} pending · ${summary.delivered} delivered · ${summary.cancelled} cancelled` : undefined}
+        />
+        {(!summary || summary.orderValue !== undefined) && (
+          <>
+            <StatCard label="Order Value" value={summary?.orderValue !== undefined ? formatCurrency(summary.orderValue) : '-'} />
+            <StatCard label="Received" accent="success" value={summary?.received !== undefined ? formatCurrency(summary.received) : '-'} />
+            <StatCard
+              label="Balance Due"
+              accent="warning"
+              value={summary?.balanceDue !== undefined ? formatCurrency(summary.balanceDue) : '-'}
+              sub={summary?.dueOrders !== undefined ? `${summary.dueOrders} order${summary.dueOrders === 1 ? '' : 's'} with balance` : undefined}
+            />
+          </>
+        )}
       </div>
 
       <div className="card overflow-x-auto">

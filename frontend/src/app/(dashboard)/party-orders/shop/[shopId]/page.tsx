@@ -118,7 +118,7 @@ function PaymentSummaryCards({ summary }: { summary: ShopSummary }) {
 // on payments. A payment is against the shop's overall balance - the
 // backend splits it across the shop's orders (and re-splits on edit).
 type ShopPaymentPayload = { date: string; amount: number; mode?: string; note?: string; orderId?: string };
-const PAY_MODES = ['CASH', 'UPI', 'GPAY', 'BANK TRANSFER'];
+const PAY_MODES = ['CASH', 'UPI', 'UPI-HDFC', 'GPAY', 'BANK TRANSFER'];
 const emptyLedgerFilter = { q: '', kind: '', mode: '', from: '', to: '' };
 
 function PaymentLedgerPanel({

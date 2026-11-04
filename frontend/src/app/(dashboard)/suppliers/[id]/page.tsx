@@ -9,6 +9,7 @@ import { api, ApiError, getAccessToken, assetUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { StatCard } from '@/components/StatCard';
+import { PaymentModeOptions } from '@/components/PaymentModeOptions';
 import { RoleGate } from '@/components/RoleGate';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { PurchaseFormModal } from '@/components/PurchaseFormModal';
@@ -498,9 +499,7 @@ function SupplierDetailContent() {
                       <td><input type="date" className="input py-1 text-xs" value={editPaymentForm.date} onChange={(e) => setEditPaymentForm((f) => ({ ...f, date: e.target.value }))} /></td>
                       <td>
                         <select className="input py-1 text-xs" value={editPaymentForm.mode} onChange={(e) => setEditPaymentForm((f) => ({ ...f, mode: e.target.value }))}>
-                          <option>CASH</option>
-                          <option>GPAY</option>
-                          <option>UPI</option>
+                          <PaymentModeOptions current={editPaymentForm.mode} />
                         </select>
                       </td>
                       <td><input className="input py-1 text-xs w-20" placeholder="V.No" value={editPaymentForm.voucherNo} onChange={(e) => setEditPaymentForm((f) => ({ ...f, voucherNo: e.target.value }))} /></td>
@@ -571,9 +570,7 @@ function SupplierDetailContent() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input type="number" step="0.01" className="input" placeholder="Amount" required value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))} />
                 <select className="input" value={paymentForm.mode} onChange={(e) => setPaymentForm((f) => ({ ...f, mode: e.target.value }))}>
-                  <option>CASH</option>
-                  <option>GPAY</option>
-                  <option>UPI</option>
+                  <PaymentModeOptions current={paymentForm.mode} />
                 </select>
               </div>
               <button type="submit" className="btn-primary w-full">

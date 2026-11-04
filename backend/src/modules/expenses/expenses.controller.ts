@@ -1,5 +1,6 @@
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { ExpensesService } from './expenses.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
@@ -56,6 +57,23 @@ export class ExpensesController {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  // Every row matching the screen's filters, not just the current page.
+  @Get('pdf')
+  async pdf(@Query() q: Record<string, string | undefined>, @Res() res: Response) {
+    const buffer = await this.service.generatePdf({
+      dateFrom: q.dateFrom,
+      dateTo: q.dateTo,
+      categoryId: q.categoryId,
+      paymentModeId: q.paymentModeId,
+      scope: q.scope as 'COMPANY' | 'PERSONAL' | undefined,
+      status: q.status as 'ACTIVE' | 'ARCHIVED' | undefined,
+      search: q.search,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="expenses.pdf"');
+    res.send(buffer);
   }
 
   @Get('summary')

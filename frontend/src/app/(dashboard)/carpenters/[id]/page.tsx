@@ -7,6 +7,7 @@ import { fetcher } from '@/lib/swr';
 import { api, ApiError, getAccessToken } from '@/lib/api';
 import { lookupModelNo, sanitizeModelNo, type ModelNoLookup } from '@/lib/modelNoLookup';
 import { ModelNoHint } from '@/components/ModelNoHint';
+import { PaymentModeOptions } from '@/components/PaymentModeOptions';
 import { ProductSelector } from '@/components/ProductSelector';
 import { WorkerKycPanel } from '@/components/WorkerKyc';
 import type { CompanyProductEntry } from '@/lib/companyProducts';
@@ -881,9 +882,7 @@ Please confirm receipt.`,
             <input className="input" placeholder="Voucher No. (e.g. SSS-250)" value={paymentForm.reference} onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))} />
             <input type="number" step="0.01" className="input" placeholder="Amount" required value={paymentForm.amount} onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))} />
             <select className="input" value={paymentForm.mode} onChange={(e) => setPaymentForm((f) => ({ ...f, mode: e.target.value }))}>
-              <option>CASH</option>
-              <option>GPAY</option>
-              <option>UPI</option>
+              <PaymentModeOptions current={paymentForm.mode} />
             </select>
             <button type="submit" className="btn-primary">
               Record
@@ -926,9 +925,7 @@ Please confirm receipt.`,
               <div>
                 <label className="label">Mode</label>
                 <select className="input" value={payEdit.mode} onChange={(e) => setPayEdit((f) => f && { ...f, mode: e.target.value })}>
-                  <option>CASH</option>
-                  <option>GPAY</option>
-                  <option>UPI</option>
+                  <PaymentModeOptions current={payEdit.mode} />
                 </select>
               </div>
               <div>

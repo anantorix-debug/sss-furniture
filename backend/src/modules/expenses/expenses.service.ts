@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { paginate, toSkipTake } from '../../common/utils/pagination.util';
+import { PdfService } from '../pdf/pdf.service';
+import { escapeHtml, renderFilterSummary, renderGeneratedFooter, renderReportHeader, REPORT_PDF_STYLES } from '../../common/utils/pdf-report.util';
 
 export interface ExpenseFilters {
   dateFrom?: string;
@@ -33,7 +35,10 @@ const EXPENSE_INCLUDE = {
 
 @Injectable()
 export class ExpensesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private pdf?: PdfService,
+  ) {}
 
   private buildWhere(filters: ExpenseFilters): Prisma.ExpenseWhereInput {
     return {
@@ -107,6 +112,70 @@ export class ExpensesService {
     const totalAmount = Number(sum._sum.amount ?? 0);
     if (!paginated) return { data: items, totalAmount };
     return { ...paginate(items, total, page, limit), totalAmount };
+  }
+
+  async generatePdf(filters: ExpenseFilters): Promise<Buffer> {
+    const rows = await this.prisma.expense.findMany({
+      where: this.buildWhere(filters),
+      include: EXPENSE_INCLUDE,
+      orderBy: [{ date: 'desc' }, { voucherNumber: 'desc' }],
+    });
+    const rupees = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    const day = (d: Date | string) => new Date(d).toISOString().slice(0, 10).split('-').reverse().join('-');
+    const total = rows.reduce((t, e) => t + Number(e.amount), 0);
+
+    const [category, mode] = await Promise.all([
+      filters.categoryId ? this.prisma.expenseCategory.findUnique({ where: { id: filters.categoryId } }) : null,
+      filters.paymentModeId ? this.prisma.expensePaymentMode.findUnique({ where: { id: filters.paymentModeId } }) : null,
+    ]);
+    const byMode = new Map<string, number>();
+    for (const e of rows) byMode.set(e.paymentMode.name, (byMode.get(e.paymentMode.name) ?? 0) + Number(e.amount));
+
+    const showCategory = !filters.categoryId;
+    const body = rows
+      .map(
+        (e, i) => `<tr>
+          <td>${i + 1}</td>
+          <td style="white-space:nowrap">${day(e.date)}</td>
+          <td>${escapeHtml(e.referenceType?.code ?? '-')}</td>
+          <td>${e.voucherNumber ?? '-'}</td>
+          <td>${escapeHtml(e.particulars)}</td>
+          ${showCategory ? `<td>${escapeHtml(e.category.name)}</td>` : ''}
+          <td style="white-space:nowrap">${escapeHtml(e.paymentMode.name)}</td>
+          <td style="text-align:right;white-space:nowrap">${rupees(Number(e.amount))}</td>
+          <td>${escapeHtml(e.paidBy ?? '-')}</td>
+        </tr>`,
+      )
+      .join('');
+    const columns = showCategory ? 9 : 8;
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Expenses</title><style>${REPORT_PDF_STYLES}</style></head><body>
+      ${renderReportHeader(`Expenses${category ? ` - ${category.name}` : ''}`)}
+      <div class="body">
+        ${renderFilterSummary({
+          Category: category?.name,
+          Type: filters.scope,
+          'Date From': filters.dateFrom ? day(filters.dateFrom) : undefined,
+          'Date To': filters.dateTo ? day(filters.dateTo) : undefined,
+          Mode: mode?.name,
+          Search: filters.search,
+          Status: filters.status === 'ARCHIVED' ? 'Archived' : undefined,
+        })}
+        <div class="summary">
+          <div><div class="label">Total</div><div class="value">${rupees(total)}</div></div>
+          <div><div class="label">Entries</div><div class="value">${rows.length}</div></div>
+          ${[...byMode.entries()].map(([name, amount]) => `<div><div class="label">${escapeHtml(name)}</div><div class="value">${rupees(amount)}</div></div>`).join('')}
+        </div>
+        <table>
+          <thead><tr><th>S.No</th><th>Date</th><th>Ref</th><th>V</th><th>Particulars</th>${showCategory ? '<th>Category</th>' : ''}<th>Mode</th><th style="text-align:right">Debit</th><th>Paid By</th></tr></thead>
+          <tbody>
+            ${body || `<tr><td colspan="${columns}" style="text-align:center;color:#9ca3af;padding:16px">No entries</td></tr>`}
+            ${rows.length ? `<tr style="font-weight:bold;background:#f4f2ec"><td colspan="${columns - 2}">Total</td><td style="text-align:right;white-space:nowrap">${rupees(total)}</td><td></td></tr>` : ''}
+          </tbody>
+        </table>
+        ${renderGeneratedFooter(rows.length, 'entry').replace('entrys', 'entries')}
+      </div></body></html>`;
+    return this.pdf!.renderHtmlToPdf(html, { pageNumbers: true });
   }
 
   async findOne(id: string) {

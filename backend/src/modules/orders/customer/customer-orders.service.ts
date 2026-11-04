@@ -212,7 +212,36 @@ export class CustomerOrdersService {
       paginated ? this.prisma.customerOrder.count({ where }) : Promise.resolve(0),
     ]);
     const mapped = orders.map((o) => stripOrderMoney(withBalance(flattenGalleryImages(o)), hide));
-    return paginated ? paginate(mapped, total, page, limit) : mapped;
+    if (!paginated) return mapped;
+    return { ...paginate(mapped, total, page, limit), summary: await this.listSummary(where, hide) };
+  }
+
+  // KPI cards above the list: every order matching the search and status
+  // filter, not just the 20 on this page. Overpaid orders don't reduce what
+  // the other customers still owe, so Balance Due adds only amounts still owed.
+  private async listSummary(where: Prisma.CustomerOrderWhereInput, hide: boolean) {
+    const rows = await this.prisma.customerOrder.findMany({
+      where,
+      select: { orderValue: true, deliveryStatus: true, payments: { select: { amount: true } } },
+    });
+    const count = (status: string) => rows.filter((r) => r.deliveryStatus === status).length;
+    const counts = { orders: rows.length, pending: count('PENDING'), delivered: count('DELIVERED'), cancelled: count('CANCELLED') };
+    if (hide) return counts;
+    let orderValue = 0;
+    let received = 0;
+    let balanceDue = 0;
+    let dueOrders = 0;
+    for (const r of rows) {
+      const { totalReceived, balanceAmount } = computeBalance(r.orderValue as any, r.payments as any);
+      orderValue += Number(r.orderValue);
+      received += totalReceived;
+      if (balanceAmount > 0) {
+        balanceDue += balanceAmount;
+        dueOrders += 1;
+      }
+    }
+    const round = (n: number) => Math.round(n * 100) / 100;
+    return { ...counts, orderValue: round(orderValue), received: round(received), balanceDue: round(balanceDue), dueOrders };
   }
 
   async findOne(id: string, viewerRole?: Role) {

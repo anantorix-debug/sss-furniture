@@ -4,6 +4,8 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { api } from '@/lib/api';
+import { downloadPdf } from '@/lib/sharePdf';
+import { toast } from '@/lib/toast';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { Chip, type ChipColor } from '@/components/StatusBadge';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -44,11 +46,12 @@ export function ExpenseListTab({
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Expense | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const { data: paymentModes } = useSWR<ExpensePaymentMode[]>('/expense-config/payment-modes', fetcher);
   const { data: categories } = useSWR<ExpenseCategory[]>('/expense-config/categories', fetcher);
 
-  const query = new URLSearchParams({
+  const filters = {
     ...(categoryId ? { categoryId } : {}),
     ...(!categoryId && categoryFilter ? { categoryId: categoryFilter } : {}),
     ...(scope ? { scope } : {}),
@@ -57,9 +60,8 @@ export function ExpenseListTab({
     ...(dateTo ? { dateTo } : {}),
     ...(paymentModeId ? { paymentModeId } : {}),
     status: showArchived ? 'ARCHIVED' : 'ACTIVE',
-    page: String(page),
-    limit: '20',
-  });
+  };
+  const query = new URLSearchParams({ ...filters, page: String(page), limit: '20' });
   const { data: result, isLoading, mutate } = useSWR<PaginatedResult<Expense> & { totalAmount: number }>(
     `/expenses?${query}`,
     fetcher,
@@ -67,6 +69,17 @@ export function ExpenseListTab({
 
   function resetPage() {
     setPage(1);
+  }
+
+  async function exportPdf() {
+    setPdfBusy(true);
+    try {
+      await downloadPdf(`/expenses/pdf?${new URLSearchParams(filters)}`, `${exportName}.pdf`);
+    } catch {
+      toast.error('Failed to download the PDF');
+    } finally {
+      setPdfBusy(false);
+    }
   }
 
   async function handleArchive() {
@@ -100,6 +113,10 @@ export function ExpenseListTab({
           <h2 className="text-lg font-semibold text-brand-900">{title}</h2>
           <p className="text-sm text-brand-500">{description}</p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        <button className="btn-secondary text-sm" disabled={pdfBusy} onClick={exportPdf}>
+          {pdfBusy ? 'Preparing PDF...' : 'Export PDF'}
+        </button>
         <button
           className="btn-secondary text-sm"
           onClick={() =>
@@ -122,6 +139,7 @@ export function ExpenseListTab({
         >
           Export CSV
         </button>
+        </div>
       </div>
 
       <div className="card p-3">
