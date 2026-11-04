@@ -730,6 +730,18 @@ const STEPS: { key: Exclude<PipelineStage, 'rework'>; label: string }[] = [
 ];
 const STEP_ORDER = STEPS.map((s) => s.key);
 
+// Bulk "Change status to" options. `from` = the stages each one can move
+// forward from (the server applies the same rule and skips the rest).
+type PipelineTarget = 'QC_PASSED' | 'IN_STOCK' | 'DISPATCHED' | 'REWORK' | 'FAILED';
+const BULK_TARGETS: { key: PipelineTarget; label: string; from: PipelineStage[]; note: string }[] = [
+  { key: 'QC_PASSED', label: 'QC Passed', from: ['awaiting_qc', 'rework'], note: 'They will be ready to add to Finished Stock.' },
+  { key: 'IN_STOCK', label: 'In Finished Stock', from: ['awaiting_qc', 'rework', 'awaiting_stock'], note: 'QC Passed is recorded where it is missing, and each piece is added to Finished Stock.' },
+  { key: 'DISPATCHED', label: 'Dispatched', from: ['awaiting_qc', 'rework', 'awaiting_stock', 'in_stock'], note: 'QC Passed and Finished Stock are recorded where missing, with today as the dispatch date. Vehicle and driver are left blank.' },
+  { key: 'REWORK', label: 'Send for Rework', from: ['awaiting_qc', 'rework'], note: 'They go back to the worker and leave this list until finished again.' },
+  { key: 'FAILED', label: 'QC Failed', from: ['awaiting_qc', 'rework'], note: 'They go back to the worker and leave this list until finished again.' },
+];
+const DISPATCH_PAGE_SIZE = 20;
+
 function Stepper({ stage }: { stage: PipelineStage }) {
   if (stage === 'rework') {
     return <Chip color="red" label="Rework needed" />;
@@ -765,6 +777,16 @@ function DispatchTab() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const [stageFilter, setStageFilter] = useState<PipelineStage | 'all'>('all');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkTarget, setBulkTarget] = useState<PipelineTarget | ''>('');
+  const [bulkRemarks, setBulkRemarks] = useState('');
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
   // Items from the sequential Carpenter -> Carving -> Polish engine
   // (identified by having a batchId) are excluded here - those go through
   // the Verification tab and the /verify endpoint instead, never this
@@ -788,6 +810,80 @@ function DispatchTab() {
       return { item, jobNumber, stage, stock };
     });
   }, [workItems, qcChecks, stockItems, dispatches]);
+
+  const stageCounts = useMemo(() => {
+    const counts: Partial<Record<PipelineStage, number>> = {};
+    for (const r of rows) counts[r.stage] = (counts[r.stage] ?? 0) + 1;
+    return counts;
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter(
+      (r) =>
+        (stageFilter === 'all' || r.stage === stageFilter) &&
+        (!q || (r.item.modelNo ?? '').toLowerCase().includes(q) || r.item.productName.toLowerCase().includes(q)),
+    );
+  }, [rows, stageFilter, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / DISPATCH_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filteredRows.slice((currentPage - 1) * DISPATCH_PAGE_SIZE, currentPage * DISPATCH_PAGE_SIZE);
+
+  // Dispatched pieces are the end of the line, so they can't be selected.
+  const selectable = (r: { stage: PipelineStage }) => r.stage !== 'dispatched';
+  const pageSelectable = pageRows.filter(selectable);
+  const filteredSelectable = filteredRows.filter(selectable);
+  const allOnPageSelected = pageSelectable.length > 0 && pageSelectable.every((r) => selected.has(r.item.id));
+  const selectedRows = rows.filter((r) => selectable(r) && selected.has(r.item.id));
+
+  const target = BULK_TARGETS.find((t) => t.key === bulkTarget);
+  const willChange = target ? selectedRows.filter((r) => target.from.includes(r.stage)).length : 0;
+  const willSkip = selectedRows.length - willChange;
+  const needsRemarks = bulkTarget === 'REWORK' || bulkTarget === 'FAILED';
+
+  function setSelection(ids: string[], on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function changeFilter(stage: PipelineStage | 'all') {
+    setStageFilter(stage);
+    setPage(1);
+  }
+
+  async function applyBulk() {
+    if (!bulkTarget) return;
+    setBulkConfirm(false);
+    setBulkBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api.post<{ changed: number; skipped: { id: string; reason: string }[] }>('/carpenter-work-items/pipeline-bulk', {
+        workItemIds: selectedRows.map((r) => r.item.id),
+        target: bulkTarget,
+        remarks: needsRemarks && bulkRemarks.trim() ? bulkRemarks.trim() : undefined,
+      });
+      setNotice(
+        `${res.changed} ${res.changed === 1 ? 'piece' : 'pieces'} changed to ${target?.label}.` +
+          (res.skipped.length ? ` ${res.skipped.length} skipped (already at or past this status).` : ''),
+      );
+      setSelected(new Set());
+      setBulkTarget('');
+      setBulkRemarks('');
+    } catch (err) {
+      setError(err instanceof ApiError ? `Nothing was changed: ${err.message}` : 'Nothing was changed: could not reach the server');
+    } finally {
+      await Promise.all([mutateWork(), mutateQc(), mutateStock(), mutateDispatch()]);
+      setBulkBusy(false);
+    }
+  }
 
   async function submitQc(e: React.FormEvent) {
     e.preventDefault();
@@ -848,11 +944,53 @@ function DispatchTab() {
   return (
     <div className="space-y-4">
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-emerald-700">{notice}</p>}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          className="input !py-1.5 text-sm w-full sm:w-56"
+          placeholder="Search Model No or product"
+          aria-label="Search Model No or product"
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+        />
+        {[{ key: 'all' as const, label: 'All', count: rows.length }, ...(Object.keys(STAGE_LABEL) as PipelineStage[]).map((key) => ({ key, label: STAGE_LABEL[key], count: stageCounts[key] ?? 0 }))]
+          .filter((f) => f.key === 'all' || f.count > 0)
+          .map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={stageFilter === f.key}
+              onClick={() => changeFilter(f.key)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${stageFilter === f.key ? 'border-brand-700 bg-brand-700 text-white' : 'border-brand-100 bg-white text-brand-700 hover:bg-brand-50'}`}
+            >
+              {f.label} ({f.count})
+            </button>
+          ))}
+      </div>
+
+      {allOnPageSelected && selectedRows.length < filteredSelectable.length && (
+        <p className="text-sm text-brand-600">
+          All {pageSelectable.length} on this page are selected.{' '}
+          <button type="button" className="font-semibold text-brand-800 underline" onClick={() => setSelection(filteredSelectable.map((r) => r.item.id), true)}>
+            Select all {filteredSelectable.length}
+          </button>
+        </p>
+      )}
 
       <div className="card overflow-x-auto">
         <table className="table-shell">
           <thead>
             <tr>
+              <th className="w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all on this page"
+                  checked={allOnPageSelected}
+                  disabled={pageSelectable.length === 0}
+                  onChange={(e) => setSelection(pageSelectable.map((r) => r.item.id), e.target.checked)}
+                />
+              </th>
               <th>Piece Model No</th>
               <th>Product</th>
               <th>Completed</th>
@@ -863,13 +1001,26 @@ function DispatchTab() {
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td colSpan={6} className="text-center text-brand-400 py-6">Loading...</td></tr>
+              <tr><td colSpan={7} className="text-center text-brand-400 py-6">Loading...</td></tr>
             )}
             {!isLoading && rows.length === 0 && (
-              <tr><td colSpan={6} className="text-center text-brand-400 py-6">No completed cots waiting on the pipeline yet.</td></tr>
+              <tr><td colSpan={7} className="text-center text-brand-400 py-6">No completed cots waiting on the pipeline yet.</td></tr>
             )}
-            {rows.map(({ item, jobNumber, stage, stock }) => (
-              <tr key={item.id}>
+            {!isLoading && rows.length > 0 && filteredRows.length === 0 && (
+              <tr><td colSpan={7} className="text-center text-brand-400 py-6">Nothing matches this search or filter.</td></tr>
+            )}
+            {pageRows.map(({ item, jobNumber, stage, stock }) => (
+              <tr key={item.id} className={selected.has(item.id) && stage !== 'dispatched' ? 'bg-brand-50/60' : undefined}>
+                <td>
+                  {stage !== 'dispatched' && (
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${item.modelNo || item.productName}`}
+                      checked={selected.has(item.id)}
+                      onChange={(e) => setSelection([item.id], e.target.checked)}
+                    />
+                  )}
+                </td>
                 <td className="font-medium">{item.modelNo || '-'}</td>
                 <td>{item.productName}{item.size ? ` · ${item.size}${item.sizeUnit ? ` ${item.sizeUnit}` : ''}` : ''}</td>
                 <td>{formatDate(item.workDate)}</td>
@@ -898,6 +1049,53 @@ function DispatchTab() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={currentPage} totalPages={totalPages} total={filteredRows.length} limit={DISPATCH_PAGE_SIZE} onPageChange={setPage} />
+
+      {selectedRows.length > 0 && (
+        <div className="sticky bottom-3 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-white p-3 shadow-lg">
+          <span className="text-sm font-semibold text-brand-900">{selectedRows.length} selected</span>
+          <select
+            className="input !py-1.5 text-sm w-full sm:w-52"
+            aria-label="Change status to"
+            value={bulkTarget}
+            onChange={(e) => setBulkTarget(e.target.value as PipelineTarget | '')}
+          >
+            <option value="">Change status to...</option>
+            {BULK_TARGETS.map((t) => (
+              <option key={t.key} value={t.key}>{t.label}</option>
+            ))}
+          </select>
+          {needsRemarks && (
+            <input
+              className="input !py-1.5 text-sm w-full sm:w-64"
+              placeholder="What to fix (optional)"
+              aria-label="What to fix"
+              maxLength={500}
+              value={bulkRemarks}
+              onChange={(e) => setBulkRemarks(e.target.value)}
+            />
+          )}
+          <button type="button" className="btn-primary text-sm" disabled={!bulkTarget || willChange === 0 || bulkBusy} onClick={() => setBulkConfirm(true)}>
+            {bulkBusy ? 'Updating…' : 'Apply'}
+          </button>
+          <button type="button" className="btn-secondary text-sm" disabled={bulkBusy} onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+          {target && willChange === 0 && <span className="text-xs text-amber-700">The selected pieces are already at or past this status.</span>}
+        </div>
+      )}
+
+      {bulkConfirm && target && (
+        <ConfirmDialog
+          title={`Change to ${target.label}?`}
+          message={`${willChange} ${willChange === 1 ? 'piece' : 'pieces'} will change to ${target.label}. ${target.note}${willSkip ? ` ${willSkip} already at or past this status will be skipped.` : ''}`}
+          confirmLabel={`Change ${willChange}`}
+          danger={target.key === 'DISPATCHED'}
+          onConfirm={applyBulk}
+          onCancel={() => setBulkConfirm(false)}
+        />
+      )}
 
       {qcModalItem && (
         <Modal title={`Quality Check - ${qcModalItem.productName}`} onClose={() => setQcModalItem(null)}>

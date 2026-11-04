@@ -5,6 +5,8 @@ import { ApiBody, ApiConsumes } from '@nestjs/swagger';
 import { Response } from 'express';
 import { CarpenterService } from './carpenter.service';
 import { WORKER_DOC_MAX_BYTES, WorkerKycService } from './worker-kyc.service';
+import { PipelineBulkService } from './pipeline-bulk.service';
+import { PipelineBulkDto } from './dto/pipeline-bulk.dto';
 import { UpdateWorkerKycDto } from './dto/update-worker-kyc.dto';
 import { CreateCarpenterDto } from './dto/create-carpenter.dto';
 import { UpdateCarpenterDto } from './dto/update-carpenter.dto';
@@ -32,6 +34,7 @@ export class CarpenterController {
   constructor(
     private service: CarpenterService,
     private kyc: WorkerKycService,
+    private pipelineBulk: PipelineBulkService,
   ) {}
 
   // --- Worker ID & bank details (Aadhaar, PAN, bank account) -------------
@@ -310,6 +313,13 @@ export class CarpenterController {
   @Patch('carpenter-work-items/:id/status')
   updateWorkStatus(@Param('id') id: string, @Body() dto: UpdateWorkStatusDto, @CurrentUser() user: AuthUser) {
     return this.service.updateWorkStatus(id, dto, user.role as Role, user.userId);
+  }
+
+  // Production Control > Dispatch: change the status of many pieces at once.
+  @Roles(Role.ADMIN)
+  @Post('carpenter-work-items/pipeline-bulk')
+  applyPipelineBulk(@Body() dto: PipelineBulkDto, @CurrentUser() user: AuthUser) {
+    return this.pipelineBulk.apply(dto, user);
   }
 
   // "Verify & Add to Stock" - the only action that creates real Product /
