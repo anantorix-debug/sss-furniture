@@ -133,8 +133,8 @@ export function ExpenseListTab({
 
       <div className="flex flex-wrap gap-2">
         <input
-          className="input max-w-[220px]"
-          placeholder="Search particulars, vendor, notes..."
+          className="input w-full sm:max-w-[300px]"
+          placeholder="Search voucher no, particulars, mode, amount..."
           value={search}
           onChange={(e) => { setSearch(e.target.value); resetPage(); }}
         />

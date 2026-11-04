@@ -55,15 +55,32 @@ export class ExpensesService {
         filters.minAmount != null || filters.maxAmount != null
           ? { gte: filters.minAmount, lte: filters.maxAmount }
           : undefined,
-      OR: filters.search
-        ? [
-            { particulars: { contains: filters.search } },
-            { vendorName: { contains: filters.search } },
-            { notes: { contains: filters.search } },
-            { paidBy: { contains: filters.search } },
-          ]
-        : undefined,
+      OR: this.searchConditions(filters.search),
     };
+  }
+
+  // One box for everything shown in the list. Voucher number and amount are
+  // number columns, so they match exactly: "845" or "V845" finds voucher 845,
+  // and "2500" or "2,500" also finds that amount. "V845" means the voucher only.
+  private searchConditions(raw?: string): Prisma.ExpenseWhereInput[] | undefined {
+    const q = raw?.trim();
+    if (!q) return undefined;
+    const conditions: Prisma.ExpenseWhereInput[] = [
+      { particulars: { contains: q } },
+      { vendorName: { contains: q } },
+      { notes: { contains: q } },
+      { paidBy: { contains: q } },
+      { paymentMode: { name: { contains: q } } },
+      { referenceType: { code: { contains: q } } },
+    ];
+    const voucherOnly = /^v[\s.-]*(\d{1,9})$/i.exec(q);
+    if (voucherOnly) conditions.push({ voucherNumber: Number(voucherOnly[1]) });
+    const number = q.replace(/[₹,\s]/g, '');
+    if (/^\d{1,10}(\.\d{1,2})?$/.test(number)) {
+      conditions.push({ amount: Number(number) });
+      if (/^\d{1,9}$/.test(number)) conditions.push({ voucherNumber: Number(number) });
+    }
+    return conditions;
   }
 
   // Opt-in pagination (see the identical pattern used across the app's other
