@@ -19,6 +19,7 @@ import { ViewField } from '@/components/ViewField';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { ImportButton } from '@/components/ImportButton';
 import { SizePicker } from '@/components/SizePicker';
+import { ColourPicker } from '@/components/ColourPicker';
 import type {
   ProductionDashboard,
   CarpenterWorkItem,
@@ -154,7 +155,7 @@ function AssignWorkerModal({ item, onClose, onAssigned }: { item: CarpenterWorkI
         {needsColor && (
           <div>
             <label className="label">Colour (required for Polish)</label>
-            <input className="input" required value={color} onChange={(e) => setColor(e.target.value)} placeholder="e.g. Walnut Brown" />
+            <ColourPicker required value={color} onChange={setColor} />
             <p className="text-[11px] text-brand-400 mt-1">Shown to the polish worker so they know what colour to use.</p>
           </div>
         )}
@@ -207,7 +208,7 @@ function SetColorModal({ item, onClose, onSaved }: { item: CarpenterWorkItem; on
         </p>
         <div>
           <label className="label">Colour</label>
-          <input className="input" required autoFocus value={color} onChange={(e) => setColor(e.target.value)} placeholder="e.g. Walnut Brown" />
+          <ColourPicker required autoFocus value={color} onChange={setColor} />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
@@ -386,12 +387,7 @@ function StartStockProductionModal({ onClose, onCreated }: { onClose: () => void
                   ))}
                 </select>
               </div>
-              <input
-                className="input text-sm"
-                placeholder="Polish Colour (optional - e.g. Walnut Brown)"
-                value={row.color}
-                onChange={(e) => updateRow(idx, { color: e.target.value })}
-              />
+              <ColourPicker className="input text-sm" value={row.color} onChange={(color) => updateRow(idx, { color })} />
             </div>
           ))}
         </div>

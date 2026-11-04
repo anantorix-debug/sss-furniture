@@ -6,6 +6,7 @@ import { fetcher } from '@/lib/swr';
 import { Modal } from './Modal';
 import { FormRow, FormField } from './orders/OrderFormFields';
 import type { CarpenterSummary, User } from '@/types';
+import { ColourPicker } from '@/components/ColourPicker';
 
 export interface AssignProductionPayload {
   carpenterId: string;
@@ -156,13 +157,7 @@ export function AssignProductionModal({
 
         {stage === 'POLISH' && (
           <FormField label="Colour (required for Polish)" full>
-            <input
-              className="input"
-              required
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              placeholder="e.g. Walnut Brown"
-            />
+            <ColourPicker required value={color} onChange={setColor} />
             <p className="text-[11px] text-brand-400 mt-1">Shown to the polish worker so they know what colour to use.</p>
           </FormField>
         )}

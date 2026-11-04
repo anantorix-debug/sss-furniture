@@ -49,6 +49,7 @@ import { SuccessTick } from '@/components/SuccessTick';
 import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 import { ImportButton } from '@/components/ImportButton';
 import { SizePicker } from '@/components/SizePicker';
+import { ColourPicker } from '@/components/ColourPicker';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -642,12 +643,7 @@ function CustomerOrdersContent() {
                         onChange={(e) => updateItemRow(idx, { category: e.target.value })}
                       />
                       <SizePicker value={row.size} onChange={(size) => updateItemRow(idx, { size })} />
-                      <input
-                        className="input"
-                        placeholder="Polish Colour (e.g. Walnut Brown)"
-                        value={row.color}
-                        onChange={(e) => updateItemRow(idx, { color: e.target.value })}
-                      />
+                      <ColourPicker value={row.color} onChange={(color) => updateItemRow(idx, { color })} />
                       <div className="flex items-center gap-2">
                         {row.referenceImage ? (
                           <div className="relative">

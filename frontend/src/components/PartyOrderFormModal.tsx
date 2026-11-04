@@ -20,6 +20,7 @@ import { SuccessTick } from './SuccessTick';
 import { assetUrl } from '@/lib/api';
 import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product, GalleryImage, ItemSpecs } from '@/types';
 import { SizePicker } from '@/components/SizePicker';
+import { ColourPicker } from '@/components/ColourPicker';
 
 interface ItemForm {
   productId?: string;
@@ -461,12 +462,7 @@ export function PartyOrderFormModal({
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <input className="input text-sm" placeholder="Details" value={item.details} onChange={(e) => updateItem(idx, { details: e.target.value })} />
-                  <input
-                    className="input text-sm"
-                    placeholder="Polish Colour (e.g. Walnut Brown)"
-                    value={item.color}
-                    onChange={(e) => updateItem(idx, { color: e.target.value })}
-                  />
+                  <ColourPicker className="input text-sm" value={item.color} onChange={(color) => updateItem(idx, { color })} />
                 </div>
                 <div className="grid grid-cols-3 gap-2 items-center">
                   <div>
