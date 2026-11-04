@@ -27,6 +27,12 @@ interface WhatsAppStatus {
   error?: string;
 }
 
+export class WhatsappLookupTimeoutError extends Error {
+  constructor() {
+    super('WhatsApp did not respond while checking this number. Reconnecting - please try again in 2 minutes.');
+  }
+}
+
 @Injectable()
 export class WhatsappClientWrapper implements OnModuleDestroy {
   private readonly logger = new Logger(WhatsappClientWrapper.name);
@@ -42,6 +48,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   private readyResolve: (() => void) | null = null;
   private lidToPhoneJidCache = new Map<string, string>();
   private readonly sendTimeoutMs: number;
+  private readonly lookupTimeoutMs: number;
   private readonly lidResolutionTimeoutMs: number;
   // Belt-and-suspenders against any future cause of client.initialize()
   // never emitting anything (a bad Puppeteer arg, a wedged Chromium launch,
@@ -50,9 +57,11 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   // recover short of a manual PM2/container restart.
   private initWatchdog: NodeJS.Timeout | null = null;
   private static readonly INIT_TIMEOUT_MS = 90_000;
+  private static readonly LOOKUP_RESTART_COOLDOWN_MS = 10 * 60_000;
 
   constructor(private config: ConfigService) {
     this.sendTimeoutMs = Number(this.config.get('WHATSAPP_SEND_TIMEOUT_MS') ?? 30000);
+    this.lookupTimeoutMs = Number(this.config.get('WHATSAPP_LOOKUP_TIMEOUT_MS') ?? 15000);
     this.lidResolutionTimeoutMs = Number(this.config.get('WHATSAPP_LID_RESOLUTION_TIMEOUT_MS') ?? 8000);
     this.logger.log(`WhatsApp timeouts: send=${this.sendTimeoutMs}ms, lid-resolution=${this.lidResolutionTimeoutMs}ms`);
   }
@@ -75,6 +84,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   // logout — either way we want the app to land back on a scannable QR
   // code on its own, without requiring a server restart.
   private restarting = false;
+  private lastLookupRestartAt = 0;
 
   // Detects the class of Puppeteer error that means the underlying Chrome
   // page/frame has gone stale (WhatsApp Web reloaded internally, the tab
@@ -577,6 +587,31 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     throw new Error(`Unsupported WhatsApp chat ID format: ${id}`);
   }
 
+  // Is this number on WhatsApp? null means WhatsApp really answered "no". The
+  // lookup can hang on a degraded WhatsApp Web page until Puppeteer's 3-minute
+  // limit; that is not a "no", so it gets its own short timeout and error, and
+  // reconnects the client (at most once per cooldown) so the next try can work.
+  private async lookupNumberId(wid: string) {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new WhatsappLookupTimeoutError()), this.lookupTimeoutMs);
+    });
+    try {
+      return await Promise.race([this.client.getNumberId(wid), timeout]);
+    } catch (err) {
+      if (err instanceof WhatsappLookupTimeoutError) {
+        this.logger.error(`[WA SEND] Number lookup timed out after ${this.lookupTimeoutMs}ms: ${wid}`);
+        if (Date.now() - this.lastLookupRestartAt > WhatsappClientWrapper.LOOKUP_RESTART_COOLDOWN_MS) {
+          this.lastLookupRestartAt = Date.now();
+          void this.restartClient();
+        }
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   // Shared by sendToChat (text) and sendMediaToChat (media) - resolves
   // whatever chat ID shape the frontend hands over (@g.us group, @c.us
   // contact, raw phone digits, or an @lid that needs async resolution) down
@@ -591,14 +626,15 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
     }
     if (incomingChatId.endsWith('@c.us')) {
       this.logger.log(`[WA SEND] Detected chat type: CONTACT`);
-      const numberId = await this.client.getNumberId(incomingChatId).catch(() => null);
+      const numberId = await this.lookupNumberId(incomingChatId);
       if (!numberId) throw new Error(`Phone number is not registered on WhatsApp: ${incomingChatId}`);
       return numberId._serialized;
     }
     if (/^\d+$/.test(incomingChatId)) {
       this.logger.log(`[WA SEND] Normalizing raw phone: ${incomingChatId}`);
-      const chatIdWithSuffix = `${incomingChatId}@c.us`;
-      const numberId = await this.client.getNumberId(chatIdWithSuffix).catch(() => null);
+      // A bare 10-digit number is an Indian mobile without its country code.
+      const chatIdWithSuffix = `${incomingChatId.length === 10 ? `91${incomingChatId}` : incomingChatId}@c.us`;
+      const numberId = await this.lookupNumberId(chatIdWithSuffix);
       if (!numberId) throw new Error(`Phone number is not registered on WhatsApp: ${incomingChatId}`);
       this.logger.log(`[WA SEND] Normalized to: ${numberId._serialized}`);
       return numberId._serialized;
@@ -743,7 +779,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
 
     try {
       const chatId = `${phone}@c.us`;
-      const numberId = await this.client.getNumberId(chatId).catch(() => null);
+      const numberId = await this.lookupNumberId(chatId);
       if (!numberId) {
         throw new Error(`Phone number ${phone} is not registered on WhatsApp`);
       }
@@ -1095,7 +1131,7 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
 
     try {
       const chatId = `${phone}@c.us`;
-      const numberId = await this.client.getNumberId(chatId).catch(() => null);
+      const numberId = await this.lookupNumberId(chatId);
       if (!numberId) {
         throw new Error(`Phone number ${phone} is not registered on WhatsApp`);
       }
