@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/swr';
 import { ApiError, getAccessToken } from '@/lib/api';
@@ -33,14 +33,17 @@ export default function TrackPage() {
   const { code } = useParams<{ code: string }>();
   const router = useRouter();
   const decoded = decodeURIComponent(code);
-  const { data, isLoading, error, mutate } = useSWR<TrackResult>(`/search/track?q=${encodeURIComponent(decoded)}`, fetcher);
+  const isVoucher = useSearchParams().get('type') === 'voucher';
+  const searchType = isVoucher ? 'voucher' : 'model';
+  const searchLabel = isVoucher ? 'Voucher / Ref No' : 'Model No';
+  const { data, isLoading, error, mutate } = useSWR<TrackResult>(`/search/track?q=${encodeURIComponent(decoded)}&type=${searchType}`, fetcher);
   const [downloading, setDownloading] = useState(false);
 
   async function downloadPdf() {
     setDownloading(true);
     try {
       const token = getAccessToken();
-      const res = await fetch(`${API_BASE_URL}/search/track/pdf?q=${encodeURIComponent(decoded)}`, {
+      const res = await fetch(`${API_BASE_URL}/search/track/pdf?q=${encodeURIComponent(decoded)}&type=${searchType}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: 'include',
       });
@@ -74,8 +77,12 @@ export default function TrackPage() {
           <button className="text-sm text-brand-500 hover:underline mb-2" onClick={() => router.back()}>
             &larr; Back
           </button>
-          <h1 className="text-2xl font-bold text-brand-900">Search Record &ldquo;{decoded}&rdquo;</h1>
-          <p className="text-sm text-brand-500 mt-1">Complete order &rarr; voucher &rarr; production &rarr; employee &rarr; delivery history for &ldquo;{decoded}&rdquo;.</p>
+          <h1 className="text-2xl font-bold text-brand-900">{searchLabel} &ldquo;{decoded}&rdquo;</h1>
+          <p className="text-sm text-brand-500 mt-1">
+            {isVoucher
+              ? <>Expense, worker, supplier, purchase and investor records with voucher / ref no &ldquo;{decoded}&rdquo;.</>
+              : <>Product, order, production, employee and delivery history for Model No &ldquo;{decoded}&rdquo;.</>}
+          </p>
         </div>
         <button className="btn-secondary" onClick={downloadPdf} disabled={downloading}>
           {downloading ? 'Preparing...' : 'Download PDF'}
@@ -93,7 +100,11 @@ export default function TrackPage() {
       )}
 
       {data && !data.found && (
-        <div className="card p-8 text-center text-brand-400">No order, product, or production record found for Model No &ldquo;{decoded}&rdquo;.</div>
+        <div className="card p-8 text-center text-brand-400">
+          {isVoucher
+            ? <>No voucher or payment found for Voucher / Ref No &ldquo;{decoded}&rdquo;.</>
+            : <>No order, product, or production record found for Model No &ldquo;{decoded}&rdquo;.</>}
+        </div>
       )}
 
       {data?.product && (

@@ -82,14 +82,14 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
     e.preventDefault();
     const q = modelSearch.trim();
     if (!q) return;
-    router.push(`/track/${encodeURIComponent(q)}`);
+    router.push(`/track/${encodeURIComponent(q)}?type=model`);
   }
 
   function handleVoucherSearch(e: React.FormEvent) {
     e.preventDefault();
     const q = voucherSearch.trim();
     if (!q) return;
-    router.push(`/track/${encodeURIComponent(q)}`);
+    router.push(`/track/${encodeURIComponent(q)}?type=voucher`);
   }
 
   return (

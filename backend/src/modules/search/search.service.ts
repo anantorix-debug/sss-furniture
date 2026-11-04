@@ -7,6 +7,11 @@ import { escapeHtml, REPORT_PDF_STYLES, renderReportHeader, renderGeneratedFoote
 
 const HIDE_FINANCIALS_FOR: Role[] = [Role.CARPENTER, Role.CARVER, Role.POLISHER];
 
+export type TrackMode = 'model' | 'voucher';
+// Matches no rows, without a database round trip for that section.
+const NONE = { id: { in: [] as string[] } };
+const MAX_INT = 2147483647;
+
 @Injectable()
 export class SearchService {
   constructor(
@@ -14,38 +19,49 @@ export class SearchService {
     private pdf: PdfService,
   ) {}
 
-  // Global Search is Model No-only: it matches CustomerOrder.cotTrack,
-  // PartyOrder.cotNo (legacy single-product rows) / PartyOrderItem.modelNo
-  // (current multi-line rows), Product.modelNo, and CarpenterWorkItem.modelNo
-  // - the places "Model No" is stored - and nothing else (no Order ID,
-  // phone, or customer name matching). Model No is the single key that ties
-  // order, production, employee, and delivery/payment history together.
-  async track(modelNo: string, viewerRole?: Role) {
+  // The top bar has one box per kind of number, and each shows only its own
+  // kind: a Model No and a voucher can share a number without being related.
+  //   model:   products, orders and production (Model No, COT No, Order ID, Job No)
+  //   voucher: expenses, worker and supplier payments, purchases and investor
+  //            transactions, by voucher / reference number only
+  // A plain number must match whole: 999 finds SSS-999 or "JOB-1, 999", never
+  // 1999. In the Model No box it is matched against Model Nos alone, so it
+  // can't pick up JOB-2026-00999 or an Order ID ending in 999.
+  async track(query: string, viewerRole?: Role, mode: TrackMode = 'model') {
     const hideFinancials = viewerRole ? HIDE_FINANCIALS_FOR.includes(viewerRole) : false;
-    const trimmed = modelNo.trim();
-    const voucherNumberInt = !isNaN(Number(trimmed)) && Number.isInteger(Number(trimmed)) ? Number(trimmed) : null;
+    const isVoucher = mode === 'voucher';
+    const trimmed = isVoucher ? query.trim().replace(/^v[\s.-]*(?=\d)/i, '') : query.trim();
+    const isNumber = /^\d+$/.test(trimmed);
+    const voucherNumberInt = isVoucher && isNumber && Number(trimmed) <= MAX_INT ? Number(trimmed) : null;
+    const wholeNumber = new RegExp(`(^|[^0-9A-Za-z])${isNumber ? trimmed : ''}($|[^0-9A-Za-z])`);
+    // Text searches stay partial; only a plain number has to match whole.
+    const matches = (value: string | null | undefined) => !isNumber || wholeNumber.test(value ?? '');
 
     const [
       product,
-      customerOrders,
+      allCustomerOrders,
       customerOrderItems,
-      partyOrders,
-      partyOrderItems,
+      allPartyOrders,
+      allPartyOrderItems,
       expenses,
-      carpenterPayments,
-      purchaseOrders,
-      investorTransactions,
-      supplierPayments,
+      allCarpenterPayments,
+      allPurchaseOrders,
+      allInvestorTransactions,
+      allSupplierPayments,
     ] = await Promise.all([
-      this.prisma.product.findFirst({ where: { modelNo: { contains: trimmed } } }),
+      this.prisma.product.findFirst({ where: isVoucher ? NONE : { modelNo: isNumber ? trimmed : { contains: trimmed } } }),
       this.prisma.customerOrder.findMany({
-        where: {
-          OR: [
-            { cotTrack: { contains: trimmed } },
-            { orderId: { contains: trimmed } },
-            { jobNumber: { contains: trimmed } },
-          ],
-        },
+        where: isVoucher
+          ? NONE
+          : isNumber
+            ? { cotTrack: { contains: trimmed } }
+            : {
+                OR: [
+                  { cotTrack: { contains: trimmed } },
+                  { orderId: { contains: trimmed } },
+                  { jobNumber: { contains: trimmed } },
+                ],
+              },
         include: {
           payments: true,
           createdBy: { select: { name: true } },
@@ -55,7 +71,7 @@ export class SearchService {
         orderBy: { orderDate: 'desc' },
       }),
       this.prisma.customerOrderItem.findMany({
-        where: { product: { modelNo: { contains: trimmed } } },
+        where: isVoucher ? NONE : { product: { modelNo: isNumber ? trimmed : { contains: trimmed } } },
         include: {
           order: { include: { payments: true, createdBy: { select: { name: true } } } },
           product: { select: { modelNo: true } },
@@ -64,12 +80,16 @@ export class SearchService {
         orderBy: { order: { orderDate: 'desc' } },
       }),
       this.prisma.partyOrder.findMany({
-        where: {
-          OR: [
-            { cotNo: { contains: trimmed } },
-            { jobNumber: { contains: trimmed } },
-          ],
-        },
+        where: isVoucher
+          ? NONE
+          : isNumber
+            ? { cotNo: { contains: trimmed } }
+            : {
+                OR: [
+                  { cotNo: { contains: trimmed } },
+                  { jobNumber: { contains: trimmed } },
+                ],
+              },
         include: {
           payments: true,
           createdBy: { select: { name: true } },
@@ -79,7 +99,7 @@ export class SearchService {
         orderBy: { orderDate: 'desc' },
       }),
       this.prisma.partyOrderItem.findMany({
-        where: { modelNo: { contains: trimmed } },
+        where: isVoucher ? NONE : { modelNo: { contains: trimmed } },
         include: {
           order: { include: { payments: true, createdBy: { select: { name: true } } } },
           modelNoUpdatedBy: { select: { name: true } },
@@ -88,18 +108,19 @@ export class SearchService {
       }),
       // Expense Vouchers
       this.prisma.expense.findMany({
-        where: {
-          status: 'ACTIVE',
-          OR: [
-            ...(voucherNumberInt !== null ? [{ voucherNumber: voucherNumberInt }] : []),
-            { particulars: { contains: trimmed } },
-            { vendorName: { contains: trimmed } },
-            { paidBy: { contains: trimmed } },
-            { notes: { contains: trimmed } },
-            { referenceType: { is: { code: { contains: trimmed } } } },
-            { referenceType: { is: { label: { contains: trimmed } } } },
-          ],
-        },
+        where: !isVoucher
+          ? NONE
+          : isNumber
+            ? voucherNumberInt !== null
+              ? { status: 'ACTIVE', voucherNumber: voucherNumberInt }
+              : NONE
+            : {
+                status: 'ACTIVE',
+                OR: [
+                  { referenceType: { is: { code: { contains: trimmed } } } },
+                  { referenceType: { is: { label: { contains: trimmed } } } },
+                ],
+              },
         include: {
           category: { select: { id: true, name: true, scope: true } },
           referenceType: { select: { id: true, code: true, label: true } },
@@ -111,67 +132,53 @@ export class SearchService {
       }),
       // Carpenter Payment Vouchers
       this.prisma.carpenterPayment.findMany({
-        where: {
-          OR: [
-            { reference: { contains: trimmed } },
-            { note: { contains: trimmed } },
-            { mode: { contains: trimmed } },
-          ],
-        },
+        where: isVoucher ? { reference: { contains: trimmed } } : NONE,
         include: {
           carpenter: { select: { id: true, name: true, phone: true } },
           createdBy: { select: { id: true, name: true } },
         },
         orderBy: { date: 'desc' },
-        take: 20,
+        take: isNumber ? undefined : 20,
       }),
       // Purchase Orders
       this.prisma.purchase.findMany({
-        where: {
-          OR: [
-            { purchaseNumber: { contains: trimmed } },
-            { notes: { contains: trimmed } },
-          ],
-        },
+        where: isVoucher ? { purchaseNumber: { contains: trimmed } } : NONE,
         include: {
           supplier: { select: { id: true, name: true, phone: true } },
           createdBy: { select: { id: true, name: true } },
           items: { select: { quantity: true, unitPrice: true } },
         },
         orderBy: { purchaseDate: 'desc' },
-        take: 20,
+        take: isNumber ? undefined : 20,
       }),
       // Investor Transactions / Vouchers
       this.prisma.investorTransaction.findMany({
-        where: {
-          OR: [
-            { reference: { contains: trimmed } },
-            { notes: { contains: trimmed } },
-          ],
-        },
+        where: isVoucher ? { reference: { contains: trimmed } } : NONE,
         include: {
           investor: { select: { id: true, name: true, phone: true } },
         },
         orderBy: { date: 'desc' },
-        take: 20,
+        take: isNumber ? undefined : 20,
       }),
       // Supplier Payments / Ref Vouchers
       this.prisma.supplierPayment.findMany({
-        where: {
-          OR: [
-            { voucherNo: { contains: trimmed } },
-            { particulars: { contains: trimmed } },
-            { mode: { contains: trimmed } },
-          ],
-        },
+        where: isVoucher ? { voucherNo: { contains: trimmed } } : NONE,
         include: {
           supplier: { select: { id: true, name: true, phone: true } },
           createdBy: { select: { id: true, name: true } },
         },
         orderBy: { date: 'desc' },
-        take: 20,
+        take: isNumber ? undefined : 20,
       }),
     ]);
+
+    const customerOrders = allCustomerOrders.filter((o) => !isNumber || matches(o.cotTrack));
+    const partyOrders = allPartyOrders.filter((o) => !isNumber || matches(o.cotNo));
+    const partyOrderItems = allPartyOrderItems.filter((i) => matches(i.modelNo));
+    const carpenterPayments = allCarpenterPayments.filter((p) => matches(p.reference)).slice(0, 20);
+    const purchaseOrders = allPurchaseOrders.filter((p) => matches(p.purchaseNumber)).slice(0, 20);
+    const investorTransactions = allInvestorTransactions.filter((t) => matches(t.reference)).slice(0, 20);
+    const supplierPayments = allSupplierPayments.filter((p) => matches(p.voucherNo)).slice(0, 20);
 
     // A work item's own modelNo can differ from the Model No actually
     // searched: an order's cotTrack is a combined value when it has
@@ -183,14 +190,16 @@ export class SearchService {
     // by each work item's own modelNo.
     const matchedCustomerOrderIds = Array.from(new Set([...customerOrders.map((o) => o.id), ...customerOrderItems.map((i) => i.orderId)]));
     const matchedPartyOrderItemIds = partyOrderItems.map((i) => i.id);
-    const workItems = await this.prisma.carpenterWorkItem.findMany({
-      where: {
-        OR: [
-          { modelNo: { contains: trimmed } },
-          ...(matchedCustomerOrderIds.length ? [{ sourceCustomerOrderId: { in: matchedCustomerOrderIds } }] : []),
-          ...(matchedPartyOrderItemIds.length ? [{ sourcePartyOrderItemId: { in: matchedPartyOrderItemIds } }] : []),
-        ],
-      },
+    const allWorkItems = await this.prisma.carpenterWorkItem.findMany({
+      where: isVoucher
+        ? NONE
+        : {
+            OR: [
+              { modelNo: { contains: trimmed } },
+              ...(matchedCustomerOrderIds.length ? [{ sourceCustomerOrderId: { in: matchedCustomerOrderIds } }] : []),
+              ...(matchedPartyOrderItemIds.length ? [{ sourcePartyOrderItemId: { in: matchedPartyOrderItemIds } }] : []),
+            ],
+          },
       include: {
         carpenter: { select: { name: true, phone: true, workerType: true } },
         createdBy: { select: { name: true } },
@@ -201,6 +210,13 @@ export class SearchService {
       },
       orderBy: { workDate: 'asc' },
     });
+
+    const workItems = allWorkItems.filter(
+      (w) =>
+        matches(w.modelNo) ||
+        (w.sourceCustomerOrderId != null && matchedCustomerOrderIds.includes(w.sourceCustomerOrderId)) ||
+        (w.sourcePartyOrderItemId != null && matchedPartyOrderItemIds.includes(w.sourcePartyOrderItemId)),
+    );
 
     // Stock is fungible (no per-batch lot tracking), so "which wholesaler
     // supplied this" is answered per raw material, not per issued unit:
@@ -469,8 +485,8 @@ export class SearchService {
   // Same "order -> production -> employee -> delivery" data the Track page
   // itself shows, just as a PDF - reuses track() rather than re-querying, so
   // the PDF can never drift from what's on screen.
-  async generateTrackPdf(modelNo: string, viewerRole?: Role): Promise<Buffer> {
-    const result = await this.track(modelNo, viewerRole);
+  async generateTrackPdf(modelNo: string, viewerRole?: Role, mode: TrackMode = 'model'): Promise<Buffer> {
+    const result = await this.track(modelNo, viewerRole, mode);
     const fmt = (d: string | Date | null | undefined) => (d ? new Date(d).toLocaleDateString('en-IN') : '-');
 
     const customerOrderRows = [...result.customerOrders, ...result.customerOrderItems]

@@ -15,17 +15,17 @@ export class SearchController {
   constructor(private service: SearchService) {}
 
   @Get('track')
-  track(@Query('q') q: string, @CurrentUser() user: AuthUser) {
+  track(@Query('q') q: string, @Query('type') type: string, @CurrentUser() user: AuthUser) {
     if (!q || !q.trim()) throw new BadRequestException('Provide a Job/Model Number, Order ID, or COT No to search');
-    return this.service.track(q, user.role as Role);
+    return this.service.track(q, user.role as Role, type === 'voucher' ? 'voucher' : 'model');
   }
 
   // Static route - must come before any dynamic segment, though this
   // controller has none today.
   @Get('track/pdf')
-  async trackPdf(@Query('q') q: string, @Res() res: Response, @CurrentUser() user: AuthUser) {
+  async trackPdf(@Query('q') q: string, @Query('type') type: string, @Res() res: Response, @CurrentUser() user: AuthUser) {
     if (!q || !q.trim()) throw new BadRequestException('Provide a Job/Model Number, Order ID, or COT No to search');
-    const buffer = await this.service.generateTrackPdf(q, user.role as Role);
+    const buffer = await this.service.generateTrackPdf(q, user.role as Role, type === 'voucher' ? 'voucher' : 'model');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="Track - ${q.trim()}.pdf"`);
     res.send(buffer);
