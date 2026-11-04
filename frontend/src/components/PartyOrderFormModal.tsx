@@ -19,6 +19,7 @@ import { OrderWorkEntriesPanel, type StagedWorkEntry } from './OrderWorkEntriesP
 import { SuccessTick } from './SuccessTick';
 import { assetUrl } from '@/lib/api';
 import type { PartyOrder, PartyOrderItem, DeliveryStatus, Shop, Product, GalleryImage, ItemSpecs } from '@/types';
+import { SizePicker } from '@/components/SizePicker';
 
 interface ItemForm {
   productId?: string;
@@ -455,12 +456,7 @@ export function PartyOrderFormModal({
                 </div>
                 {item.productId && <p className="text-[11px] text-emerald-700">From Godown Stock - In Stock</p>}
                 <div className="grid grid-cols-2 gap-2">
-                  <input
-                    className="input text-sm"
-                    placeholder="Size (e.g. 75x60)"
-                    value={item.size}
-                    onChange={(e) => updateItem(idx, { size: e.target.value })}
-                  />
+                  <SizePicker className="input text-sm" value={item.size} onChange={(size) => updateItem(idx, { size })} />
                   <input className="input text-sm" placeholder="Pattern" value={item.pattern} onChange={(e) => updateItem(idx, { pattern: e.target.value })} />
                 </div>
                 <div className="grid grid-cols-2 gap-2">

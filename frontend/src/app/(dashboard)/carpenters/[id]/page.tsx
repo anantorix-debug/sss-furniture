@@ -26,6 +26,7 @@ import { useForceable } from '@/hooks/useForceable';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ImportButton } from '@/components/ImportButton';
 import { CARPENTER_PAYMENT_TYPE_LABEL, type CarpenterDetail, type CarpenterPaymentType, type ProductionStage, type StockMovement, type WorkStatus } from '@/types';
+import { SizePicker } from '@/components/SizePicker';
 
 const emptyWork = {
   stage: 'CARPENTER' as ProductionStage,
@@ -685,7 +686,7 @@ Please confirm receipt.`,
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <input className="input" placeholder="Category (BOTTOM COT / FULL BOX)" value={workForm.category} onChange={(e) => setWorkForm((f) => ({ ...f, category: e.target.value }))} />
-            <input className="input" placeholder="Size" value={workForm.size} onChange={(e) => setWorkForm((f) => ({ ...f, size: e.target.value }))} />
+            <SizePicker value={workForm.size} onChange={(size) => setWorkForm((f) => ({ ...f, size }))} />
             <input type="number" min="1" className="input" placeholder="Qty" value={workForm.quantity} onChange={(e) => setWorkForm((f) => ({ ...f, quantity: e.target.value }))} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center">
@@ -1029,7 +1030,7 @@ Please confirm receipt.`,
               </div>
               <div>
                 <label className="label">Size</label>
-                <input className="input" value={editForm.size} onChange={(e) => setEditForm((f) => ({ ...f, size: e.target.value }))} />
+                <SizePicker value={editForm.size} onChange={(size) => setEditForm((f) => ({ ...f, size }))} />
               </div>
               <div>
                 <label className="label">Qty</label>

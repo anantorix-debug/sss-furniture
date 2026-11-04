@@ -18,6 +18,7 @@ import { UnitSelect } from '@/components/UnitSelect';
 import { ViewField } from '@/components/ViewField';
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { ImportButton } from '@/components/ImportButton';
+import { SizePicker } from '@/components/SizePicker';
 import type {
   ProductionDashboard,
   CarpenterWorkItem,
@@ -357,7 +358,7 @@ function StartStockProductionModal({ onClose, onCreated }: { onClose: () => void
                 </button>
               </div>
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                <input className="input text-sm" placeholder="Size" value={row.size} onChange={(e) => updateRow(idx, { size: e.target.value })} />
+                <SizePicker className="input text-sm" value={row.size} onChange={(size) => updateRow(idx, { size })} />
                 <UnitSelect id={`stock-production-size-unit-${idx}`} className="input text-sm" value={row.sizeUnit} onChange={(v) => updateRow(idx, { sizeUnit: v })} />
                 <input
                   type="number"
@@ -1375,7 +1376,7 @@ function HistoricalEntryFormModal({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Size</label>
-            <input className="input" placeholder="e.g. 78x84" value={form.size} onChange={(e) => setForm((f) => ({ ...f, size: e.target.value }))} />
+            <SizePicker value={form.size} onChange={(size) => setForm((f) => ({ ...f, size }))} />
           </div>
           <div>
             <label className="label">Size Unit</label>

@@ -48,6 +48,7 @@ import { HoverPreview } from '@/components/HoverPreview';
 import { SuccessTick } from '@/components/SuccessTick';
 import type { CustomerOrder, CustomerOrderItem, DeliveryStatus, Product, CarpenterWorkItem } from '@/types';
 import { ImportButton } from '@/components/ImportButton';
+import { SizePicker } from '@/components/SizePicker';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -640,12 +641,7 @@ function CustomerOrdersContent() {
                         value={row.category}
                         onChange={(e) => updateItemRow(idx, { category: e.target.value })}
                       />
-                      <input
-                        className="input"
-                        placeholder="Size (e.g. 6x3 ft)"
-                        value={row.size}
-                        onChange={(e) => updateItemRow(idx, { size: e.target.value })}
-                      />
+                      <SizePicker value={row.size} onChange={(size) => updateItemRow(idx, { size })} />
                       <input
                         className="input"
                         placeholder="Polish Colour (e.g. Walnut Brown)"

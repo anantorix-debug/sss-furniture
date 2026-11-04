@@ -25,6 +25,7 @@ import type { CarpenterSummary, GalleryImage, MaterialGroup, MaterialMeasurement
 import { Pagination, type PaginatedResult } from '@/components/Pagination';
 import { ImportButton } from '@/components/ImportButton';
 import { sanitizeModelNo } from '@/lib/modelNoLookup';
+import { SizePicker } from '@/components/SizePicker';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
@@ -548,7 +549,7 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="label">Size</label>
-                <input className="input" value={form.modelSize} onChange={(e) => setForm((f) => ({ ...f, modelSize: e.target.value }))} />
+                <SizePicker value={form.modelSize} onChange={(modelSize) => setForm((f) => ({ ...f, modelSize }))} />
               </div>
               <div>
                 <label className="label">Size Unit</label>
@@ -637,7 +638,7 @@ function ProductsTab({ canEdit }: { canEdit: boolean }) {
                     </div>
                     <div>
                       <label className="text-[11px] text-brand-400">Size</label>
-                      <input className="input" value={row.size} onChange={(e) => updateBulkRow(idx, { size: e.target.value })} />
+                      <SizePicker value={row.size} onChange={(size) => updateBulkRow(idx, { size })} />
                     </div>
                   </div>
                   <div>
