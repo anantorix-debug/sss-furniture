@@ -126,6 +126,44 @@ describe('WhatsappClientWrapper auto-heal', () => {
     expect(delays).toEqual([3000, 6000, 12000, 24000, 300000]);
   });
 
+  it('Restart WhatsApp skips the wait between automatic tries', async () => {
+    jest.useFakeTimers();
+    try {
+      const wrapper = new WhatsappClientWrapper({ get: () => undefined } as any) as any;
+      wrapper.consecutiveRestarts = 10; // waiting 5 minutes
+      const start = jest.spyOn(wrapper, 'startClient').mockImplementation(() => undefined);
+      const done = wrapper.restartClient();
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(start).not.toHaveBeenCalled();
+      expect(wrapper.getStatus().retryAt).toBeDefined();
+      expect(wrapper.restartNow()).toEqual({ restarting: true });
+      await done;
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(wrapper.consecutiveRestarts).toBe(0);
+      expect(wrapper.getStatus().retryAt).toBeUndefined();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('Restart WhatsApp starts a new client when none is pending', () => {
+    const wrapper = new WhatsappClientWrapper({ get: () => undefined } as any) as any;
+    const restart = jest.spyOn(wrapper, 'restartClient').mockResolvedValue(undefined);
+    wrapper.consecutiveRestarts = 7;
+    wrapper.lastError = 'boom';
+    expect(wrapper.restartNow()).toEqual({ restarting: true });
+    expect(restart).toHaveBeenCalledWith(1000);
+    expect(wrapper.consecutiveRestarts).toBe(0);
+    expect(wrapper.lastError).toBeNull();
+  });
+
+  it('Restart WhatsApp does nothing when WhatsApp is switched off', () => {
+    const wrapper = new WhatsappClientWrapper({ get: (k: string) => (k === 'WHATSAPP_ENABLED' ? 'false' : undefined) } as any) as any;
+    const restart = jest.spyOn(wrapper, 'restartClient').mockResolvedValue(undefined);
+    expect(wrapper.restartNow()).toEqual({ restarting: false });
+    expect(restart).not.toHaveBeenCalled();
+  });
+
   it('force-kills Chrome when closing it hangs, then starts a new client', async () => {
     jest.useFakeTimers();
     try {

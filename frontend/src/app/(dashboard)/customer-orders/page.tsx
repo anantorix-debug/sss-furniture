@@ -32,6 +32,19 @@ import { useWhatsApp } from '@/hooks/useWhatsApp';
 import { useForceable } from '@/hooks/useForceable';
 import { sharePdf } from '@/lib/sharePdf';
 
+// Red alert for Pending orders whose delivery date is 2 days away or less,
+// including today and overdue. Compared by calendar day in local time.
+function deliveryAlert(order: CustomerOrder): { label: string } | null {
+  if (order.deliveryStatus !== 'PENDING' || !order.actualDeliveryDate) return null;
+  const [y, m, d] = order.actualDeliveryDate.slice(0, 10).split('-').map(Number);
+  const now = new Date();
+  const days = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  if (days > 2) return null;
+  if (days < 0) return { label: `Overdue ${-days} day${days === -1 ? '' : 's'}` };
+  if (days === 0) return { label: 'Due today' };
+  return { label: days === 1 ? 'Due tomorrow' : 'Due in 2 days' };
+}
+
 interface CustomerOrderSummary {
   orders: number;
   pending: number;
@@ -502,8 +515,10 @@ function CustomerOrdersContent() {
                 </td>
               </tr>
             )}
-            {data?.map((order) => (
-              <tr key={order.id}>
+            {data?.map((order) => {
+              const due = deliveryAlert(order);
+              return (
+              <tr key={order.id} className={due ? 'bg-red-50' : undefined}>
                 <td className="font-medium">{order.orderId}</td>
                 <td className="text-brand-600 text-xs font-medium whitespace-nowrap">{order.jobNumber ?? '-'}</td>
                 <td>{formatDate(order.orderDate)}</td>
@@ -521,7 +536,22 @@ function CustomerOrdersContent() {
                 <td>
                   <StatusBadge status={order.deliveryStatus} />
                 </td>
-                <td>{formatDate(order.actualDeliveryDate)}</td>
+                <td className="whitespace-nowrap">
+                  {due ? (
+                    <div title={due.label}>
+                      <p className="font-bold text-red-700">{formatDate(order.actualDeliveryDate)}</p>
+                      <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+                        </span>
+                        {due.label}
+                      </span>
+                    </div>
+                  ) : (
+                    formatDate(order.actualDeliveryDate)
+                  )}
+                </td>
                 <td>
                   <div className="flex gap-2 items-center">
                     <WhatsAppActionButton
@@ -557,7 +587,8 @@ function CustomerOrdersContent() {
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {result && (
@@ -1084,6 +1115,10 @@ function ProductCell({ order }: { order: CustomerOrder }) {
             )}
             <div>
               <p className="font-medium text-ink">{item.productName}</p>
+              <p className="text-brand-700">
+                Size: <span className="font-semibold">{item.size ? [item.size, item.sizeUnit].filter(Boolean).join(' ') : 'Not set'}</span>
+              </p>
+              {item.color && <p className="text-brand-500 text-xs">Colour: {item.color}</p>}
               {item.product?.modelNo ? (
                 <>
                   <p className="text-brand-600 font-medium">{item.product.modelNo}</p>

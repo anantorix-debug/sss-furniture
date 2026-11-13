@@ -25,6 +25,9 @@ interface WhatsAppStatus {
   operational?: boolean;
   qr?: string;
   error?: string;
+  // While waiting between automatic retries: when the next try starts.
+  retryAt?: string;
+  attempts?: number;
 }
 
 export class WhatsappLookupTimeoutError extends Error {
@@ -95,6 +98,9 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
   private healthTimer: NodeJS.Timeout | null = null;
   private healthCheckRunning = false;
   private healthFailures = 0;
+  // Set while waiting between restarts; calling it starts the client at once.
+  private wakeRestart: (() => void) | null = null;
+  private retryAt: Date | null = null;
 
   // Detects the class of Puppeteer error that means the underlying Chrome
   // page/frame has gone stale (WhatsApp Web reloaded internally, the tab
@@ -142,10 +148,36 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       this.client = null;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, wait));
+    this.retryAt = new Date(Date.now() + wait);
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, wait);
+      this.wakeRestart = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+    this.wakeRestart = null;
+    this.retryAt = null;
 
     this.restarting = false;
     this.startClient();
+  }
+
+  // "Restart WhatsApp" button: try again now instead of waiting out the
+  // automatic back-off (which grows to 5 minutes), and start counting afresh.
+  restartNow(): { restarting: boolean } {
+    if (this.config.get<string>('WHATSAPP_ENABLED') === 'false') return { restarting: false };
+    this.consecutiveRestarts = 0;
+    this.lastError = null;
+    if (this.wakeRestart) {
+      this.logger.log('[WhatsApp] Manual restart: skipping the wait');
+      this.wakeRestart();
+      return { restarting: true };
+    }
+    if (this.restarting) return { restarting: true };
+    this.logger.log('[WhatsApp] Manual restart requested');
+    void this.restartClient(1000);
+    return { restarting: true };
   }
 
   // Doubles with each restart in a row, so a long WhatsApp or network outage
@@ -409,6 +441,8 @@ export class WhatsappClientWrapper implements OnModuleDestroy {
       operational,
       qr: this.state === 'QR_REQUIRED' ? this.latestQr ?? undefined : undefined,
       error: this.lastError ?? undefined,
+      retryAt: this.retryAt?.toISOString(),
+      attempts: this.consecutiveRestarts,
     };
   }
 

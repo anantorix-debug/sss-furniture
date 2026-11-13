@@ -91,6 +91,12 @@ export class WhatsappController {
     return this.service.logout();
   }
 
+  // Start WhatsApp again now, for example after it failed to start.
+  @Post('restart')
+  restart() {
+    return this.service.restart();
+  }
+
   @Post('send/:chatId')
   sendMessage(@Param('chatId') chatId: string, @Body() dto: { message: string }) {
     return this.service.sendMessage(chatId, dto.message);

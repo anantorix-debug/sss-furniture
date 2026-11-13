@@ -25,6 +25,35 @@ interface WhatsappStatus {
   operational?: boolean;
   qr?: string;
   error?: string;
+  retryAt?: string;
+  attempts?: number;
+}
+
+// Plain words for each connection state the server reports.
+function describeState(status: WhatsappStatus | undefined): { title: string; detail: string; busy: boolean } {
+  switch (status?.state) {
+    case 'QR_REQUIRED':
+      return { title: 'Scan the QR code', detail: 'Preparing the QR code...', busy: true };
+    case 'INITIALIZING':
+      return { title: 'Starting WhatsApp', detail: 'This can take up to 2 minutes.', busy: true };
+    case 'LOADING_SCREEN':
+    case 'AUTHENTICATED':
+      return { title: 'Signing in to WhatsApp', detail: 'Loading your chats. This can take up to 2 minutes.', busy: true };
+    case 'RECONNECTING':
+      return { title: 'Reconnecting', detail: 'WhatsApp will try again automatically.', busy: true };
+    case 'ERROR':
+      return { title: 'WhatsApp could not start', detail: 'It will try again automatically, or press Restart WhatsApp.', busy: false };
+    case 'DISCONNECTED':
+      return { title: 'Disconnected', detail: 'Press Restart WhatsApp to show a new QR code.', busy: false };
+    default:
+      return { title: 'Not connected', detail: 'Checking WhatsApp...', busy: true };
+  }
+}
+
+function secondsUntil(iso?: string) {
+  if (!iso) return null;
+  const s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  return s > 0 ? s : null;
 }
 
 function WhatsappSettingsContent() {
@@ -58,6 +87,7 @@ function WhatsappSettingsContent() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -120,6 +150,19 @@ function WhatsappSettingsContent() {
     }
   }
 
+  async function handleRestart() {
+    setRestarting(true);
+    try {
+      await api.post('/whatsapp/restart');
+    } catch (err) {
+      console.warn('WhatsApp restart request failed:', err instanceof ApiError ? err.message : err);
+    } finally {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await mutateStatus();
+      setRestarting(false);
+    }
+  }
+
   async function handleSendMessage() {
     if (!selectedChat || (!messageText.trim() && !mediaFile)) return;
     setSending(true);
@@ -179,23 +222,43 @@ function WhatsappSettingsContent() {
           </div>
         )}
 
-        {!statusLoading && !status?.operational && (
-          <div className="space-y-3">
-            <p className="font-semibold text-amber-700">Not connected</p>
-            {status?.qr ? (
-              <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={status.qr} alt="WhatsApp QR code" className="mx-auto rounded-lg border border-brand-100" width={220} height={220} />
-                <p className="text-sm text-brand-500">Scan with WhatsApp on your phone (Linked Devices → Link a Device)</p>
-              </>
-            ) : (
-              <p className="text-sm text-brand-500">Waiting for QR code...</p>
-            )}
-            <button className="btn-secondary" onClick={() => mutateStatus()}>
-              Refresh
-            </button>
-          </div>
-        )}
+        {!statusLoading && !status?.operational && (() => {
+          const info = describeState(status);
+          const wait = secondsUntil(status?.retryAt);
+          return (
+            <div className="space-y-3">
+              {status?.qr ? (
+                <>
+                  <p className="font-semibold text-brand-900">Scan the QR code</p>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={status.qr} alt="WhatsApp QR code" className="mx-auto rounded-lg border border-brand-100" width={240} height={240} />
+                  <p className="text-sm text-brand-500">On your phone: WhatsApp → Settings → Linked Devices → Link a Device</p>
+                  <p className="text-xs text-brand-400">The code changes every few seconds. It refreshes here by itself.</p>
+                </>
+              ) : (
+                <>
+                  <p className={`font-semibold ${status?.state === 'ERROR' || status?.state === 'DISCONNECTED' ? 'text-red-700' : 'text-amber-700'}`}>
+                    {info.busy && <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent align-middle" />}
+                    {info.title}
+                  </p>
+                  <p className="text-sm text-brand-500">{info.detail}</p>
+                  {wait !== null && <p className="text-xs text-brand-500">Next automatic try in {wait >= 60 ? `${Math.ceil(wait / 60)} min` : `${wait} s`}{status?.attempts ? ` (try ${status.attempts})` : ''}.</p>}
+                  {status?.error && <p className="mx-auto max-w-lg text-xs text-red-600 break-words">Last error: {status.error}</p>}
+                </>
+              )}
+              <div className="flex justify-center gap-2">
+                {!status?.qr && (
+                  <button className="btn-primary" onClick={handleRestart} disabled={restarting}>
+                    {restarting ? 'Restarting...' : 'Restart WhatsApp'}
+                  </button>
+                )}
+                <button className="btn-secondary" onClick={() => mutateStatus()}>
+                  Refresh
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Chat Selection Panel - Only show when connected */}

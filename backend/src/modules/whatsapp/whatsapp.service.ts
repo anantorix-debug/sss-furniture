@@ -226,6 +226,10 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  restart() {
+    return this.client.restartNow();
+  }
+
   async logout(): Promise<{ success: boolean }> {
     try {
       await this.client.logout();
